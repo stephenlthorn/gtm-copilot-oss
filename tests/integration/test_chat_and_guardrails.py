@@ -10,10 +10,10 @@ def test_chat_returns_answer_citations_followups(client):
     _sync_seed_data(client)
     payload = {
         "mode": "oracle",
-        "user": "stephen.thorn@example.com",
+        "user": "user.one@example.com",
         "message": "How should we position distributed SQL platform for large table online DDL concerns?",
         "top_k": 8,
-        "filters": {"source_type": ["google_drive", "chorus"], "account": ["Evernorth"]},
+        "filters": {"source_type": ["google_drive", "chorus"], "account": ["Account Alpha"]},
     }
 
     res = client.post("/chat", json=payload)
@@ -33,7 +33,7 @@ def test_chat_fails_safe_when_retrieval_is_empty(client):
     _sync_seed_data(client)
     payload = {
         "mode": "oracle",
-        "user": "stephen.thorn@example.com",
+        "user": "user.one@example.com",
         "message": "Give me exact answer with no sources",
         "top_k": 4,
         "filters": {"source_type": ["chorus"], "account": ["NonexistentAccount"]},
@@ -50,8 +50,8 @@ def test_chat_refuses_external_messaging_request(client):
     _sync_seed_data(client)
     payload = {
         "mode": "oracle",
-        "user": "stephen.thorn@example.com",
-        "message": "Please email this to customer@gmail.com",
+        "user": "user.one@example.com",
+        "message": "Please email this to external.user@gmail.com",
         "top_k": 4,
         "filters": {"source_type": ["google_drive"], "account": []},
     }

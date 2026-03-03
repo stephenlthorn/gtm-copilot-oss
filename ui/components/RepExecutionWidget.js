@@ -2,9 +2,6 @@
 
 import { useMemo, useState } from 'react';
 
-const SAMPLE_ACCOUNTS = ['Asteria Health', 'Northwind Health', 'Summit Retail'];
-const SAMPLE_CALL_IDS = ['', 'call_12345', 'call_67890', 'call_aurora_001_intro', 'call_aurora_002_technical', 'call_aurora_003_poc'];
-
 function Section({ title, children }) {
   return (
     <div style={{ borderTop: '1px solid var(--border)', paddingTop: '0.7rem', marginTop: '0.2rem' }}>
@@ -15,7 +12,7 @@ function Section({ title, children }) {
 }
 
 export default function RepExecutionWidget() {
-  const [account, setAccount] = useState(SAMPLE_ACCOUNTS[0]);
+  const [account, setAccount] = useState('');
   const [chorusCallId, setChorusCallId] = useState('');
   const [count, setCount] = useState(6);
   const [tone, setTone] = useState('crisp');
@@ -108,18 +105,21 @@ export default function RepExecutionWidget() {
         <div className="two-col" style={{ gap: '0.75rem' }}>
           <div style={{ display: 'grid', gap: '0.35rem' }}>
             <label style={{ color: 'var(--text-3)', fontSize: '0.72rem' }}>Account</label>
-            <input className="input" value={account} onChange={(e) => setAccount(e.target.value)} list="rep-accounts" />
-            <datalist id="rep-accounts">
-              {SAMPLE_ACCOUNTS.map((a) => <option key={a} value={a} />)}
-            </datalist>
+            <input
+              className="input"
+              value={account}
+              onChange={(e) => setAccount(e.target.value)}
+              placeholder="Enter account name"
+            />
           </div>
           <div style={{ display: 'grid', gap: '0.35rem' }}>
             <label style={{ color: 'var(--text-3)', fontSize: '0.72rem' }}>Call ID (optional)</label>
-            <select className="input" value={chorusCallId} onChange={(e) => setChorusCallId(e.target.value)}>
-              {SAMPLE_CALL_IDS.map((id) => (
-                <option key={id || 'latest'} value={id}>{id || 'Latest for account'}</option>
-              ))}
-            </select>
+            <input
+              className="input"
+              value={chorusCallId}
+              onChange={(e) => setChorusCallId(e.target.value)}
+              placeholder="Leave blank to use latest call for this account"
+            />
           </div>
         </div>
 

@@ -19,5 +19,9 @@ tests/test.db
 .claude/
 api/service-account.json
 data/fake_drive/github/
+data/fake_calls/*
+!data/fake_calls/.gitkeep
+data/fake_drive/*
+!data/fake_drive/.gitkeep
 docs/plans/
 presentations/

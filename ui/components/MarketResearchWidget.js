@@ -2,15 +2,8 @@
 
 import { useState } from 'react';
 
-const SAMPLE_CURRENT_CUSTOMERS = `account,region,industry,current_platform,use_case,arr,renewal_date,notes
-Asteria Health,East,Healthcare,Aurora MySQL,Claims analytics + OLTP,$1.2M,2026-09-30,Needs legal + BAA confidence
-Summit Retail,Central,Retail,Sharded MySQL,Inventory + checkout scaling,$640K,2026-11-15,CFO focused on 3-year TCO
-Northwind Health,East,Healthcare,MySQL + Redshift,Unified HTAP reporting,$820K,2026-10-01,DBA adoption risk`;
-
-const SAMPLE_PIPELINE = `account,region,stage,industry,workload,est_arr,close_quarter,competing_vendor,notes
-Apex Logistics,Central,Technical Validation,Logistics,Routing + fleet telemetry,$550K,Q3 FY26,SingleStore,Needs benchmark proof
-BlueLake Financial,East,POC,Financial Services,Fraud scoring + ledger reads,$900K,Q2 FY26,CockroachDB,Security review started
-Horizon Media,East,Business Case,Media,Real-time campaign analytics,$700K,Q2 FY26,Aurora MySQL,Strong VP Eng sponsor`;
+const TEMPLATE_CURRENT_CUSTOMERS = 'account,region,industry,current_platform,use_case,arr';
+const TEMPLATE_PIPELINE = 'account,region,stage,industry,workload,est_arr,close_quarter,competing_vendor';
 
 export default function MarketResearchWidget() {
   const [goal, setGoal] = useState('Market research on all current customers and pipeline, then build a strategic list for East and Central.');
@@ -25,10 +18,10 @@ export default function MarketResearchWidget() {
   const [result, setResult] = useState(null);
 
   const fillSample = () => {
-    setCurrentCsv(SAMPLE_CURRENT_CUSTOMERS);
-    setPipelineCsv(SAMPLE_PIPELINE);
+    setCurrentCsv(TEMPLATE_CURRENT_CUSTOMERS);
+    setPipelineCsv(TEMPLATE_PIPELINE);
     setAdditionalContext(
-      'Rep capacity: 2 AEs + 1 SE. Must-win goal: close two East opportunities this quarter while protecting top 3 renewals.'
+      'Rep capacity, must-win accounts, and executive priorities.'
     );
     setError('');
   };
@@ -156,7 +149,7 @@ export default function MarketResearchWidget() {
         </div>
 
         <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
-          <button className="btn" onClick={fillSample}>Load Sample Data</button>
+          <button className="btn" onClick={fillSample}>Insert CSV Templates</button>
           <button className="btn btn-primary" onClick={generate} disabled={loading}>
             {loading ? 'Generating…' : 'Generate Strategic List'}
           </button>

@@ -10,8 +10,8 @@ def test_email_draft_blocked_for_external_recipient(client):
     _sync_seed_data(client)
 
     payload = {
-        "chorus_call_id": "call_12345",
-        "to": ["customer@gmail.com"],
+        "chorus_call_id": "call_demo_001",
+        "to": ["external.user@gmail.com"],
         "cc": ["se@example.com"],
         "mode": "send",
         "tone": "crisp",
@@ -30,10 +30,10 @@ def test_audit_log_contains_query_retrieval_output_mode(client):
 
     payload = {
         "mode": "oracle",
-        "user": "stephen.thorn@example.com",
-        "message": "What should we do next for Evernorth?",
+        "user": "user.one@example.com",
+        "message": "What should we do next for Account Alpha?",
         "top_k": 5,
-        "filters": {"source_type": ["google_drive", "chorus"], "account": ["Evernorth"]},
+        "filters": {"source_type": ["google_drive", "chorus"], "account": ["Account Alpha"]},
     }
     chat_res = client.post("/chat", json=payload)
     assert chat_res.status_code == 200

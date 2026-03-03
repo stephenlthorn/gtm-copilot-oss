@@ -917,9 +917,9 @@ class GTMModuleService:
                     "Cost-to-value narrative anchored to consolidation outcomes",
                 ],
                 "priority_accounts": [
-                    "Asteria Health",
-                    "Northwind Health",
-                    "Summit Retail",
+                    "Account Alpha",
+                    "Account Beta",
+                    "Account Gamma",
                 ],
                 "next_actions": [
                     "Launch two vertical-tailored nurture sequences with technical proof assets.",

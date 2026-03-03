@@ -14,7 +14,7 @@ def _call_payload(call_id: str, d: str):
         "chorus_call_id": call_id,
         "metadata": {
             "date": d,
-            "account": "Evernorth",
+            "account": "Account Alpha",
             "opportunity": "Distributed SQL evaluation",
             "stage": "Technical validation",
             "rep_email": "rep@example.com",
@@ -29,7 +29,7 @@ def _call_payload(call_id: str, d: str):
                 "speaker_id": "S2",
                 "start_time_sec": 0,
                 "end_time_sec": 55,
-                "text": "We have a 40TB table and compare distributed SQL platform with SingleStore.",
+                "text": "We have a 40TB table and compare distributed SQL platform with CompetitorX.",
             },
             {
                 "speaker_id": "S1",

@@ -11,8 +11,8 @@ def test_rep_module_endpoints_return_structured_outputs(client):
     brief = client.post(
         "/rep/account-brief",
         json={
-            "user": "estyn.c@example.com",
-            "account": "Evernorth",
+            "user": "rep.one@example.com",
+            "account": "Account Alpha",
         },
     )
     assert brief.status_code == 200
@@ -23,8 +23,8 @@ def test_rep_module_endpoints_return_structured_outputs(client):
     questions = client.post(
         "/rep/discovery-questions",
         json={
-            "user": "estyn.c@example.com",
-            "account": "Evernorth",
+            "user": "rep.one@example.com",
+            "account": "Account Alpha",
             "count": 5,
         },
     )
@@ -36,8 +36,8 @@ def test_rep_module_endpoints_return_structured_outputs(client):
     risk = client.post(
         "/rep/deal-risk",
         json={
-            "user": "estyn.c@example.com",
-            "account": "Evernorth",
+            "user": "rep.one@example.com",
+            "account": "Account Alpha",
         },
     )
     assert risk.status_code == 200
@@ -48,9 +48,9 @@ def test_rep_module_endpoints_return_structured_outputs(client):
     draft = client.post(
         "/rep/follow-up-draft",
         json={
-            "user": "estyn.c@example.com",
-            "account": "Evernorth",
-            "to": ["estyn.c@example.com"],
+            "user": "rep.one@example.com",
+            "account": "Account Alpha",
+            "to": ["rep.one@example.com"],
             "cc": ["se.demo@example.com"],
             "mode": "draft",
             "tone": "crisp",
@@ -69,9 +69,9 @@ def test_rep_follow_up_blocks_external_recipient(client):
     draft = client.post(
         "/rep/follow-up-draft",
         json={
-            "user": "estyn.c@example.com",
-            "account": "Evernorth",
-            "to": ["customer@gmail.com"],
+            "user": "rep.one@example.com",
+            "account": "Account Alpha",
+            "to": ["external.user@gmail.com"],
             "mode": "send",
         },
     )
@@ -88,7 +88,7 @@ def test_se_module_endpoints_return_structured_outputs(client):
         "/se/poc-plan",
         json={
             "user": "se.demo@example.com",
-            "account": "Evernorth",
+            "account": "Account Alpha",
             "target_offering": "Managed Distributed SQL",
         },
     )
@@ -101,7 +101,7 @@ def test_se_module_endpoints_return_structured_outputs(client):
         "/se/poc-readiness",
         json={
             "user": "se.demo@example.com",
-            "account": "Evernorth",
+            "account": "Account Alpha",
         },
     )
     assert readiness.status_code == 200
@@ -112,7 +112,7 @@ def test_se_module_endpoints_return_structured_outputs(client):
         "/se/architecture-fit",
         json={
             "user": "se.demo@example.com",
-            "account": "Evernorth",
+            "account": "Account Alpha",
         },
     )
     assert fit.status_code == 200
@@ -123,8 +123,8 @@ def test_se_module_endpoints_return_structured_outputs(client):
         "/se/competitor-coach",
         json={
             "user": "se.demo@example.com",
-            "account": "Evernorth",
-            "competitor": "SingleStore",
+            "account": "Account Alpha",
+            "competitor": "CompetitorX",
         },
     )
     assert coach.status_code == 200
@@ -158,11 +158,11 @@ def test_rep_full_solution_endpoint(client):
     res = client.post(
         "/rep/full-solution",
         json={
-            "user": "estyn.c@example.com",
-            "account": "Evernorth",
+            "user": "rep.one@example.com",
+            "account": "Account Alpha",
             "count": 5,
             "mode": "draft",
-            "to": ["estyn.c@example.com"],
+            "to": ["rep.one@example.com"],
             "cc": ["se.demo@example.com"],
             "tone": "executive",
         },
@@ -183,9 +183,9 @@ def test_se_full_solution_endpoint(client):
         "/se/full-solution",
         json={
             "user": "se.demo@example.com",
-            "account": "Evernorth",
+            "account": "Account Alpha",
             "target_offering": "Managed Distributed SQL",
-            "competitor": "SingleStore",
+            "competitor": "CompetitorX",
         },
     )
     assert res.status_code == 200
@@ -231,8 +231,8 @@ def test_feature_flag_can_disable_rep_module(client):
     res = client.post(
         "/rep/account-brief",
         json={
-            "user": "estyn.c@example.com",
-            "account": "Evernorth",
+            "user": "rep.one@example.com",
+            "account": "Account Alpha",
         },
     )
     assert res.status_code == 403

@@ -108,7 +108,7 @@ def test_slack_events_app_mention_posts_message(client, monkeypatch):
         return {"ok": True}
 
     async def fake_resolve(self, user_id, user_name=None):
-        return "stephen.thorn@example.com"
+        return "user.one@example.com"
 
     monkeypatch.setattr(ChatOrchestrator, "run", fake_run)
     monkeypatch.setattr(SlackService, "post_message", fake_post)
@@ -120,7 +120,7 @@ def test_slack_events_app_mention_posts_message(client, monkeypatch):
         "event": {
             "type": "app_mention",
             "user": "U123",
-            "text": "<@Ubot> summarize evernorth risks",
+            "text": "<@Ubot> summarize account alpha risks",
             "channel": "C123",
             "ts": "1700000000.000100",
         },

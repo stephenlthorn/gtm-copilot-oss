@@ -107,7 +107,7 @@ async def slack_command(request: Request) -> dict:
     if not message:
         return {
             "response_type": "ephemeral",
-            "text": "Usage: `/gtm-copilot your question` or `call_assistant: summarize risks for call_12345`.",
+            "text": "Usage: `/gtm-copilot your question` or `call_assistant: summarize risks for call_demo_001`.",
         }
 
     user_email = await slack.resolve_user_email(payload.get("user_id"), payload.get("user_name"))

@@ -150,4 +150,4 @@ Sync calls:
 curl -X POST "http://localhost:8000/admin/sync/calls"
 ```
 
-Synthetic demo data is included in `data/fake_drive` and `data/fake_calls`.
+No demo transcripts or documents are bundled. Use `data/fake_drive` and `data/fake_calls` only for local, non-sensitive fixtures.

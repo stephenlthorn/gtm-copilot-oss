@@ -18,7 +18,7 @@ class ArtifactGenerator:
         lower = text_blob.lower()
 
         competitors = []
-        for name in ["singlestore", "cockroachdb", "snowflake", "spanner"]:
+        for name in ["competitorx", "competitory", "warehouse_a", "db_platform_b"]:
             if name in lower:
                 competitors.append(name.title())
 
