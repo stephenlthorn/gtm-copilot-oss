@@ -45,6 +45,7 @@ def test_loads_codex_credential_from_auth_json(monkeypatch, tmp_path: Path):
 
     monkeypatch.setenv("CODEX_HOME", str(codex_home))
     monkeypatch.setenv("OPENAI_API_KEY", "")
+    monkeypatch.setenv("DISABLE_CODEX_AUTH", "false")
     get_settings.cache_clear()
 
     service = LLMService()

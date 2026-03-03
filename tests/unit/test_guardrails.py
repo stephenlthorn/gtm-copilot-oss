@@ -9,5 +9,5 @@ def test_internal_email_allowlist():
 
 
 def test_blocked_recipients():
-    blocked = blocked_recipients(["rep@example.com", "foo@example.com"], ["example.com"])
-    assert blocked == ["foo@example.com"]
+    blocked = blocked_recipients(["rep@example.com", "foo@gmail.com"], ["example.com"])
+    assert blocked == ["foo@gmail.com"]
