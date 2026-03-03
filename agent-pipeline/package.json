@@ -1,0 +1,27 @@
+{
+  "name": "ios-dev-co-agent-pipeline",
+  "version": "1.0.0",
+  "description": "iOS dev team automation pipeline using Claude Agent SDK",
+  "type": "module",
+  "scripts": {
+    "pipeline": "tsx src/pipeline.ts",
+    "agent:pm": "tsx src/agents/pm.ts",
+    "agent:scrum": "tsx src/agents/scrum.ts",
+    "agent:spec": "tsx src/agents/spec-compiler.ts",
+    "agent:engineer": "tsx src/agents/engineer.ts",
+    "agent:qa-build": "tsx src/agents/qa-build.ts",
+    "agent:qa-regression": "tsx src/agents/qa-regression.ts",
+    "agent:commit": "tsx src/agents/commit.ts",
+    "agent:tech-writer": "tsx src/agents/tech-writer.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.55.0",
+    "openai": "^6.25.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.7.0"
+  }
+}

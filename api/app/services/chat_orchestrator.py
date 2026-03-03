@@ -1,0 +1,348 @@
+from __future__ import annotations
+
+import re
+from uuid import UUID
+
+from sqlalchemy import select
+from sqlalchemy.orm import Session
+
+from app.core.settings import Settings, get_settings
+from app.models import ChorusCall, KBConfig, SourceType
+from app.prompts.personas import DEFAULT_PERSONA, get_default_persona_prompt, normalize_persona
+from app.retrieval.service import HybridRetriever
+from app.services.llm import LLMService
+from app.services.query_rewrite import QueryRewriter
+from app.utils.email_utils import is_internal_email
+
+
+class ChatOrchestrator:
+    def __init__(self, db: Session | None, openai_token: str | None = None) -> None:
+        self.db = db
+        self.settings = get_settings()
+        self.retriever = HybridRetriever(db) if db is not None else None
+        self.llm = LLMService(api_key=openai_token)
+        self.rewriter = QueryRewriter()
+
+    def _guardrail_external_messaging(self, text: str) -> str | None:
+        lowered = text.lower()
+        if "email" not in lowered and "send" not in lowered and "slack" not in lowered:
+            return None
+
+        emails = re.findall(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}", text)
+        for email in emails:
+            if not is_internal_email(email, self.settings.domain_allowlist):
+                return "I cannot help send or draft external outbound messages. Policy allows internal recipients only (@example.com)."
+        return None
+
+    @staticmethod
+    def _citation_quote(text: str) -> str:
+        words = re.sub(r"\s+", " ", text).strip().split()
+        return " ".join(words[:25])
+
+    @staticmethod
+    def _query_terms(query: str) -> list[str]:
+        tokens = re.findall(r"[a-zA-Z0-9][a-zA-Z0-9._-]{1,}", query.lower())
+        stop = {
+            "what",
+            "where",
+            "when",
+            "which",
+            "who",
+            "why",
+            "how",
+            "are",
+            "the",
+            "for",
+            "and",
+            "with",
+            "from",
+            "into",
+            "this",
+            "that",
+            "your",
+            "ours",
+            "their",
+            "about",
+            "should",
+            "could",
+            "would",
+            "please",
+            "show",
+            "tell",
+            "give",
+        }
+        seen: set[str] = set()
+        terms: list[str] = []
+        for token in tokens:
+            if len(token) < 3 or token in stop:
+                continue
+            if token not in seen:
+                terms.append(token)
+                seen.add(token)
+        return terms
+
+    @classmethod
+    def _lexical_overlap(cls, text: str, query: str) -> float:
+        terms = cls._query_terms(query)
+        if not terms:
+            return 0.0
+        lowered = text.lower()
+        matches = sum(1 for term in terms if cls._contains_term(lowered, term))
+        return matches / max(1, len(terms))
+
+    def _rerank_oracle_hits(self, query: str, hits: list) -> list:
+        if not hits:
+            return hits
+        critical = {
+            "tiflash",
+            "tikv",
+            "htap",
+            "replication",
+            "lag",
+            "aurora",
+            "mysql",
+            "mpp",
+            "ddl",
+            "migration",
+            "poc",
+        }
+        query_terms = self._query_terms(query)
+
+        def score(hit) -> float:
+            body = f"{hit.title}\n{hit.text[:1500]}"
+            overlap = self._lexical_overlap(body, query)
+            lowered = body.lower()
+            matched_critical = sum(
+                1 for t in query_terms if t in critical and self._contains_term(lowered, t)
+            )
+            nav_penalty = 0.0
+            title = (hit.title or "").lower()
+            if title.endswith("/toc.md") or title.endswith("toc.md") or title.endswith("_index.md"):
+                nav_penalty -= 0.30
+            if title.endswith("/overview.md") or title.endswith("overview.md") or title.endswith("glossary.md"):
+                nav_penalty -= 0.16
+            if title in {"overview", "glossary", "toc"}:
+                nav_penalty -= 0.18
+            source_boost = 0.08 if hit.source_type == SourceType.OFFICIAL_DOCS_ONLINE.value else 0.0
+            return (0.42 * hit.score) + (0.58 * overlap) + min(0.24, matched_critical * 0.08) + source_boost + nav_penalty
+
+        ranked = sorted(hits, key=score, reverse=True)
+        return ranked
+
+    def _oracle_high_quality_hits(self, query: str, hits: list) -> list:
+        if not hits:
+            return []
+        focus_terms = {
+            "tiflash",
+            "tikv",
+            "htap",
+            "replication",
+            "lag",
+            "aurora",
+            "mysql",
+            "mpp",
+            "ddl",
+            "migration",
+            "poc",
+        }
+        query_terms = self._query_terms(query)
+        query_focus = [term for term in query_terms if term in focus_terms]
+        required_focus = 1
+        if "replication" in query_focus and "lag" in query_focus:
+            required_focus = 3
+        filtered = []
+        for hit in hits:
+            body = f"{hit.title}\n{hit.text[:1600]}".lower()
+            overlap = self._lexical_overlap(body, query)
+            if overlap < 0.16:
+                continue
+            if query_focus:
+                matched_focus = sum(1 for term in query_focus if self._contains_term(body, term))
+                if "tiflash" in query_focus and not self._contains_term(body, "tiflash"):
+                    continue
+                if matched_focus < required_focus:
+                    continue
+            filtered.append(hit)
+        return filtered
+
+    def _resolve_top_k(self, kb_config: KBConfig | None, request_top_k: int) -> int:
+        if kb_config is not None:
+            return kb_config.retrieval_top_k
+        return self.settings.retrieval_top_k
+
+    @staticmethod
+    def _resolve_allowed_sources(kb_config: KBConfig | None, mode: str) -> list[str] | None:
+        if mode == "oracle":
+            if kb_config is None:
+                return [
+                    SourceType.GOOGLE_DRIVE.value,
+                    SourceType.FEISHU.value,
+                    SourceType.CHORUS.value,
+                    SourceType.MEMORY.value,
+                ]
+            allowed: list[str] = []
+            if kb_config.google_drive_enabled:
+                allowed.append(SourceType.GOOGLE_DRIVE.value)
+            if kb_config.feishu_enabled:
+                allowed.append(SourceType.FEISHU.value)
+            if kb_config.chorus_enabled:
+                allowed.append(SourceType.CHORUS.value)
+            allowed.append(SourceType.MEMORY.value)
+            deduped: list[str] = []
+            for source in allowed:
+                if source not in deduped:
+                    deduped.append(source)
+            return deduped or [SourceType.GOOGLE_DRIVE.value, SourceType.CHORUS.value, SourceType.MEMORY.value]
+        # call_assistant and any other modes: use call transcripts only
+        if kb_config is None:
+            return None
+        allowed = []
+        if kb_config.chorus_enabled:
+            allowed.append(SourceType.CHORUS.value)
+        return allowed or None
+
+    def _infer_account_filter(self, message: str) -> list[str] | None:
+        if self.db is None:
+            return None
+        lowered = message.lower()
+        accounts = self.db.execute(select(ChorusCall.account).distinct()).scalars().all()
+        matched: list[str] = []
+        for account in accounts:
+            if not account:
+                continue
+            acct = account.strip()
+            if not acct:
+                continue
+            if acct.lower() in lowered:
+                matched.append(acct)
+        return matched or None
+
+    @staticmethod
+    def _resolve_llm_config(
+        kb_config: KBConfig | None,
+        settings: Settings,
+        mode: str,
+    ) -> tuple[str, list[dict]]:
+        model = (kb_config.llm_model if kb_config else None) or settings.openai_model
+        tools: list[dict] = []
+        if mode == "oracle":
+            # Always enable web search for oracle when live product facts are needed.
+            tools.append({"type": "web_search_preview"})
+        elif kb_config and kb_config.web_search_enabled:
+            tools.append({"type": "web_search_preview"})
+        if kb_config and kb_config.code_interpreter_enabled:
+            tools.append({"type": "code_interpreter", "container": {"type": "auto"}})
+        return model, tools
+
+    @staticmethod
+    def _resolve_persona_config(kb_config: KBConfig | None) -> tuple[str, str]:
+        persona_name = normalize_persona(kb_config.persona_name if kb_config else DEFAULT_PERSONA)
+        custom_prompt = (kb_config.persona_prompt or "").strip() if kb_config else ""
+        persona_prompt = custom_prompt or get_default_persona_prompt(persona_name)
+        return persona_name, persona_prompt
+
+    def run(self, *, mode: str, user: str, message: str, top_k: int, filters: dict, context: dict) -> tuple[dict, dict]:
+        blocked = self._guardrail_external_messaging(message)
+        if blocked:
+            payload = {
+                "answer": blocked,
+                "citations": [],
+                "follow_up_questions": ["Do you want an internal-only draft to @example.com recipients instead?"],
+            }
+            return payload, {"top_k": 0, "results": []}
+
+        if self.db is None or self.retriever is None:
+            if mode == "oracle":
+                llm_model, llm_tools = self._resolve_llm_config(None, self.settings, mode)
+                persona_name, persona_prompt = self._resolve_persona_config(None)
+                data = self.llm.answer_oracle(
+                    message,
+                    [],
+                    model=llm_model,
+                    tools=llm_tools,
+                    allow_ungrounded=True,
+                    persona_name=persona_name,
+                    persona_prompt=persona_prompt,
+                )
+                data["citations"] = []
+                return data, {"top_k": 0, "results": []}
+
+            data = {
+                "what_happened": ["Transcript mode is unavailable because the internal DB is disabled."],
+                "risks": ["Enable internal DB-backed retrieval to use call assistant mode."],
+                "next_steps": ["Use `oracle` mode for direct LLM chat in the meantime."],
+                "questions_to_ask_next_call": self.llm._fallback_followups("call_assistant"),
+                "citations": [],
+            }
+            return data, {"top_k": 0, "results": []}
+
+        kb_config: KBConfig | None = self.db.get(KBConfig, 1)
+        resolved_top_k = self._resolve_top_k(kb_config, top_k)
+        allowed_sources = self._resolve_allowed_sources(kb_config, mode)
+        llm_model, llm_tools = self._resolve_llm_config(kb_config, self.settings, mode)
+        persona_name, persona_prompt = self._resolve_persona_config(kb_config)
+
+        mode_filters = dict(filters or {})
+        mode_filters["viewer_email"] = (user or "").strip().lower()
+        requested_sources = [str(s).lower() for s in (mode_filters.get("source_type") or [])]
+        inferred_accounts = self._infer_account_filter(message)
+        if inferred_accounts and not mode_filters.get("account"):
+            mode_filters["account"] = inferred_accounts
+        if mode == "oracle":
+            oracle_allowed = allowed_sources or [
+                SourceType.GOOGLE_DRIVE.value,
+                SourceType.FEISHU.value,
+                SourceType.CHORUS.value,
+                SourceType.MEMORY.value,
+            ]
+            if requested_sources:
+                filtered = [source for source in requested_sources if source in set(oracle_allowed)]
+                mode_filters["source_type"] = filtered or oracle_allowed
+            else:
+                mode_filters["source_type"] = oracle_allowed
+        elif mode == "call_assistant":
+            mode_filters["source_type"] = allowed_sources or [SourceType.CHORUS.value]
+
+        rewritten = self.rewriter.rewrite(message, mode)
+        hits = self.retriever.search(rewritten, top_k=resolved_top_k, filters=mode_filters)
+
+        citations = [
+            {
+                "title": hit.title,
+                "source_type": hit.source_type,
+                "source_id": hit.source_id,
+                "chunk_id": hit.chunk_id,
+                "quote": self._citation_quote(hit.text),
+                "relevance": hit.score,
+                "file_id": hit.file_id,
+                "timestamp": hit.metadata.get("start_time_sec"),
+            }
+            for hit in hits[:8]
+        ]
+
+        if mode == "call_assistant":
+            data = self.llm.answer_call_assistant(
+                message,
+                hits,
+                model=llm_model,
+                tools=llm_tools,
+                persona_name=persona_name,
+                persona_prompt=persona_prompt,
+            )
+            data["citations"] = citations
+            return data, self.retriever.retrieval_payload(hits, resolved_top_k)
+
+        data = self.llm.answer_oracle(
+            message,
+            hits,
+            model=llm_model,
+            tools=llm_tools,
+            persona_name=persona_name,
+            persona_prompt=persona_prompt,
+        )
+        data["citations"] = citations
+        return data, self.retriever.retrieval_payload(hits, resolved_top_k)
+    @staticmethod
+    def _contains_term(haystack: str, term: str) -> bool:
+        pattern = rf"(?<![a-z0-9_]){re.escape(term)}(?![a-z0-9_])"
+        return re.search(pattern, haystack) is not None
