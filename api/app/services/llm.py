@@ -932,7 +932,7 @@ class LLMService:
             return {
                 "what_happened": ["Insufficient transcript evidence retrieved."],
                 "risks": ["Need the call id or transcript context to proceed."],
-                "next_steps": ["Provide the target `chorus_call_id` and relevant account context."],
+                "next_steps": ["Provide the target call ID and relevant account context."],
                 "questions_to_ask_next_call": self._fallback_followups("call_assistant"),
             }
 
