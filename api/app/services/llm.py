@@ -861,7 +861,7 @@ class LLMService:
             return {
                 "answer": (
                     "LLM unavailable for direct Oracle chat. "
-                    "Set `OPENAI_API_KEY` in `/Users/stephen/Documents/New project/.env` "
+                    "Set `OPENAI_API_KEY` in your app `.env` file "
                     "or connect ChatGPT OAuth again at http://localhost:3000/login "
                     "(Codex auth is also read from ~/.codex/auth.json). "
                     f"Latest error: {err}"
