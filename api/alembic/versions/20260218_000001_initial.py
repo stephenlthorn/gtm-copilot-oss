@@ -9,8 +9,6 @@ from __future__ import annotations
 
 from alembic import op
 import sqlalchemy as sa
-from sqlalchemy.dialects import postgresql
-from pgvector.sqlalchemy import Vector
 
 
 revision = "20260218_000001"
@@ -19,23 +17,67 @@ branch_labels = None
 depends_on = None
 
 
+def _uuid_type(is_pg: bool):
+    """Return UUID column type appropriate for the dialect."""
+    if is_pg:
+        from sqlalchemy.dialects.postgresql import UUID
+        return UUID(as_uuid=True)
+    return sa.String(36)
+
+
+def _json_type(is_pg: bool):
+    """Return JSON column type appropriate for the dialect."""
+    if is_pg:
+        from sqlalchemy.dialects.postgresql import JSONB
+        return JSONB(astext_type=sa.Text())
+    return sa.JSON()
+
+
+def _json_default(value: str, is_pg: bool):
+    """Return a server_default for a JSON column."""
+    if is_pg:
+        return sa.text(f"'{value}'::jsonb")
+    return sa.text(f"'{value}'")
+
+
 def upgrade() -> None:
-    op.execute("CREATE EXTENSION IF NOT EXISTS vector")
+    bind = op.get_bind()
+    is_pg = bind.dialect.name == "postgresql"
 
-    source_type = postgresql.ENUM("google_drive", "chorus", name="source_type", create_type=False)
-    message_mode = postgresql.ENUM("draft", "sent", "blocked", name="message_mode", create_type=False)
-    message_channel = postgresql.ENUM("email", "slack", name="message_channel", create_type=False)
-    audit_status = postgresql.ENUM("ok", "error", name="audit_status", create_type=False)
+    if is_pg:
+        op.execute("CREATE EXTENSION IF NOT EXISTS vector")
+        from pgvector.sqlalchemy import Vector
+        from sqlalchemy.dialects import postgresql
 
-    source_type.create(op.get_bind(), checkfirst=True)
-    message_mode.create(op.get_bind(), checkfirst=True)
-    message_channel.create(op.get_bind(), checkfirst=True)
-    audit_status.create(op.get_bind(), checkfirst=True)
+        source_type_enum = postgresql.ENUM("google_drive", "chorus", name="source_type", create_type=False)
+        message_mode_enum = postgresql.ENUM("draft", "sent", "blocked", name="message_mode", create_type=False)
+        message_channel_enum = postgresql.ENUM("email", "slack", name="message_channel", create_type=False)
+        audit_status_enum = postgresql.ENUM("ok", "error", name="audit_status", create_type=False)
+
+        source_type_enum.create(bind, checkfirst=True)
+        message_mode_enum.create(bind, checkfirst=True)
+        message_channel_enum.create(bind, checkfirst=True)
+        audit_status_enum.create(bind, checkfirst=True)
+
+        source_type_type = source_type_enum
+        message_mode_type = message_mode_enum
+        message_channel_type = message_channel_enum
+        audit_status_type = audit_status_enum
+        embedding_type = Vector(1536)
+    else:
+        source_type_type = sa.String(32)
+        message_mode_type = sa.String(16)
+        message_channel_type = sa.String(16)
+        audit_status_type = sa.String(16)
+        embedding_type = sa.Text()
+
+    uuid_type = _uuid_type(is_pg)
+    json_type = _json_type(is_pg)
 
     op.create_table(
         "kb_documents",
-        sa.Column("id", postgresql.UUID(as_uuid=True), primary_key=True),
-        sa.Column("source_type", source_type, nullable=False),
+        sa.Column("id", uuid_type, primary_key=True),
+        sa.Column("source_type", source_type_type, nullable=False),
         sa.Column("source_id", sa.String(length=255), nullable=False),
         sa.Column("title", sa.String(length=512), nullable=False),
         sa.Column("url", sa.Text(), nullable=True),
@@ -44,8 +86,8 @@ def upgrade() -> None:
         sa.Column("owner", sa.String(length=255), nullable=True),
         sa.Column("path", sa.String(length=1024), nullable=True),
         sa.Column("permissions_hash", sa.String(length=128), nullable=False),
-        sa.Column("tags", postgresql.JSONB(astext_type=sa.Text()), nullable=False, server_default=sa.text("'{}'::jsonb")),
-        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False),
+        sa.Column("tags", json_type, nullable=False, server_default=_json_default("{}", is_pg)),
+        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.text("CURRENT_TIMESTAMP"), nullable=False),
         sa.UniqueConstraint("source_type", "source_id", name="uq_document_source"),
     )
     op.create_index("ix_kb_documents_source_id", "kb_documents", ["source_id"])
@@ -53,27 +95,28 @@ def upgrade() -> None:
 
     op.create_table(
         "kb_chunks",
-        sa.Column("id", postgresql.UUID(as_uuid=True), primary_key=True),
-        sa.Column("document_id", postgresql.UUID(as_uuid=True), sa.ForeignKey("kb_documents.id", ondelete="CASCADE"), nullable=False),
+        sa.Column("id", uuid_type, primary_key=True),
+        sa.Column("document_id", uuid_type, sa.ForeignKey("kb_documents.id", ondelete="CASCADE"), nullable=False),
         sa.Column("chunk_index", sa.Integer(), nullable=False),
         sa.Column("text", sa.Text(), nullable=False),
         sa.Column("token_count", sa.Integer(), nullable=False),
-        sa.Column("embedding", Vector(1536), nullable=True),
-        sa.Column("metadata", postgresql.JSONB(astext_type=sa.Text()), nullable=False, server_default=sa.text("'{}'::jsonb")),
+        sa.Column("embedding", embedding_type, nullable=True),
+        sa.Column("metadata", json_type, nullable=False, server_default=_json_default("{}", is_pg)),
         sa.Column("content_hash", sa.String(length=64), nullable=False),
-        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False),
+        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.text("CURRENT_TIMESTAMP"), nullable=False),
         sa.UniqueConstraint("document_id", "chunk_index", name="uq_chunk_doc_index"),
     )
     op.create_index("ix_kb_chunks_document_id", "kb_chunks", ["document_id"])
     op.create_index("ix_kb_chunks_content_hash", "kb_chunks", ["content_hash"])
-    op.execute(
-        "CREATE INDEX IF NOT EXISTS ix_kb_chunks_embedding_ivfflat "
-        "ON kb_chunks USING ivfflat (embedding vector_cosine_ops) WITH (lists = 100)"
-    )
+    if is_pg:
+        op.execute(
+            "CREATE INDEX IF NOT EXISTS ix_kb_chunks_embedding_ivfflat "
+            "ON kb_chunks USING ivfflat (embedding vector_cosine_ops) WITH (lists = 100)"
+        )
 
     op.create_table(
         "chorus_calls",
-        sa.Column("id", postgresql.UUID(as_uuid=True), primary_key=True),
+        sa.Column("id", uuid_type, primary_key=True),
         sa.Column("chorus_call_id", sa.String(length=255), nullable=False, unique=True),
         sa.Column("date", sa.Date(), nullable=False),
         sa.Column("account", sa.String(length=255), nullable=False),
@@ -81,10 +124,10 @@ def upgrade() -> None:
         sa.Column("stage", sa.String(length=255), nullable=True),
         sa.Column("rep_email", sa.String(length=255), nullable=False),
         sa.Column("se_email", sa.String(length=255), nullable=True),
-        sa.Column("participants", postgresql.JSONB(astext_type=sa.Text()), nullable=False, server_default=sa.text("'[]'::jsonb")),
+        sa.Column("participants", json_type, nullable=False, server_default=_json_default("[]", is_pg)),
         sa.Column("recording_url", sa.Text(), nullable=True),
         sa.Column("transcript_url", sa.Text(), nullable=True),
-        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False),
+        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.text("CURRENT_TIMESTAMP"), nullable=False),
     )
     op.create_index("ix_chorus_calls_chorus_call_id", "chorus_calls", ["chorus_call_id"])
     op.create_index("ix_chorus_calls_account", "chorus_calls", ["account"])
@@ -92,33 +135,33 @@ def upgrade() -> None:
 
     op.create_table(
         "call_artifacts",
-        sa.Column("id", postgresql.UUID(as_uuid=True), primary_key=True),
+        sa.Column("id", uuid_type, primary_key=True),
         sa.Column("chorus_call_id", sa.String(length=255), nullable=False),
         sa.Column("summary", sa.Text(), nullable=False),
-        sa.Column("objections", postgresql.JSONB(astext_type=sa.Text()), nullable=False, server_default=sa.text("'[]'::jsonb")),
-        sa.Column("competitors_mentioned", postgresql.JSONB(astext_type=sa.Text()), nullable=False, server_default=sa.text("'[]'::jsonb")),
-        sa.Column("risks", postgresql.JSONB(astext_type=sa.Text()), nullable=False, server_default=sa.text("'[]'::jsonb")),
-        sa.Column("next_steps", postgresql.JSONB(astext_type=sa.Text()), nullable=False, server_default=sa.text("'[]'::jsonb")),
-        sa.Column("recommended_collateral", postgresql.JSONB(astext_type=sa.Text()), nullable=False, server_default=sa.text("'[]'::jsonb")),
-        sa.Column("follow_up_questions", postgresql.JSONB(astext_type=sa.Text()), nullable=False, server_default=sa.text("'[]'::jsonb")),
-        sa.Column("model_info", postgresql.JSONB(astext_type=sa.Text()), nullable=False, server_default=sa.text("'{}'::jsonb")),
-        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False),
+        sa.Column("objections", json_type, nullable=False, server_default=_json_default("[]", is_pg)),
+        sa.Column("competitors_mentioned", json_type, nullable=False, server_default=_json_default("[]", is_pg)),
+        sa.Column("risks", json_type, nullable=False, server_default=_json_default("[]", is_pg)),
+        sa.Column("next_steps", json_type, nullable=False, server_default=_json_default("[]", is_pg)),
+        sa.Column("recommended_collateral", json_type, nullable=False, server_default=_json_default("[]", is_pg)),
+        sa.Column("follow_up_questions", json_type, nullable=False, server_default=_json_default("[]", is_pg)),
+        sa.Column("model_info", json_type, nullable=False, server_default=_json_default("{}", is_pg)),
+        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.text("CURRENT_TIMESTAMP"), nullable=False),
     )
     op.create_index("ix_call_artifacts_chorus_call_id", "call_artifacts", ["chorus_call_id"])
 
     op.create_table(
         "outbound_messages",
-        sa.Column("id", postgresql.UUID(as_uuid=True), primary_key=True),
-        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False),
-        sa.Column("mode", message_mode, nullable=False),
-        sa.Column("channel", message_channel, nullable=False),
-        sa.Column("to", postgresql.JSONB(astext_type=sa.Text()), nullable=False, server_default=sa.text("'[]'::jsonb")),
-        sa.Column("cc", postgresql.JSONB(astext_type=sa.Text()), nullable=False, server_default=sa.text("'[]'::jsonb")),
+        sa.Column("id", uuid_type, primary_key=True),
+        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.text("CURRENT_TIMESTAMP"), nullable=False),
+        sa.Column("mode", message_mode_type, nullable=False),
+        sa.Column("channel", message_channel_type, nullable=False),
+        sa.Column("to", json_type, nullable=False, server_default=_json_default("[]", is_pg)),
+        sa.Column("cc", json_type, nullable=False, server_default=_json_default("[]", is_pg)),
         sa.Column("subject", sa.String(length=512), nullable=False),
         sa.Column("body", sa.Text(), nullable=False),
         sa.Column("reason_blocked", sa.Text(), nullable=True),
         sa.Column("chorus_call_id", sa.String(length=255), nullable=True),
-        sa.Column("artifact_id", postgresql.UUID(as_uuid=True), sa.ForeignKey("call_artifacts.id", ondelete="SET NULL"), nullable=True),
+        sa.Column("artifact_id", uuid_type, sa.ForeignKey("call_artifacts.id", ondelete="SET NULL"), nullable=True),
         sa.Column("content_hash", sa.String(length=64), nullable=False),
     )
     op.create_index("ix_outbound_messages_mode", "outbound_messages", ["mode"])
@@ -127,14 +170,14 @@ def upgrade() -> None:
 
     op.create_table(
         "audit_logs",
-        sa.Column("id", postgresql.UUID(as_uuid=True), primary_key=True),
-        sa.Column("timestamp", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False),
+        sa.Column("id", uuid_type, primary_key=True),
+        sa.Column("timestamp", sa.DateTime(timezone=True), server_default=sa.text("CURRENT_TIMESTAMP"), nullable=False),
         sa.Column("actor", sa.String(length=255), nullable=False),
         sa.Column("action", sa.String(length=128), nullable=False),
-        sa.Column("input", postgresql.JSONB(astext_type=sa.Text()), nullable=False, server_default=sa.text("'{}'::jsonb")),
-        sa.Column("retrieval", postgresql.JSONB(astext_type=sa.Text()), nullable=False, server_default=sa.text("'{}'::jsonb")),
-        sa.Column("output", postgresql.JSONB(astext_type=sa.Text()), nullable=False, server_default=sa.text("'{}'::jsonb")),
-        sa.Column("status", audit_status, nullable=False),
+        sa.Column("input", json_type, nullable=False, server_default=_json_default("{}", is_pg)),
+        sa.Column("retrieval", json_type, nullable=False, server_default=_json_default("{}", is_pg)),
+        sa.Column("output", json_type, nullable=False, server_default=_json_default("{}", is_pg)),
+        sa.Column("status", audit_status_type, nullable=False),
         sa.Column("error_message", sa.Text(), nullable=True),
     )
     op.create_index("ix_audit_logs_action", "audit_logs", ["action"])
@@ -149,12 +192,14 @@ def downgrade() -> None:
     op.drop_table("kb_chunks")
     op.drop_table("kb_documents")
 
-    audit_status = sa.Enum("ok", "error", name="audit_status")
-    message_channel = sa.Enum("email", "slack", name="message_channel")
-    message_mode = sa.Enum("draft", "sent", "blocked", name="message_mode")
-    source_type = sa.Enum("google_drive", "chorus", name="source_type")
+    bind = op.get_bind()
+    if bind.dialect.name == "postgresql":
+        audit_status = sa.Enum("ok", "error", name="audit_status")
+        message_channel = sa.Enum("email", "slack", name="message_channel")
+        message_mode = sa.Enum("draft", "sent", "blocked", name="message_mode")
+        source_type = sa.Enum("google_drive", "chorus", name="source_type")
 
-    audit_status.drop(op.get_bind(), checkfirst=True)
-    message_channel.drop(op.get_bind(), checkfirst=True)
-    message_mode.drop(op.get_bind(), checkfirst=True)
-    source_type.drop(op.get_bind(), checkfirst=True)
+        audit_status.drop(bind, checkfirst=True)
+        message_channel.drop(bind, checkfirst=True)
+        message_mode.drop(bind, checkfirst=True)
+        source_type.drop(bind, checkfirst=True)

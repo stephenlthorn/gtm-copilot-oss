@@ -7,6 +7,9 @@ from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from app.api.router import api_router
 from app.core.settings import get_settings
 from app.db.init_db import init_db
+from app.routers.connectors import router as connectors_router
+from app.routers.refinements import router as refinements_router
+from app.routers.research import router as research_router
 
 settings = get_settings()
 
@@ -21,6 +24,9 @@ app.add_middleware(
 if settings.trusted_hosts:
     app.add_middleware(TrustedHostMiddleware, allowed_hosts=settings.trusted_hosts)
 app.include_router(api_router)
+app.include_router(connectors_router)
+app.include_router(research_router)
+app.include_router(refinements_router)
 
 
 @app.on_event("startup")

@@ -5,7 +5,11 @@ import uuid
 from datetime import date, datetime
 
 from pgvector.sqlalchemy import Vector
-from sqlalchemy import JSON, Date, DateTime, Enum, ForeignKey, Index, Integer, String, Text, UniqueConstraint, Uuid, func
+from sqlalchemy import (
+    JSON, BigInteger, Boolean, Column, DECIMAL, Date, DateTime, Enum,
+    ForeignKey, Index, Integer, LargeBinary, String, Text, UniqueConstraint,
+    Uuid, func,
+)
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.constants import DEFAULT_EMBEDDING_DIMENSIONS
@@ -357,3 +361,349 @@ class GTMTrendInsight(Base):
     )
     created_by: Mapped[str] = mapped_column(String(255), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
+# ---------------------------------------------------------------------------
+# GTM Copilot v2 enums
+# ---------------------------------------------------------------------------
+
+
+class UserRole(str, enum.Enum):
+    sales_rep = "sales_rep"
+    se = "se"
+    marketing = "marketing"
+    admin = "admin"
+
+
+class SourceScope(str, enum.Enum):
+    global_ = "global"
+    account = "account"
+
+
+class SourceRegistryType(str, enum.Enum):
+    builtin = "builtin"
+    internal = "internal"
+    custom = "custom"
+
+
+class ReportType(str, enum.Enum):
+    pre_call = "pre_call"
+    post_call = "post_call"
+
+
+class ReportStatus(str, enum.Enum):
+    pending = "pending"
+    researching = "researching"
+    ready = "ready"
+    error = "error"
+
+
+class DealStatus(str, enum.Enum):
+    open = "open"
+    won = "won"
+    lost = "lost"
+
+
+class CRMSource(str, enum.Enum):
+    salesforce = "salesforce"
+    custom = "custom"
+
+
+class RefinementScope(str, enum.Enum):
+    personal = "personal"
+    team = "team"
+
+
+class APIUsageStatus(str, enum.Enum):
+    success = "success"
+    error = "error"
+    rate_limited = "rate_limited"
+
+
+class IntelType(str, enum.Enum):
+    news = "news"
+    product_launch = "product_launch"
+    pricing_change = "pricing_change"
+    review = "review"
+    release = "release"
+    other = "other"
+
+
+class MessageRole(str, enum.Enum):
+    user = "user"
+    assistant = "assistant"
+    system = "system"
+    tool = "tool"
+
+
+class SyncSourceType(str, enum.Enum):
+    google_drive = "google_drive"
+    feishu = "feishu"
+    tidb_docs = "tidb_docs"
+    tidb_github = "tidb_github"
+
+
+class SyncStatusEnum(str, enum.Enum):
+    idle = "idle"
+    syncing = "syncing"
+    error = "error"
+
+
+# ---------------------------------------------------------------------------
+# GTM Copilot v2 models
+# ---------------------------------------------------------------------------
+
+
+class User(Base):
+    __tablename__ = "users"
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    google_id = Column(String(128), unique=True, nullable=False)
+    email = Column(String(256), nullable=False, index=True)
+    name = Column(String(256))
+    role = Column(Enum(UserRole), nullable=False, default=UserRole.sales_rep)
+    team_id = Column(BigInteger, nullable=True)
+    org_id = Column(BigInteger, nullable=False, index=True)
+    openai_api_key_encrypted = Column(LargeBinary, nullable=True)
+    preferences = Column(JSON, nullable=True)
+    connected_accounts = Column(JSON, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class Account(Base):
+    __tablename__ = "accounts"
+    __table_args__ = (Index("idx_external", "external_id", "crm_source"),)
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    external_id = Column(String(256), nullable=True)
+    crm_source = Column(Enum(CRMSource), default=CRMSource.salesforce)
+    name = Column(String(512), nullable=False)
+    industry = Column(String(256))
+    website = Column(String(512))
+    employee_count = Column(Integer)
+    revenue_range = Column(String(64))
+    description = Column(Text)
+    metadata_ = Column("metadata", JSON)
+    org_id = Column(BigInteger, nullable=False, index=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class Deal(Base):
+    __tablename__ = "deals"
+    __table_args__ = (Index("idx_org_status", "org_id", "status"),)
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    external_id = Column(String(256))
+    account_id = Column(BigInteger, ForeignKey("accounts.id"), nullable=False, index=True)
+    name = Column(String(512))
+    stage = Column(String(128))
+    amount = Column(DECIMAL(15, 2))
+    close_date = Column(Date)
+    owner_user_id = Column(BigInteger, ForeignKey("users.id"), index=True)
+    status = Column(Enum(DealStatus), default=DealStatus.open)
+    metadata_ = Column("metadata", JSON)
+    org_id = Column(BigInteger, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class Contact(Base):
+    __tablename__ = "contacts"
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    external_id = Column(String(256))
+    account_id = Column(BigInteger, ForeignKey("accounts.id"), nullable=False, index=True)
+    name = Column(String(256))
+    title = Column(String(256))
+    email = Column(String(256))
+    linkedin_url = Column(String(512))
+    metadata_ = Column("metadata", JSON)
+    org_id = Column(BigInteger, nullable=False, index=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class SourceRegistry(Base):
+    __tablename__ = "source_registry"
+    __table_args__ = (Index("idx_org_active", "org_id", "active"),)
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    source_type = Column(Enum(SourceRegistryType), nullable=False)
+    provider = Column(String(64))
+    config = Column(JSON)
+    scope = Column(Enum(SourceScope), default=SourceScope.global_)
+    account_id = Column(BigInteger, ForeignKey("accounts.id"), nullable=True, index=True)
+    user_id = Column(BigInteger, ForeignKey("users.id"), nullable=True)
+    org_id = Column(BigInteger, nullable=False)
+    active = Column(Boolean, default=True)
+
+
+class SystemConfig(Base):
+    __tablename__ = "system_config"
+    __table_args__ = (Index("idx_org_key", "org_id", "config_key"),)
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    config_key = Column(String(128), unique=True, nullable=False)
+    config_value_encrypted = Column(LargeBinary, nullable=True)
+    config_value_plain = Column(JSON, nullable=True)
+    org_id = Column(BigInteger, nullable=False)
+    updated_by_user_id = Column(BigInteger, ForeignKey("users.id"), nullable=True)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class APIUsageLog(Base):
+    __tablename__ = "api_usage_log"
+    __table_args__ = (
+        Index("idx_org_source", "org_id", "source", "created_at"),
+        Index("idx_created", "created_at"),
+    )
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    source = Column(String(64), nullable=False)
+    endpoint = Column(String(256))
+    user_id = Column(BigInteger, ForeignKey("users.id"), nullable=True)
+    tokens_used = Column(Integer, nullable=True)
+    estimated_cost_usd = Column(DECIMAL(10, 6), nullable=True)
+    status = Column(Enum(APIUsageStatus), nullable=False)
+    org_id = Column(BigInteger, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class CompetitorIntel(Base):
+    __tablename__ = "competitor_intel"
+    __table_args__ = (
+        Index("idx_org_competitor", "org_id", "competitor_name", "created_at"),
+        Index("idx_notable", "org_id", "is_notable", "created_at"),
+    )
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    competitor_name = Column(String(256), nullable=False)
+    intel_type = Column(Enum(IntelType))
+    title = Column(String(512))
+    summary = Column(Text)
+    source_url = Column(String(512))
+    raw_content = Column(Text)
+    is_notable = Column(Boolean, default=False)
+    org_id = Column(BigInteger, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class TrackedCompetitor(Base):
+    __tablename__ = "tracked_competitors"
+    __table_args__ = (Index("idx_org_active_comp", "org_id", "active"),)
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    name = Column(String(256), nullable=False)
+    website = Column(String(512))
+    monitoring_config = Column(JSON)
+    org_id = Column(BigInteger, nullable=False)
+    active = Column(Boolean, default=True)
+
+
+class Conversation(Base):
+    __tablename__ = "conversations"
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    user_id = Column(BigInteger, ForeignKey("users.id"), nullable=False, index=True)
+    account_id = Column(BigInteger, ForeignKey("accounts.id"), nullable=True, index=True)
+    title = Column(String(512))
+    org_id = Column(BigInteger, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class Message(Base):
+    __tablename__ = "messages"
+    __table_args__ = (Index("idx_conversation", "conversation_id", "created_at"),)
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    conversation_id = Column(BigInteger, ForeignKey("conversations.id"), nullable=False)
+    role = Column(Enum(MessageRole), nullable=False)
+    content = Column(Text)
+    tool_calls = Column(JSON, nullable=True)
+    tool_results = Column(JSON, nullable=True)
+    tokens_used = Column(Integer)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class ResearchReport(Base):
+    __tablename__ = "research_reports"
+    __table_args__ = (Index("idx_org_type", "org_id", "report_type", "status"),)
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    account_id = Column(BigInteger, ForeignKey("accounts.id"), nullable=False, index=True)
+    contact_id = Column(BigInteger, ForeignKey("contacts.id"), nullable=True)
+    report_type = Column(Enum(ReportType), nullable=False)
+    meeting_id = Column(String(256), nullable=True, index=True)
+    status = Column(Enum(ReportStatus), default=ReportStatus.pending)
+    sections = Column(JSON, nullable=False)
+    raw_sources = Column(JSON)
+    follow_up_email = Column(Text, nullable=True)
+    generated_by_user_id = Column(BigInteger, ForeignKey("users.id"))
+    org_id = Column(BigInteger, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class AIRefinement(Base):
+    __tablename__ = "ai_refinements"
+    __table_args__ = (
+        Index("idx_user_type", "user_id", "output_type"),
+        Index("idx_scope", "scope", "output_type"),
+    )
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    user_id = Column(BigInteger, ForeignKey("users.id"))
+    output_type = Column(String(64))
+    feedback_text = Column(Text)
+    context_filter = Column(JSON)
+    scope = Column(Enum(RefinementScope), default=RefinementScope.personal)
+    active = Column(Boolean, default=True)
+    effectiveness = Column(Integer, default=0)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class KnowledgeIndex(Base):
+    __tablename__ = "knowledge_index"
+    __table_args__ = (Index("idx_source", "source_type", "org_id"),)
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    source_type = Column(Enum(SyncSourceType), nullable=False)
+    source_ref = Column(String(512))
+    title = Column(String(512))
+    chunk_text = Column(Text)
+    chunk_index = Column(Integer)
+    embedding = Column(JSON)  # JSON array for TiDB compat; native vector when available
+    embedding_model = Column(String(64), default="text-embedding-3-small")
+    metadata_ = Column("metadata", JSON)
+    org_id = Column(BigInteger, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class SyncStatus(Base):
+    __tablename__ = "sync_status"
+    __table_args__ = (Index("idx_source_org", "source_type", "org_id", unique=True),)
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    source_type = Column(Enum(SyncSourceType), nullable=False)
+    org_id = Column(BigInteger, nullable=False)
+    last_sync_at = Column(DateTime)
+    docs_indexed = Column(Integer, default=0)
+    chunks_indexed = Column(Integer, default=0)
+    status = Column(Enum(SyncStatusEnum), default=SyncStatusEnum.idle)
+    error_message = Column(Text)
+
+
+class NotificationPreference(Base):
+    __tablename__ = "notification_preferences"
+    __table_args__ = (Index("idx_user_notif", "user_id", "notification_type", unique=True),)
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    user_id = Column(BigInteger, ForeignKey("users.id"), nullable=False, index=True)
+    notification_type = Column(String(64), nullable=False)
+    enabled = Column(Boolean, default=True)
+    timing = Column(String(64))
+    channel = Column(String(128))
+    org_id = Column(BigInteger, nullable=False)

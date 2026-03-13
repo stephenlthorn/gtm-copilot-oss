@@ -18,7 +18,16 @@ class Settings(BaseSettings):
     cors_allow_origins: str = "http://localhost:3000,http://127.0.0.1:3000"
 
     database_url: str = "postgresql+psycopg://postgres:postgres@localhost:5432/gtm_copilot"
+    database_provider: str = "postgresql"  # "postgresql" or "tidb"
     redis_url: str = "redis://localhost:6379/0"
+
+    # TiDB Cloud configuration
+    tidb_host: str = ""
+    tidb_port: int = 4000
+    tidb_user: str = ""
+    tidb_password: str = ""
+    tidb_database: str = "gtm_copilot"
+    tidb_ssl_ca: str = ""  # Path to CA cert for TiDB Cloud
 
     embedding_dimensions: int = 1536
     retrieval_top_k: int = 8
@@ -71,6 +80,47 @@ class Settings(BaseSettings):
     slack_bot_token: str | None = None
     slack_signing_secret: str | None = None
     slack_default_channel: str | None = None
+
+    # MCP integration settings
+    salesforce_instance_url: str | None = None
+    salesforce_access_token: str | None = None
+    zoominfo_api_key: str | None = None
+    linkedin_access_token: str | None = None
+    firecrawl_api_key: str | None = None
+    github_access_token: str | None = None
+
+    # Google OAuth (user login)
+    google_oauth_client_id: str | None = None
+    google_oauth_client_secret: str | None = None
+    google_oauth_redirect_uri: str = "http://localhost:8000/api/auth/callback"
+
+    # JWT settings
+    jwt_secret_key: str = "CHANGE-ME-IN-PRODUCTION"
+    jwt_algorithm: str = "HS256"
+    jwt_access_token_expire_minutes: int = 60 * 24  # 24 hours
+
+    @property
+    def effective_database_url(self) -> str:
+        """Return the database URL based on provider configuration.
+
+        When database_provider is 'tidb' and tidb_host is set, builds a
+        mysql+pymysql:// connection string from the TIDB_* settings.
+        Otherwise falls back to the DATABASE_URL setting (PostgreSQL default).
+        """
+        if self.database_provider == "tidb" and self.tidb_host:
+            ssl_param = ""
+            if self.tidb_ssl_ca:
+                ssl_param = f"&ssl_ca={self.tidb_ssl_ca}"
+            return (
+                f"mysql+pymysql://{self.tidb_user}:{self.tidb_password}"
+                f"@{self.tidb_host}:{self.tidb_port}/{self.tidb_database}"
+                f"?charset=utf8mb4{ssl_param}"
+            )
+        return self.database_url
+
+    @property
+    def is_tidb(self) -> bool:
+        return self.database_provider == "tidb"
 
     @property
     def drive_folder_ids(self) -> List[str]:

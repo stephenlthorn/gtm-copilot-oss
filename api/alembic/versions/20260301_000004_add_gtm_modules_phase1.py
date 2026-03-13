@@ -9,7 +9,6 @@ from __future__ import annotations
 
 from alembic import op
 import sqlalchemy as sa
-from sqlalchemy.dialects import postgresql
 
 
 revision = "20260301_000004"
@@ -19,28 +18,41 @@ depends_on = None
 
 
 def upgrade() -> None:
+    bind = op.get_bind()
+    is_pg = bind.dialect.name == "postgresql"
+
+    if is_pg:
+        from sqlalchemy.dialects.postgresql import UUID, JSONB
+        uuid_type = UUID(as_uuid=True)
+        json_type = JSONB(astext_type=sa.Text())
+        def json_default(v): return sa.text(f"'{v}'::jsonb")
+    else:
+        uuid_type = sa.String(36)
+        json_type = sa.JSON()
+        def json_default(v): return sa.text(f"'{v}'")
+
     op.add_column("kb_config", sa.Column("se_poc_kit_url", sa.Text(), nullable=True))
     op.add_column(
         "kb_config",
         sa.Column(
             "feature_flags_json",
-            postgresql.JSONB(astext_type=sa.Text()),
+            json_type,
             nullable=False,
-            server_default=sa.text("'{}'::jsonb"),
+            server_default=json_default("{}"),
         ),
     )
 
     op.create_table(
         "gtm_module_runs",
-        sa.Column("id", postgresql.UUID(as_uuid=True), primary_key=True),
+        sa.Column("id", uuid_type, primary_key=True),
         sa.Column("module_name", sa.String(length=128), nullable=False),
         sa.Column("actor", sa.String(length=255), nullable=False),
-        sa.Column("input", postgresql.JSONB(astext_type=sa.Text()), nullable=False, server_default=sa.text("'{}'::jsonb")),
-        sa.Column("retrieval", postgresql.JSONB(astext_type=sa.Text()), nullable=False, server_default=sa.text("'{}'::jsonb")),
-        sa.Column("output", postgresql.JSONB(astext_type=sa.Text()), nullable=False, server_default=sa.text("'{}'::jsonb")),
+        sa.Column("input", json_type, nullable=False, server_default=json_default("{}")),
+        sa.Column("retrieval", json_type, nullable=False, server_default=json_default("{}")),
+        sa.Column("output", json_type, nullable=False, server_default=json_default("{}")),
         sa.Column("status", sa.String(length=32), nullable=False),
         sa.Column("error_message", sa.Text(), nullable=True),
-        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False),
+        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.text("CURRENT_TIMESTAMP"), nullable=False),
     )
     op.create_index("ix_gtm_module_runs_module_name", "gtm_module_runs", ["module_name"])
     op.create_index("ix_gtm_module_runs_actor", "gtm_module_runs", ["actor"])
@@ -49,22 +61,22 @@ def upgrade() -> None:
 
     op.create_table(
         "gtm_account_profiles",
-        sa.Column("id", postgresql.UUID(as_uuid=True), primary_key=True),
+        sa.Column("id", uuid_type, primary_key=True),
         sa.Column("account", sa.String(length=255), nullable=False),
         sa.Column("territory", sa.String(length=128), nullable=True),
         sa.Column("segment", sa.String(length=128), nullable=True),
         sa.Column("industry", sa.String(length=128), nullable=True),
         sa.Column("owner_email", sa.String(length=255), nullable=True),
         sa.Column("se_email", sa.String(length=255), nullable=True),
-        sa.Column("metadata", postgresql.JSONB(astext_type=sa.Text()), nullable=False, server_default=sa.text("'{}'::jsonb")),
-        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False),
-        sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False),
+        sa.Column("metadata", json_type, nullable=False, server_default=json_default("{}")),
+        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.text("CURRENT_TIMESTAMP"), nullable=False),
+        sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.text("CURRENT_TIMESTAMP"), nullable=False),
     )
     op.create_index("ix_gtm_account_profiles_account", "gtm_account_profiles", ["account"])
 
     op.create_table(
         "gtm_risk_signals",
-        sa.Column("id", postgresql.UUID(as_uuid=True), primary_key=True),
+        sa.Column("id", uuid_type, primary_key=True),
         sa.Column("account", sa.String(length=255), nullable=False),
         sa.Column("signal_type", sa.String(length=128), nullable=False),
         sa.Column("severity", sa.String(length=32), nullable=False),
@@ -72,8 +84,8 @@ def upgrade() -> None:
         sa.Column("owner_email", sa.String(length=255), nullable=True),
         sa.Column("source_call_id", sa.String(length=255), nullable=True),
         sa.Column("due_date", sa.Date(), nullable=True),
-        sa.Column("metadata", postgresql.JSONB(astext_type=sa.Text()), nullable=False, server_default=sa.text("'{}'::jsonb")),
-        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False),
+        sa.Column("metadata", json_type, nullable=False, server_default=json_default("{}")),
+        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.text("CURRENT_TIMESTAMP"), nullable=False),
     )
     op.create_index("ix_gtm_risk_signals_account", "gtm_risk_signals", ["account"])
     op.create_index("ix_gtm_risk_signals_source_call_id", "gtm_risk_signals", ["source_call_id"])
@@ -82,16 +94,16 @@ def upgrade() -> None:
 
     op.create_table(
         "gtm_poc_plans",
-        sa.Column("id", postgresql.UUID(as_uuid=True), primary_key=True),
+        sa.Column("id", uuid_type, primary_key=True),
         sa.Column("account", sa.String(length=255), nullable=False),
         sa.Column("status", sa.String(length=64), nullable=False),
         sa.Column("readiness_score", sa.Integer(), nullable=False),
         sa.Column("readiness_summary", sa.Text(), nullable=False),
-        sa.Column("plan_json", postgresql.JSONB(astext_type=sa.Text()), nullable=False, server_default=sa.text("'{}'::jsonb")),
+        sa.Column("plan_json", json_type, nullable=False, server_default=json_default("{}")),
         sa.Column("poc_kit_url", sa.Text(), nullable=True),
         sa.Column("created_by", sa.String(length=255), nullable=False),
-        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False),
-        sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False),
+        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.text("CURRENT_TIMESTAMP"), nullable=False),
+        sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.text("CURRENT_TIMESTAMP"), nullable=False),
     )
     op.create_index("ix_gtm_poc_plans_account", "gtm_poc_plans", ["account"])
     op.create_index("ix_gtm_poc_plans_status", "gtm_poc_plans", ["status"])
@@ -99,16 +111,16 @@ def upgrade() -> None:
 
     op.create_table(
         "gtm_generated_assets",
-        sa.Column("id", postgresql.UUID(as_uuid=True), primary_key=True),
+        sa.Column("id", uuid_type, primary_key=True),
         sa.Column("account", sa.String(length=255), nullable=False),
         sa.Column("module_name", sa.String(length=128), nullable=False),
         sa.Column("asset_type", sa.String(length=128), nullable=False),
         sa.Column("title", sa.String(length=512), nullable=False),
         sa.Column("content", sa.Text(), nullable=False),
-        sa.Column("metadata", postgresql.JSONB(astext_type=sa.Text()), nullable=False, server_default=sa.text("'{}'::jsonb")),
+        sa.Column("metadata", json_type, nullable=False, server_default=json_default("{}")),
         sa.Column("content_hash", sa.String(length=64), nullable=False),
         sa.Column("created_by", sa.String(length=255), nullable=False),
-        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False),
+        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.text("CURRENT_TIMESTAMP"), nullable=False),
     )
     op.create_index("ix_gtm_generated_assets_account", "gtm_generated_assets", ["account"])
     op.create_index("ix_gtm_generated_assets_module", "gtm_generated_assets", ["module_name"])
@@ -117,14 +129,14 @@ def upgrade() -> None:
 
     op.create_table(
         "gtm_trend_insights",
-        sa.Column("id", postgresql.UUID(as_uuid=True), primary_key=True),
+        sa.Column("id", uuid_type, primary_key=True),
         sa.Column("region", sa.String(length=128), nullable=False),
         sa.Column("vertical", sa.String(length=128), nullable=False),
         sa.Column("summary", sa.Text(), nullable=False),
-        sa.Column("top_signals", postgresql.JSONB(astext_type=sa.Text()), nullable=False, server_default=sa.text("'[]'::jsonb")),
-        sa.Column("recommended_plays", postgresql.JSONB(astext_type=sa.Text()), nullable=False, server_default=sa.text("'[]'::jsonb")),
+        sa.Column("top_signals", json_type, nullable=False, server_default=json_default("[]")),
+        sa.Column("recommended_plays", json_type, nullable=False, server_default=json_default("[]")),
         sa.Column("created_by", sa.String(length=255), nullable=False),
-        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False),
+        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.text("CURRENT_TIMESTAMP"), nullable=False),
     )
     op.create_index("ix_gtm_trend_insights_region", "gtm_trend_insights", ["region"])
     op.create_index("ix_gtm_trend_insights_vertical", "gtm_trend_insights", ["vertical"])

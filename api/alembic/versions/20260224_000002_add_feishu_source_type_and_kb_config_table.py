@@ -18,22 +18,30 @@ depends_on = None
 
 
 def upgrade() -> None:
-    # Add 'feishu' to source_type enum
-    op.execute("ALTER TYPE source_type ADD VALUE IF NOT EXISTS 'feishu' AFTER 'google_drive'")
+    bind = op.get_bind()
+    is_pg = bind.dialect.name == "postgresql"
+
+    # Add 'feishu' to source_type enum (PostgreSQL only; MySQL/TiDB uses VARCHAR)
+    if is_pg:
+        op.execute("ALTER TYPE source_type ADD VALUE IF NOT EXISTS 'feishu' AFTER 'google_drive'")
+
+    # Boolean server defaults: PostgreSQL uses 'true'/'false', MySQL/TiDB uses '1'/'0'
+    bool_true = sa.text("true") if is_pg else sa.text("1")
+    bool_false = sa.text("false") if is_pg else sa.text("0")
 
     # Create kb_config table
     op.create_table(
         "kb_config",
         sa.Column("id", sa.Integer(), primary_key=True, default=1),
-        sa.Column("google_drive_enabled", sa.Boolean(), nullable=False, server_default=sa.text("true")),
+        sa.Column("google_drive_enabled", sa.Boolean(), nullable=False, server_default=bool_true),
         sa.Column("google_drive_folder_ids", sa.Text(), nullable=True),
-        sa.Column("feishu_enabled", sa.Boolean(), nullable=False, server_default=sa.text("false")),
+        sa.Column("feishu_enabled", sa.Boolean(), nullable=False, server_default=bool_false),
         sa.Column("feishu_folder_token", sa.String(length=255), nullable=True),
         sa.Column("feishu_app_id", sa.String(length=255), nullable=True),
         sa.Column("feishu_app_secret", sa.String(length=255), nullable=True),
-        sa.Column("chorus_enabled", sa.Boolean(), nullable=False, server_default=sa.text("false")),
+        sa.Column("chorus_enabled", sa.Boolean(), nullable=False, server_default=bool_false),
         sa.Column("retrieval_top_k", sa.Integer(), nullable=False, server_default=sa.text("8")),
-        sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False),
+        sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.text("CURRENT_TIMESTAMP"), nullable=False),
     )
 
 

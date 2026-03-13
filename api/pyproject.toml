@@ -30,7 +30,14 @@ dependencies = [
   "google-api-python-client>=2.151.0",
   "google-auth>=2.34.0",
   "google-auth-oauthlib>=1.2.1",
-  "cryptography>=43.0.1"
+  "google-auth-httplib2>=0.2.0",
+  "cryptography>=43.0.1",
+  "python-jose[cryptography]>=3.3.0",
+  "passlib>=1.7.4",
+  "tidb-vector>=0.0.9",
+  "firecrawl-py>=1.0.0",
+  "tiktoken>=0.7.0",
+  "slack_sdk>=3.27.0"
 ]
 
 [project.optional-dependencies]

@@ -9,7 +9,6 @@ from __future__ import annotations
 
 from alembic import op
 import sqlalchemy as sa
-from sqlalchemy.dialects import postgresql
 
 
 revision = "20260227_000003"
@@ -19,24 +18,34 @@ depends_on = None
 
 
 def upgrade() -> None:
+    bind = op.get_bind()
+    is_pg = bind.dialect.name == "postgresql"
+    bool_false = sa.text("false") if is_pg else sa.text("0")
+
+    if is_pg:
+        from sqlalchemy.dialects.postgresql import UUID
+        uuid_type = UUID(as_uuid=True)
+    else:
+        uuid_type = sa.String(36)
+
     op.add_column(
         "kb_config",
         sa.Column("feishu_root_tokens", sa.Text(), nullable=True),
     )
     op.add_column(
         "kb_config",
-        sa.Column("feishu_oauth_enabled", sa.Boolean(), nullable=False, server_default=sa.text("false")),
+        sa.Column("feishu_oauth_enabled", sa.Boolean(), nullable=False, server_default=bool_false),
     )
 
     op.create_table(
         "feishu_user_credentials",
-        sa.Column("id", postgresql.UUID(as_uuid=True), primary_key=True),
+        sa.Column("id", uuid_type, primary_key=True),
         sa.Column("user_email", sa.String(length=255), nullable=False, unique=True),
         sa.Column("token_encrypted", sa.Text(), nullable=False),
         sa.Column("scopes", sa.Text(), nullable=True),
         sa.Column("last_synced_at", sa.DateTime(timezone=True), nullable=True),
-        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False),
-        sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False),
+        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.text("CURRENT_TIMESTAMP"), nullable=False),
+        sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.text("CURRENT_TIMESTAMP"), nullable=False),
     )
     op.create_index(
         "ix_feishu_user_credentials_user_email",

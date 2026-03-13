@@ -13,11 +13,23 @@ settings = get_settings()
 def _normalize_database_url(url: str) -> str:
     value = (url or "").strip()
     if value.startswith("mysql://"):
-        return "mysql+pymysql://" + value[len("mysql://") :]
+        return "mysql+pymysql://" + value[len("mysql://"):]
     return value
 
 
-engine = create_engine(_normalize_database_url(settings.database_url), pool_pre_ping=True)
+def _build_engine_kwargs(url: str) -> dict:
+    """Build engine keyword arguments appropriate for the database backend."""
+    kwargs: dict = {"pool_pre_ping": True}
+    if "pymysql" in url and settings.tidb_ssl_ca:
+        import ssl as _ssl
+
+        ssl_ctx = _ssl.create_default_context(cafile=settings.tidb_ssl_ca)
+        kwargs["connect_args"] = {"ssl": ssl_ctx}
+    return kwargs
+
+
+_url = _normalize_database_url(settings.effective_database_url)
+engine = create_engine(_url, **_build_engine_kwargs(_url))
 SessionLocal = sessionmaker(bind=engine, autocommit=False, autoflush=False)
 
 
