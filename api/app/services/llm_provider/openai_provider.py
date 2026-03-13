@@ -27,13 +27,17 @@ class OpenAIProvider:
         model: str | None = None,
         tools: list[dict[str, Any]] | None = None,
         stream: bool = False,
+        reasoning_effort: str | None = None,
     ) -> LLMResponse:
+        resolved_model = model or self.default_model
         kwargs: dict[str, Any] = {
-            "model": model or self.default_model,
+            "model": resolved_model,
             "messages": messages,
         }
         if tools:
             kwargs["tools"] = tools
+        if reasoning_effort and resolved_model.startswith("o"):
+            kwargs["reasoning_effort"] = reasoning_effort
         response = await self.client.chat.completions.create(**kwargs)
         choice = response.choices[0]
         tool_calls = None

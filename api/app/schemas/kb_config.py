@@ -17,6 +17,7 @@ class KBConfigUpdate(BaseModel):
     chorus_enabled: bool | None = None
     retrieval_top_k: int | None = Field(default=None, ge=1, le=50)
     llm_model: str | None = None
+    reasoning_effort: str | None = None
     web_search_enabled: bool | None = None
     code_interpreter_enabled: bool | None = None
     persona_name: str | None = None
@@ -37,6 +38,7 @@ class KBConfigRead(BaseModel):
     chorus_enabled: bool
     retrieval_top_k: int
     llm_model: str
+    reasoning_effort: str | None
     web_search_enabled: bool
     code_interpreter_enabled: bool
     persona_name: str

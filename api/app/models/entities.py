@@ -186,7 +186,8 @@ class KBConfig(Base):
     feishu_app_secret: Mapped[str | None] = mapped_column(String(255))
     chorus_enabled: Mapped[bool] = mapped_column(default=False, nullable=False)
     retrieval_top_k: Mapped[int] = mapped_column(Integer, default=8, nullable=False)
-    llm_model: Mapped[str] = mapped_column(String(100), default="gpt-5.3-codex", nullable=False, server_default="gpt-5.3-codex")
+    llm_model: Mapped[str] = mapped_column(String(100), default="gpt-4.1", nullable=False, server_default="gpt-4.1")
+    reasoning_effort: Mapped[str | None] = mapped_column(String(20))
     web_search_enabled: Mapped[bool] = mapped_column(default=False, nullable=False, server_default="false")
     code_interpreter_enabled: Mapped[bool] = mapped_column(default=False, nullable=False, server_default="false")
     persona_name: Mapped[str] = mapped_column(
