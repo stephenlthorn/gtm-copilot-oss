@@ -610,20 +610,127 @@ def sync_feishu(request: Request, db: Session = Depends(db_session)) -> dict:
 
 
 
+def _get_tidb_from_system_config(db: Session) -> dict:
+    """Read TiDB overrides stored in system_config table (org_id=1)."""
+    from app.models.entities import SystemConfig
+    keys = ["tidb.host", "tidb.port", "tidb.user", "tidb.password", "tidb.database", "tidb.ssl_ca"]
+    rows = db.query(SystemConfig).filter(
+        SystemConfig.org_id == 1,
+        SystemConfig.config_key.in_(keys),
+    ).all()
+    out: dict = {}
+    for row in rows:
+        short = row.config_key.split(".", 1)[1]  # strip "tidb."
+        if row.config_key == "tidb.password":
+            # decrypt
+            try:
+                from cryptography.fernet import Fernet
+                import base64, hashlib, os
+                raw = os.environ.get("ENCRYPTION_KEY", "")
+                if raw:
+                    try:
+                        decoded = base64.urlsafe_b64decode(raw.encode())
+                        key = raw.encode() if len(decoded) == 32 else base64.urlsafe_b64encode(hashlib.sha256(raw.encode()).digest())
+                    except Exception:
+                        key = base64.urlsafe_b64encode(hashlib.sha256(raw.encode()).digest())
+                else:
+                    key = base64.urlsafe_b64encode(hashlib.sha256(b"gtm-copilot|dev-only").digest())
+                fernet = Fernet(key)
+                out[short] = fernet.decrypt(row.config_value_encrypted).decode() if row.config_value_encrypted else ""
+            except Exception:
+                out[short] = ""
+        else:
+            out[short] = row.config_value_plain or ""
+    return out
+
+
 @router.get("/db-config")
-def get_db_config() -> dict:
+def get_db_config(db: Session = Depends(db_session)) -> dict:
     """Return current database provider and TiDB connection settings (password masked)."""
     s = get_settings()
+    overrides = _get_tidb_from_system_config(db)
+
+    host = overrides.get("host") or s.tidb_host or ""
+    port = overrides.get("port") or str(s.tidb_port)
+    user = overrides.get("user") or s.tidb_user or ""
+    password_set = bool(overrides.get("password") or s.tidb_password)
+    database = overrides.get("database") or s.tidb_database
+    ssl_ca = overrides.get("ssl_ca") or s.tidb_ssl_ca or ""
+
+    # Build preview URL from the actual (potentially overridden) host
+    if host:
+        preview = f"{host}:{port}/{database}"
+    else:
+        raw_url = s.effective_database_url
+        preview = raw_url.split("@")[-1] if "@" in raw_url else raw_url
+
     return {
         "database_provider": s.database_provider,
-        "tidb_host": s.tidb_host or "",
-        "tidb_port": s.tidb_port,
-        "tidb_user": s.tidb_user or "",
-        "tidb_password": "***" if s.tidb_password else "",
-        "tidb_database": s.tidb_database,
-        "tidb_ssl_ca": s.tidb_ssl_ca or "",
-        "database_url_preview": s.effective_database_url.split("@")[-1] if "@" in s.effective_database_url else s.effective_database_url,
+        "tidb_host": host,
+        "tidb_port": port,
+        "tidb_user": user,
+        "tidb_password": "***" if password_set else "",
+        "tidb_database": database,
+        "tidb_ssl_ca": ssl_ca,
+        "database_url_preview": preview,
+        "has_db_overrides": bool(overrides),
     }
+
+
+class TiDBConfigBody(BaseModel):
+    host: str = ""
+    port: str = ""
+    user: str = ""
+    password: str = ""
+    database: str = ""
+    ssl_ca: str = ""
+
+
+@router.put("/tidb-config")
+def save_tidb_config(
+    body: TiDBConfigBody,
+    db: Session = Depends(db_session),
+) -> dict:
+    """Save TiDB Cloud connection credentials to system_config."""
+    from app.models.entities import SystemConfig
+    from cryptography.fernet import Fernet
+    import base64, hashlib, os
+
+    raw = os.environ.get("ENCRYPTION_KEY", "")
+    if raw:
+        try:
+            decoded = base64.urlsafe_b64decode(raw.encode())
+            key = raw.encode() if len(decoded) == 32 else base64.urlsafe_b64encode(hashlib.sha256(raw.encode()).digest())
+        except Exception:
+            key = base64.urlsafe_b64encode(hashlib.sha256(raw.encode()).digest())
+    else:
+        key = base64.urlsafe_b64encode(hashlib.sha256(b"gtm-copilot|dev-only").digest())
+    fernet = Fernet(key)
+
+    fields = {
+        "tidb.host": (body.host, False),
+        "tidb.port": (body.port, False),
+        "tidb.user": (body.user, False),
+        "tidb.database": (body.database, False),
+        "tidb.ssl_ca": (body.ssl_ca, False),
+    }
+    if body.password and body.password != "***":
+        fields["tidb.password"] = (body.password, True)
+
+    for config_key, (value, is_secret) in fields.items():
+        row = db.query(SystemConfig).filter_by(config_key=config_key, org_id=1).first()
+        if row is None:
+            row = SystemConfig(config_key=config_key, org_id=1)
+            db.add(row)
+        if is_secret:
+            row.config_value_encrypted = fernet.encrypt(value.encode())
+            row.config_value_plain = None
+        else:
+            row.config_value_plain = value
+            row.config_value_encrypted = None
+
+    db.commit()
+    return {"ok": True, "message": "TiDB credentials saved. Restart containers to apply."}
 
 
 @router.get("/chorus/preview")
