@@ -30,6 +30,9 @@ services:
       # Default: PostgreSQL.  Override DATABASE_PROVIDER and TIDB_* in .env for TiDB Cloud.
       DATABASE_URL: postgresql+psycopg://postgres:postgres@db:5432/gtm_copilot
       REDIS_URL: redis://redis:6379/0
+      SENTRY_DSN: ${SENTRY_DSN:-}
+      ENVIRONMENT: ${ENVIRONMENT:-development}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
     depends_on:
       - db
       - redis
@@ -47,6 +50,9 @@ services:
     environment:
       DATABASE_URL: postgresql+psycopg://postgres:postgres@db:5432/gtm_copilot
       REDIS_URL: redis://redis:6379/0
+      SENTRY_DSN: ${SENTRY_DSN:-}
+      ENVIRONMENT: ${ENVIRONMENT:-development}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
     depends_on:
       - db
       - redis
@@ -63,6 +69,9 @@ services:
     environment:
       DATABASE_URL: postgresql+psycopg://postgres:postgres@db:5432/gtm_copilot
       REDIS_URL: redis://redis:6379/0
+      SENTRY_DSN: ${SENTRY_DSN:-}
+      ENVIRONMENT: ${ENVIRONMENT:-development}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
     depends_on:
       - db
       - redis

@@ -37,7 +37,9 @@ dependencies = [
   "tidb-vector>=0.0.9",
   "firecrawl-py>=1.0.0",
   "tiktoken>=0.7.0",
-  "slack_sdk>=3.27.0"
+  "slack_sdk>=3.27.0",
+  "sentry-sdk[fastapi]==2.22.0",
+  "python-json-logger==2.0.7"
 ]
 
 [project.optional-dependencies]

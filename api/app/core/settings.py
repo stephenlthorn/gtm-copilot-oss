@@ -94,6 +94,11 @@ class Settings(BaseSettings):
     google_oauth_client_secret: str | None = None
     google_oauth_redirect_uri: str = "http://localhost:8000/api/auth/callback"
 
+    # Observability
+    sentry_dsn: str = ""
+    log_level: str = "INFO"
+    environment: str = "development"
+
     # JWT settings
     jwt_secret_key: str = "CHANGE-ME-IN-PRODUCTION"
     jwt_algorithm: str = "HS256"
