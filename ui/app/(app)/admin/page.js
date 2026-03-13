@@ -1,6 +1,14 @@
 import { apiGet } from '../../../lib/api';
 import KBConfigPanel from '../../../components/KBConfigPanel';
 import KnowledgeSourcesPanel from '../../../components/KnowledgeSourcesPanel';
+import SourceRegistryPanel from '../../../components/admin/SourceRegistryPanel';
+import UserManagementPanel from '../../../components/admin/UserManagementPanel';
+import ApiKeyManagementPanel from '../../../components/admin/ApiKeyManagementPanel';
+import SyncStatusPanel from '../../../components/admin/SyncStatusPanel';
+import IndexHealthPanel from '../../../components/admin/IndexHealthPanel';
+import AiCoachingPanel from '../../../components/admin/AiCoachingPanel';
+import McpServersPanel from '../../../components/admin/McpServersPanel';
+import NotificationDefaultsPanel from '../../../components/admin/NotificationDefaultsPanel';
 
 export default async function AdminPage() {
   const [docsRaw, auditsRaw, callsRaw] = await Promise.all([
@@ -28,11 +36,11 @@ export default async function AdminPage() {
 
       <div className="content">
         <div className="kpi-row">
-            {[
-              { label: 'Docs Indexed', value: docs.length, sub: docs[0]?.title || '—' },
-              { label: 'Calls Indexed', value: calls.length, sub: calls[0]?.account || '—' },
-              { label: 'Audit Events', value: audits.length, sub: 'Last 30 days' },
-            ].map((k) => (
+          {[
+            { label: 'Docs Indexed', value: docs.length, sub: docs[0]?.title || '—' },
+            { label: 'Calls Indexed', value: calls.length, sub: calls[0]?.account || '—' },
+            { label: 'Audit Events', value: audits.length, sub: 'Last 30 days' },
+          ].map((k) => (
             <div className="kpi-card" key={k.label}>
               <div className="kpi-label">{k.label}</div>
               <div className="kpi-value">{k.value}</div>
@@ -73,6 +81,22 @@ export default async function AdminPage() {
             </table>
           </div>
         </div>
+
+        <SourceRegistryPanel />
+
+        <UserManagementPanel />
+
+        <ApiKeyManagementPanel />
+
+        <SyncStatusPanel />
+
+        <IndexHealthPanel />
+
+        <AiCoachingPanel />
+
+        <McpServersPanel />
+
+        <NotificationDefaultsPanel />
       </div>
     </>
   );

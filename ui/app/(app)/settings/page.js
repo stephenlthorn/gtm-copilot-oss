@@ -4,6 +4,10 @@ import GoogleDrivePanel from '../../../components/GoogleDrivePanel';
 import FeishuPanel from '../../../components/FeishuPanel';
 import PersonaPromptPanel from '../../../components/PersonaPromptPanel';
 import GTMFeaturePanel from '../../../components/GTMFeaturePanel';
+import OpenAIKeyPanel from '../../../components/OpenAIKeyPanel';
+import ExternalAccountsPanel from '../../../components/ExternalAccountsPanel';
+import CalendarScanPanel from '../../../components/CalendarScanPanel';
+import SlackNotificationsPanel from '../../../components/SlackNotificationsPanel';
 
 export default async function SettingsPage() {
   const session = await getSession();
@@ -90,8 +94,14 @@ export default async function SettingsPage() {
           </div>
         </div>
 
+        <OpenAIKeyPanel />
+        <ExternalAccountsPanel />
+
         <GoogleDrivePanel />
         <FeishuPanel />
+
+        <CalendarScanPanel />
+        <SlackNotificationsPanel />
 
         <PersonaPromptPanel initialPersona={personaName} initialPrompt={personaPrompt} />
         <GTMFeaturePanel initialPocKitUrl={sePocKitUrl} initialFeatureFlags={featureFlags} />

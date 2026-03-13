@@ -4,6 +4,7 @@ from fastapi import APIRouter
 
 from app.api.routes import admin, calls, chat, kb, marketing, messaging, notifications, rep, se, slack
 from app.api.routes import accounts, auth, conversations, dashboard, mcp, sources
+from app.api.routes import admin_users, admin_system_config, webhooks
 from app.routers import knowledge
 
 api_router = APIRouter()
@@ -28,3 +29,6 @@ api_router.include_router(notifications.router, prefix="/notifications", tags=["
 api_router.include_router(conversations.router, prefix="/conversations", tags=["conversations"])
 api_router.include_router(mcp.router, prefix="/admin", tags=["mcp-admin"])
 api_router.include_router(sources.router, prefix="/sources", tags=["sources"])
+api_router.include_router(admin_users.router, prefix="/admin", tags=["admin-users"])
+api_router.include_router(admin_system_config.router, prefix="/admin", tags=["admin-system-config"])
+api_router.include_router(webhooks.router, prefix="/webhooks", tags=["webhooks"])
