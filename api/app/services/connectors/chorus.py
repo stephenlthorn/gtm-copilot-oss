@@ -66,10 +66,41 @@ class ChorusConnector:
         return [self._parse_call(r) for r in records]
 
     async def get_transcript(self, call_id: str) -> str:
-        resp = await self._client.get(f"/engagements/{call_id}/transcript")
-        resp.raise_for_status()
-        data = resp.json()
-        return data.get("transcript", "")
+        """Try multiple endpoint patterns; return first non-empty transcript found."""
+        candidate_paths = [
+            f"/engagements/{call_id}/transcript",
+            f"/engagements/{call_id}/transcription",
+            f"/calls/{call_id}/transcript",
+            f"/transcripts/{call_id}",
+            f"/transcriptions/{call_id}",
+        ]
+        for path in candidate_paths:
+            try:
+                resp = await self._client.get(path)
+                if resp.status_code == 404:
+                    continue
+                resp.raise_for_status()
+                data = resp.json()
+                text = (
+                    data.get("transcript")
+                    or data.get("transcription")
+                    or data.get("text")
+                    or data.get("content")
+                    or ""
+                )
+                if text:
+                    return str(text)
+            except Exception:
+                continue
+        # Fall back to engagement detail which may carry transcript inline
+        try:
+            resp = await self._client.get(f"/engagements/{call_id}")
+            if resp.status_code != 404:
+                resp.raise_for_status()
+                return self._parse_call(resp.json()).transcript or ""
+        except Exception:
+            pass
+        return ""
 
     async def get_call_details(self, call_id: str) -> ChorusCallData:
         resp = await self._client.get(f"/engagements/{call_id}")

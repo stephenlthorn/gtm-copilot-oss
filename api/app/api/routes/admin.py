@@ -938,3 +938,53 @@ async def chorus_sync_selected(
         }
     finally:
         await connector.close()
+
+
+@router.get("/chorus/probe/{call_id}")
+async def chorus_probe_transcript(call_id: str, db: Session = Depends(db_session)) -> dict:
+    """Try every known Chorus transcript endpoint pattern and report which ones return data."""
+    from app.models.entities import User
+    import httpx as _httpx
+
+    settings = get_settings()
+    api_key = settings.call_api_key or settings.chorus_api_key
+    base_url = settings.call_base_url or settings.chorus_base_url or "https://chorus.ai/v3"
+
+    if not api_key:
+        users = db.query(User).filter(User.org_id == 1).all()
+        for u in users:
+            accts = u.connected_accounts or {}
+            chorus = accts.get("chorus", {})
+            if isinstance(chorus, dict) and chorus.get("access_token"):
+                api_key = chorus["access_token"]
+                base_url = chorus.get("base_url") or base_url
+                break
+
+    if not api_key:
+        raise HTTPException(status_code=400, detail="Chorus API key not configured.")
+
+    base = base_url.rstrip("/")
+    headers = {"Authorization": f"Bearer {api_key}", "Accept": "application/json"}
+    candidates = [
+        f"{base}/engagements/{call_id}",
+        f"{base}/engagements/{call_id}/transcript",
+        f"{base}/engagements/{call_id}/transcription",
+        f"{base}/calls/{call_id}/transcript",
+        f"{base}/calls/{call_id}",
+        f"{base}/transcripts/{call_id}",
+        f"{base}/transcriptions/{call_id}",
+        f"{base}/transcriptions?engagement_id={call_id}",
+        f"{base}/engagements/{call_id}/summary",
+    ]
+
+    results = []
+    async with _httpx.AsyncClient(timeout=15.0) as client:
+        for url in candidates:
+            try:
+                r = await client.get(url, headers=headers)
+                body = r.text[:800]
+                results.append({"url": url, "status": r.status_code, "body_preview": body})
+            except Exception as exc:
+                results.append({"url": url, "status": "error", "body_preview": str(exc)})
+
+    return {"call_id": call_id, "base_url": base, "probes": results}
