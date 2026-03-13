@@ -15,6 +15,7 @@ export default function RepExecutionWidget() {
   const [account, setAccount] = useState('');
   const [chorusCallId, setChorusCallId] = useState('');
   const [website, setWebsite] = useState('');
+  const [linkedinUrl, setLinkedinUrl] = useState('');
   const [count, setCount] = useState(6);
   const [tone, setTone] = useState('crisp');
   const [to, setTo] = useState('rep.one@example.com');
@@ -31,8 +32,13 @@ export default function RepExecutionWidget() {
   const [error, setError] = useState('');
 
   const basePayload = useMemo(
-    () => ({ account: account.trim(), chorus_call_id: chorusCallId || null, website: website.trim() || null }),
-    [account, chorusCallId, website]
+    () => ({
+      account: account.trim(),
+      chorus_call_id: chorusCallId || null,
+      website: website.trim() || null,
+      linkedin_url: linkedinUrl.trim() || null,
+    }),
+    [account, chorusCallId, website, linkedinUrl]
   );
 
   const run = async (action) => {
@@ -123,14 +129,25 @@ export default function RepExecutionWidget() {
             />
           </div>
         </div>
-        <div style={{ display: 'grid', gap: '0.35rem' }}>
-          <label style={{ color: 'var(--text-3)', fontSize: '0.72rem' }}>Company Website (optional — used for account brief research)</label>
-          <input
-            className="input"
-            value={website}
-            onChange={(e) => setWebsite(e.target.value)}
-            placeholder="e.g. https://example.com"
-          />
+        <div className="two-col" style={{ gap: '0.75rem' }}>
+          <div style={{ display: 'grid', gap: '0.35rem' }}>
+            <label style={{ color: 'var(--text-3)', fontSize: '0.72rem' }}>Company Website (optional)</label>
+            <input
+              className="input"
+              value={website}
+              onChange={(e) => setWebsite(e.target.value)}
+              placeholder="e.g. https://example.com"
+            />
+          </div>
+          <div style={{ display: 'grid', gap: '0.35rem' }}>
+            <label style={{ color: 'var(--text-3)', fontSize: '0.72rem' }}>Prospect LinkedIn URL (optional)</label>
+            <input
+              className="input"
+              value={linkedinUrl}
+              onChange={(e) => setLinkedinUrl(e.target.value)}
+              placeholder="e.g. https://linkedin.com/in/john-doe"
+            />
+          </div>
         </div>
 
         <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>

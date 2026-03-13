@@ -7,8 +7,6 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-import httpx
-
 from app.models import (
     AuditStatus,
     CallArtifact,
@@ -23,7 +21,10 @@ from app.models import (
     OutboundMessage,
     SourceType,
 )
+from app.core.settings import get_settings
 from app.models.entities import Account
+from app.services.connectors.firecrawl import FirecrawlConnector
+from app.services.research.account_brief_researcher import AccountBriefResearcher
 from app.prompts.personas import get_default_persona_prompt, normalize_persona
 from app.retrieval.service import HybridRetriever
 from app.retrieval.types import RetrievedChunk
@@ -244,13 +245,14 @@ class GTMModuleService:
         except Exception:
             self.db.rollback()
 
-    def rep_account_brief(
+    async def rep_account_brief(
         self,
         *,
         user: str,
         account: str,
         chorus_call_id: str | None = None,
         website: str | None = None,
+        linkedin_url: str | None = None,
     ) -> tuple[dict[str, Any], dict[str, Any]]:
         ask = "Build an execution-ready account brief for the rep."
         hits = self._collect_hits(account=account, ask=ask, user_email=user, chorus_call_id=chorus_call_id)
@@ -266,17 +268,18 @@ class GTMModuleService:
         account_industry = account_record.industry if account_record else None
         account_employee_count = account_record.employee_count if account_record else None
 
-        # Fetch company homepage for context (best-effort, ~3k chars)
-        website_content: str | None = None
-        if effective_website:
+        # Run concurrent Firecrawl research if key is configured
+        settings = get_settings()
+        research_context = None
+        if settings.firecrawl_api_key:
             try:
-                url = effective_website if effective_website.startswith("http") else f"https://{effective_website}"
-                resp = httpx.get(url, timeout=10.0, follow_redirects=True, headers={"User-Agent": "Mozilla/5.0"})
-                if resp.status_code == 200:
-                    import re
-                    text = re.sub(r"<[^>]+>", " ", resp.text)
-                    text = re.sub(r"\s+", " ", text).strip()
-                    website_content = text[:3000]
+                connector = FirecrawlConnector(api_key=settings.firecrawl_api_key)
+                researcher = AccountBriefResearcher(connector)
+                research_context = await researcher.research(
+                    account_name=account,
+                    website=effective_website,
+                    linkedin_url=linkedin_url,
+                )
             except Exception:
                 pass
 
@@ -288,7 +291,8 @@ class GTMModuleService:
             persona_name=persona_name,
             persona_prompt=persona_prompt,
             tools=tools,
-            website_content=website_content,
+            research_context=research_context,
+            linkedin_url=linkedin_url,
             account_industry=account_industry,
             account_employee_count=account_employee_count,
         )
@@ -1009,7 +1013,7 @@ class GTMModuleService:
         )
         return payload, retrieval
 
-    def rep_full_solution(
+    async def rep_full_solution(
         self,
         *,
         user: str,
@@ -1021,7 +1025,7 @@ class GTMModuleService:
         cc: list[str],
         tone: str,
     ) -> tuple[dict[str, Any], dict[str, Any]]:
-        brief, _ = self.rep_account_brief(user=user, account=account, chorus_call_id=chorus_call_id)
+        brief, _ = await self.rep_account_brief(user=user, account=account, chorus_call_id=chorus_call_id)
         questions, _ = self.rep_discovery_questions(
             user=user,
             account=account,

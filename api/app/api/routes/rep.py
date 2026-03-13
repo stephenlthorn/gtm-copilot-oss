@@ -67,7 +67,7 @@ def market_research(
 
 
 @router.post("/account-brief", response_model=RepAccountBriefResponse)
-def rep_account_brief(
+async def rep_account_brief(
     req: RepAccountBriefRequest,
     request: Request,
     db: Session = Depends(db_session),
@@ -76,11 +76,12 @@ def rep_account_brief(
     service = GTMModuleService(db, openai_token=openai_token)
     _ensure_enabled(service, "rep_account_brief")
     try:
-        data, retrieval = service.rep_account_brief(
+        data, retrieval = await service.rep_account_brief(
             user=req.user,
             account=req.account,
             chorus_call_id=req.chorus_call_id,
             website=req.website,
+            linkedin_url=req.linkedin_url,
         )
         write_audit_log(
             db,
@@ -233,7 +234,7 @@ def rep_deal_risk(
 
 
 @router.post("/full-solution", response_model=RepFullSolutionResponse)
-def rep_full_solution(
+async def rep_full_solution(
     req: RepFullSolutionRequest,
     request: Request,
     db: Session = Depends(db_session),
@@ -242,7 +243,7 @@ def rep_full_solution(
     service = GTMModuleService(db, openai_token=openai_token)
     _ensure_enabled(service, "rep_full_solution")
     try:
-        data, retrieval = service.rep_full_solution(
+        data, retrieval = await service.rep_full_solution(
             user=req.user,
             account=req.account,
             chorus_call_id=req.chorus_call_id,

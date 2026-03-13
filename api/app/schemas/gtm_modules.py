@@ -15,6 +15,7 @@ class RepAccountBriefRequest(BaseModel):
     account: str
     chorus_call_id: str | None = None
     website: str | None = None
+    linkedin_url: str | None = None
 
 
 class ProspectInfo(BaseModel):

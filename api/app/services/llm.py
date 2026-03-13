@@ -1156,7 +1156,8 @@ class LLMService:
         persona_name: str | None = "sales_representative",
         persona_prompt: str | None = None,
         tools: list[dict] | None = None,
-        website_content: str | None = None,
+        research_context: Any | None = None,
+        linkedin_url: str | None = None,
         account_industry: str | None = None,
         account_employee_count: int | None = None,
     ) -> dict[str, Any] | None:
@@ -1186,7 +1187,8 @@ class LLMService:
             '  "recommended_assets": [],\n'
             '  "next_meeting_agenda": []\n'
             "}\n\n"
-            "Use all available evidence. Where data is missing, make reasoned hypotheses and label them as such."
+            "Use all available evidence. Where source data is sparse, draw on your knowledge of "
+            "this company and industry. If you have web access, use it to fill gaps."
         )
         if persona_prompt:
             system_prompt += f"\n\nAdditional instructions:\n{persona_prompt}"
@@ -1198,8 +1200,25 @@ class LLMService:
             f"Employee Count: {account_employee_count or 'Unknown'}",
             f"Request: {ask}",
         ]
-        if website_content:
-            parts.append(f"\n--- Company Website Content ---\n{website_content[:3000]}")
+
+        if research_context is not None:
+            _source_labels = {
+                "company_homepage": "Company Homepage",
+                "company_about": "Company About Page",
+                "crunchbase": "Crunchbase",
+                "stackshare": "StackShare (Tech Stack)",
+                "job_signals": "Job Postings (Tech Stack Signals)",
+                "prospect_profile": "Prospect LinkedIn Profile",
+            }
+            for field_name, label in _source_labels.items():
+                content = getattr(research_context, field_name, "")
+                if content:
+                    parts.append(f"\n--- {label} ---\n{content}")
+            if not research_context.prospect_profile and linkedin_url:
+                parts.append(f"\nProspect LinkedIn URL (profile scrape unavailable): {linkedin_url}")
+        elif linkedin_url:
+            parts.append(f"\nProspect LinkedIn URL: {linkedin_url}")
+
         if context:
             parts.append(f"\n--- Call Transcript Evidence ---\n{context}")
         prompt = "\n".join(parts)
