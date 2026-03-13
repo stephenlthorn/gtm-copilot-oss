@@ -871,17 +871,22 @@ async def chorus_sync_all(
         errors: list[str] = []
         for call_data in calls:
             from sqlalchemy import select as _sel
-            from app.models import ChorusCall as _CC
+            from app.models import ChorusCall as _CC, KBDocument as _KBD, SourceType as _ST
             existing = db.execute(_sel(_CC).where(_CC.chorus_call_id == call_data.call_id)).scalar_one_or_none()
-            if existing:
-                continue
             try:
-                row = svc._store_call(call_data)
-                stored += 1
-                transcript = await svc._fetch_and_store_transcript(call_data, row)
-                if transcript:
-                    indexed += 1
-                svc._create_artifact(call_data, transcript)
+                if existing:
+                    row = existing
+                else:
+                    row = svc._store_call(call_data)
+                    stored += 1
+                kb_doc = db.execute(
+                    _sel(_KBD).where(_KBD.source_type == _ST.CHORUS, _KBD.source_id == call_data.call_id)
+                ).scalar_one_or_none()
+                if not kb_doc:
+                    transcript = await svc._fetch_and_store_transcript(call_data, row)
+                    if transcript:
+                        indexed += 1
+                    svc._create_artifact(call_data, transcript)
                 db.flush()
             except Exception as exc:
                 errors.append(f"{call_data.call_id}: {exc}")

@@ -53,17 +53,26 @@ class ChorusSyncService:
                 ).scalar_one_or_none()
 
                 if existing:
-                    continue
+                    row = existing
+                else:
+                    row = self._store_call(call_data)
+                    stored += 1
 
-                row = self._store_call(call_data)
-                stored += 1
+                # Index transcript if not yet indexed
+                kb_doc = self.db.execute(
+                    select(KBDocument).where(
+                        KBDocument.source_type == SourceType.CHORUS,
+                        KBDocument.source_id == call_data.call_id,
+                    )
+                ).scalar_one_or_none()
 
-                transcript = await self._fetch_and_store_transcript(call_data, row)
-                if transcript:
-                    indexed += 1
+                if not kb_doc:
+                    transcript = await self._fetch_and_store_transcript(call_data, row)
+                    if transcript:
+                        indexed += 1
 
-                self._create_artifact(call_data, transcript)
-                artifacts += 1
+                    self._create_artifact(call_data, transcript)
+                    artifacts += 1
 
                 self.db.flush()
             except Exception as exc:
@@ -154,23 +163,41 @@ class ChorusSyncService:
         indexed = 0
         errors: list[str] = []
 
+        # Refetch from list to get inline meeting_summary/action_items
+        id_set = set(call_ids)
+        all_calls = await self.connector.list_calls()
+        call_map: dict[str, ChorusCallData] = {c.call_id: c for c in all_calls if c.call_id in id_set}
+
         for call_id in call_ids:
             try:
+                call_data = call_map.get(call_id)
+                if not call_data:
+                    errors.append(f"{call_id}: not found in Chorus list")
+                    continue
+
                 existing = self.db.execute(
                     select(ChorusCall).where(ChorusCall.chorus_call_id == call_id)
                 ).scalar_one_or_none()
+
                 if existing:
-                    continue
+                    row = existing
+                else:
+                    row = self._store_call(call_data)
+                    stored += 1
 
-                call_data = await self.connector.get_call_details(call_id)
-                row = self._store_call(call_data)
-                stored += 1
+                kb_doc = self.db.execute(
+                    select(KBDocument).where(
+                        KBDocument.source_type == SourceType.CHORUS,
+                        KBDocument.source_id == call_id,
+                    )
+                ).scalar_one_or_none()
 
-                transcript = await self._fetch_and_store_transcript(call_data, row)
-                if transcript:
-                    indexed += 1
+                if not kb_doc:
+                    transcript = await self._fetch_and_store_transcript(call_data, row)
+                    if transcript:
+                        indexed += 1
+                    self._create_artifact(call_data, transcript)
 
-                self._create_artifact(call_data, transcript)
                 self.db.flush()
             except Exception as exc:
                 logger.exception("Failed to sync call %s", call_id)

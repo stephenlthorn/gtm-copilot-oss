@@ -23,6 +23,9 @@ class ChorusCallData:
     participants: list[dict] = field(default_factory=list)
     recording_url: str | None = None
     transcript: str | None = None
+    meeting_summary: str | None = None
+    action_items: list[str] = field(default_factory=list)
+    subject: str | None = None
 
 
 class ChorusConnector:
@@ -135,6 +138,21 @@ class ChorusConnector:
             (data.get("assignee") or {}).get("email")
         )
 
+        meeting_summary = data.get("meeting_summary") or None
+        action_items = data.get("action_items") or []
+        if not isinstance(action_items, list):
+            action_items = []
+
+        # Build a synthesized transcript from available inline content
+        inline_transcript = data.get("transcript")
+        if not inline_transcript:
+            parts = []
+            if meeting_summary:
+                parts.append(f"Meeting Summary:\n{meeting_summary}")
+            if action_items:
+                parts.append("Action Items:\n" + "\n".join(f"- {a}" for a in action_items if a))
+            inline_transcript = "\n\n".join(parts) if parts else None
+
         return ChorusCallData(
             call_id=str(
                 data.get("engagement_id") or data.get("id") or data.get("chorus_call_id") or ""
@@ -147,5 +165,8 @@ class ChorusConnector:
             se_email=data.get("se_email"),
             participants=data.get("participants", []),
             recording_url=data.get("url") or data.get("recording_url") or data.get("recordingUrl"),
-            transcript=data.get("transcript"),
+            transcript=inline_transcript,
+            meeting_summary=meeting_summary,
+            action_items=action_items,
+            subject=data.get("subject"),
         )
