@@ -40,16 +40,16 @@ UI (RepExecutionWidget)
 POST /api/rep/account-brief  →  RepAccountBriefRequest
        │
        ▼
-GTMModuleService.rep_account_brief()
-  ├── AccountBriefResearcher.research()    ← concurrent Firecrawl scraping
-  │     ├── {website}                      → company_homepage
-  │     ├── {website}/about                → company_about
+async GTMModuleService.rep_account_brief()   ← must be async def
+  ├── AccountBriefResearcher.research()      ← concurrent Firecrawl scraping
+  │     ├── {website}                        → company_homepage
+  │     ├── {website}/about                  → company_about
   │     ├── crunchbase.com/organization/{slug}  → crunchbase
-  │     ├── stackshare.io/{slug}           → stackshare (tech stack signals)
+  │     ├── stackshare.io/{slug}             → stackshare (tech stack signals)
   │     ├── linkedin.com/jobs/search?keywords={account_name}  → job_signals
-  │     └── {linkedin_url}                 → prospect_profile
+  │     └── {linkedin_url}                   → prospect_profile (best-effort)
   │
-  ├── _collect_hits()                      ← existing KB/transcript search
+  ├── _collect_hits()                        ← existing KB/transcript search
   │
   └── LLMService.answer_rep_account_brief()
         inputs: AccountBriefContext + KB hits + account metadata
@@ -70,10 +70,10 @@ class AccountBriefContext:
     crunchbase: str = ""
     stackshare: str = ""
     job_signals: str = ""
-    prospect_profile: str = ""
+    prospect_profile: str = ""   # best-effort; LinkedIn often blocks
 
 class AccountBriefResearcher:
-    def __init__(self, firecrawl_key: str) -> None: ...
+    def __init__(self, connector: FirecrawlConnector) -> None: ...
     async def research(
         self,
         account_name: str,
@@ -82,19 +82,21 @@ class AccountBriefResearcher:
     ) -> AccountBriefContext: ...
 ```
 
+**Implementation notes:**
+- Takes a `FirecrawlConnector` instance (reuses existing connector, does not re-wrap `FirecrawlApp` directly)
 - All URLs scraped concurrently via `asyncio.gather()`
-- Each scrape wrapped in `asyncio.to_thread()` (Firecrawl SDK is sync)
+- Each `connector.scrape_url()` call wrapped in `asyncio.to_thread()` (Firecrawl SDK is sync)
 - Per-scrape timeout: 10 seconds via `asyncio.wait_for()`
 - Each field capped at 2000 chars before passing to LLM
-- Failures are silent — field stays empty, LLM fills from parametric knowledge
+- Failures are silent — field stays `""`, LLM fills from parametric knowledge
 
 **URL construction:**
-- `company_homepage`: provided website or skip
-- `company_about`: `{website}/about` or skip
-- `crunchbase`: `https://www.crunchbase.com/organization/{slug}` where slug = `re.sub(r"[^a-z0-9]+", "-", account_name.lower())`
-- `stackshare`: `https://stackshare.io/{slug}`
-- `job_signals`: `https://www.linkedin.com/jobs/search/?keywords={quote(account_name)}&f_TPR=r604800` (jobs posted in last week)
-- `prospect_profile`: provided `linkedin_url` or skip
+- `company_homepage`: provided website, or skip
+- `company_about`: `{website}/about`, or skip if no website
+- `crunchbase`: `https://www.crunchbase.com/organization/{slug}` where `slug = re.sub(r"[^a-z0-9]+", "-", account_name.lower()).strip("-")`. **Note:** slug frequently won't match the real Crunchbase URL — treat as best-effort, 404s are expected and silently ignored.
+- `stackshare`: `https://stackshare.io/{slug}` — same slug caveat applies
+- `job_signals`: `https://www.linkedin.com/jobs/search/?keywords={quote(account_name)}&f_TPR=r604800`
+- `prospect_profile`: provided `linkedin_url`, or skip. **Note:** LinkedIn actively blocks scrapers. Firecrawl may retrieve public profiles inconsistently. The LinkedIn URL is always passed to the LLM as a string even when scraping fails, so the LLM can draw on its training knowledge for well-known individuals.
 
 ---
 
@@ -102,27 +104,28 @@ class AccountBriefResearcher:
 
 ### `api/app/schemas/gtm_modules.py`
 - Add `linkedin_url: str | None = None` to `RepAccountBriefRequest`
-- `website: str | None = None` already added in previous session
+- `website: str | None = None` already exists
 
 ### `api/app/services/gtm_modules.py` — `rep_account_brief()`
-- Accept `linkedin_url` param
-- If `settings.firecrawl_api_key` is set, instantiate `AccountBriefResearcher` and `await researcher.research(...)`
-- Pass resulting `AccountBriefContext` to `answer_rep_account_brief()`
-- Remove the inline `httpx` homepage scrape added in previous session (replaced by `AccountBriefResearcher`)
+- Change signature to `async def rep_account_brief(self, *, user, account, chorus_call_id, website, linkedin_url)`
+- If `settings.firecrawl_api_key` is set, construct `FirecrawlConnector(settings.firecrawl_api_key)`, then `await AccountBriefResearcher(connector).research(account, website, linkedin_url)`
+- Remove the inline `httpx` homepage scrape added in the previous session (superseded by `AccountBriefResearcher`)
+- Pass `research_context=context` to `answer_rep_account_brief()`; remove `website_content=...` call-site argument
 
 ### `api/app/services/llm.py` — `answer_rep_account_brief()`
-- Accept `research_context: AccountBriefContext | None = None`
-- Build context block from research: each non-empty field becomes a labeled section in the user prompt
-- System prompt instruction: *"Where source data is sparse, draw on your knowledge of this company and industry. Use web access if available to fill gaps."*
-- Remove `website_content` param (now comes via `AccountBriefContext`)
+- Replace `website_content: str | None`, `account_industry`, `account_employee_count` params with `research_context: AccountBriefContext | None = None`
+- Build user prompt context block: iterate over non-empty `AccountBriefContext` fields, each becomes a labeled section
+- If `linkedin_url` is known but `prospect_profile` is empty, include `"Prospect LinkedIn URL: {url}"` in the prompt so the LLM can draw on training knowledge
+- System prompt: *"Where source data is sparse, draw on your knowledge of this company and industry. If you have web access, use it to fill gaps."*
 
 ### `api/app/api/routes/rep.py`
-- Pass `linkedin_url=req.linkedin_url` to `service.rep_account_brief()`
+- Route handler must be `async def` to `await` the now-async service call
+- Pass `linkedin_url=req.linkedin_url` and `website=req.website` to `service.rep_account_brief()`
 
 ### `ui/components/RepExecutionWidget.js`
-- Add `linkedin_url` state
-- Add LinkedIn URL input field (below website field)
-- Include `linkedin_url` in `basePayload`
+- Add `linkedin_url` state (empty string default)
+- Add LinkedIn URL input field below website field, labeled "Prospect LinkedIn URL (optional)"
+- Include `linkedin_url: linkedin_url.trim() || null` in `basePayload`
 
 ---
 
@@ -131,11 +134,20 @@ class AccountBriefResearcher:
 | Scenario | Behavior |
 |---|---|
 | No `firecrawl_api_key` configured | Skip `AccountBriefResearcher`; LLM uses KB hits + parametric knowledge |
-| Individual scrape fails (404, blocked, timeout) | Field stays `""`; other scrapes continue |
-| LinkedIn profile blocked by Firecrawl | `prospect_profile = ""`; LLM infers from name if provided |
-| No website provided | Skip homepage + about; Crunchbase + StackShare still run |
-| LLM returns invalid JSON | Existing `_responses_json()` returns `None`; fallback template used |
-| Account not in DB | `account_record = None`; metadata sourced from request fields only |
+| Individual scrape fails (404, blocked, timeout) | Field stays `""`; other scrapes continue unaffected |
+| LinkedIn profile blocked by Firecrawl | `prospect_profile = ""`; LinkedIn URL still passed to LLM as a string hint |
+| Crunchbase/StackShare slug mismatch (404) | Expected common case; silent field failure |
+| No website provided | Skip homepage + about; Crunchbase + StackShare still attempted |
+| LLM returns invalid JSON | `_responses_json()` returns `None`; existing fallback template used |
+| Account not in DB | `account_record = None`; metadata from request fields only |
+
+---
+
+## Known Limitations
+
+- **LinkedIn scraping:** Will fail for most users due to LinkedIn's bot detection. Section 1 (Prospect Information) relies on LLM parametric knowledge unless the rep provides a name directly or Firecrawl successfully retrieves the profile.
+- **Crunchbase/StackShare slug:** Auto-generated slug frequently mismatches real URLs. These sources provide value when they hit but 404s are the common path.
+- **No dedicated prospect name input:** The prospect name currently comes only from the LinkedIn URL (if Firecrawl can read it) or from LLM inference. A future improvement would add explicit `prospect_name`/`prospect_title` fields to the request.
 
 ---
 
@@ -150,13 +162,14 @@ class AccountBriefResearcher:
 
 ## MiniMax Web Search Fallback
 
-The system prompt instructs: *"Where source data is sparse or a field is unknown, draw on your knowledge of this company and industry. If you have web access, search for missing details."* This surfaces MiniMax's built-in retrieval for gaps without requiring tool-call plumbing changes.
+The system prompt instructs: *"Where source data is sparse or a field is unknown, draw on your knowledge of this company and industry. If you have web access, search for missing details."* This surfaces MiniMax's built-in retrieval without requiring tool-call plumbing changes.
 
 ---
 
 ## Success Criteria
 
-- All 7 sections populated with specific, non-generic content when website + LinkedIn URL provided
+- All 7 sections populated with specific, non-generic content when website is provided
 - Concurrent scraping completes in under 12 seconds total
 - Individual scrape failure does not surface as an error to the user
 - LLM output is valid JSON matching `RepAccountBriefResponse` schema
+- Route handler and service method are both `async def` (no sync/async mismatch)
