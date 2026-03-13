@@ -1,5 +1,6 @@
 import { getSession } from '../../../lib/session';
 import { apiGet } from '../../../lib/api';
+import KBConfigPanel from '../../../components/KBConfigPanel';
 import GoogleDrivePanel from '../../../components/GoogleDrivePanel';
 import FeishuPanel from '../../../components/FeishuPanel';
 import PersonaPromptPanel from '../../../components/PersonaPromptPanel';
@@ -73,26 +74,7 @@ export default async function SettingsPage() {
           </div>
         </div>
 
-        <div className="panel">
-          <div className="panel-header">
-            <span className="panel-title">LLM Configuration</span>
-          </div>
-          <div className="panel-body" style={{ display: 'grid', gap: '0.5rem', fontSize: '0.82rem' }}>
-            {[
-              { label: 'Model', value: `${liveModel}` },
-              { label: 'Embedding Model', value: 'text-embedding-3-small' },
-              { label: 'Retrieval Top-K', value: '8' },
-              { label: 'Redact before LLM', value: 'Enabled' },
-              { label: 'Direct API key', value: 'Set OPENAI_API_KEY in your .env for reliable responses' },
-              { label: 'Codex OAuth', value: 'Also reads ~/.codex/auth.json (OPENAI_API_KEY or tokens.access_token)' },
-            ].map(({ label, value }) => (
-              <div key={label} style={{ display: 'grid', gridTemplateColumns: '160px 1fr', gap: '0.5rem' }}>
-                <span style={{ color: 'var(--text-3)' }}>{label}</span>
-                <span style={{ color: 'var(--text)' }}>{value}</span>
-              </div>
-            ))}
-          </div>
-        </div>
+        <KBConfigPanel />
 
         <OpenAIKeyPanel />
         <ExternalAccountsPanel />
