@@ -148,6 +148,37 @@ class ChorusSyncService:
                 )
             )
 
+    async def sync_selected_calls(self, call_ids: list[str]) -> SyncResult:
+        """Fetch and store a specific list of call IDs from the Chorus API."""
+        stored = 0
+        indexed = 0
+        errors: list[str] = []
+
+        for call_id in call_ids:
+            try:
+                existing = self.db.execute(
+                    select(ChorusCall).where(ChorusCall.chorus_call_id == call_id)
+                ).scalar_one_or_none()
+                if existing:
+                    continue
+
+                call_data = await self.connector.get_call_details(call_id)
+                row = self._store_call(call_data)
+                stored += 1
+
+                transcript = await self._fetch_and_store_transcript(call_data, row)
+                if transcript:
+                    indexed += 1
+
+                self._create_artifact(call_data, transcript)
+                self.db.flush()
+            except Exception as exc:
+                logger.exception("Failed to sync call %s", call_id)
+                errors.append(f"{call_id}: {exc}")
+
+        self.db.commit()
+        return SyncResult(calls_fetched=len(call_ids), calls_stored=stored, transcripts_indexed=indexed, errors=errors)
+
     def _create_artifact(self, data: ChorusCallData, transcript: str | None) -> None:
         self.db.add(
             CallArtifact(

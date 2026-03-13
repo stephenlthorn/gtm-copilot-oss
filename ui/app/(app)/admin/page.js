@@ -10,6 +10,7 @@ import AiCoachingPanel from '../../../components/admin/AiCoachingPanel';
 import McpServersPanel from '../../../components/admin/McpServersPanel';
 import NotificationDefaultsPanel from '../../../components/admin/NotificationDefaultsPanel';
 import TiDBConfigPanel from '../../../components/admin/TiDBConfigPanel';
+import ChorusCallsPanel from '../../../components/admin/ChorusCallsPanel';
 
 export default async function AdminPage() {
   const [docsRaw, auditsRaw, callsRaw] = await Promise.all([
@@ -98,6 +99,7 @@ export default async function AdminPage() {
         <McpServersPanel />
 
         <NotificationDefaultsPanel />
+        <ChorusCallsPanel />
         <TiDBConfigPanel />
       </div>
     </>

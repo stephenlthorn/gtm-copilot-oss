@@ -6,6 +6,7 @@ import re
 import httpx
 from dateutil.parser import isoparse
 from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request
+from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -623,3 +624,103 @@ def get_db_config() -> dict:
         "tidb_ssl_ca": s.tidb_ssl_ca or "",
         "database_url_preview": s.effective_database_url.split("@")[-1] if "@" in s.effective_database_url else s.effective_database_url,
     }
+
+
+@router.get("/chorus/preview")
+async def chorus_preview(
+    since: str | None = Query(default=None, description="ISO date, e.g. 2025-01-01"),
+    until: str | None = Query(default=None, description="ISO date, e.g. 2025-03-31"),
+    request: Request = None,
+    db: Session = Depends(db_session),
+) -> list[dict]:
+    """Fetch calls from Chorus API (live preview, not indexed)."""
+    from datetime import datetime
+    from app.core.settings import get_settings as _gs
+    from app.services.connectors.chorus import ChorusConnector
+    from app.models.entities import User
+
+    settings = _gs()
+    api_key = settings.call_api_key or settings.chorus_api_key
+    base_url = settings.call_base_url or settings.chorus_base_url or "https://api.chorus.ai"
+
+    if not api_key:
+        users = db.query(User).filter(User.org_id == 1).all()
+        for u in users:
+            accts = u.connected_accounts or {}
+            chorus = accts.get("chorus", {})
+            if isinstance(chorus, dict) and chorus.get("access_token"):
+                api_key = chorus["access_token"]
+                break
+
+    if not api_key:
+        raise HTTPException(status_code=400, detail="Chorus API key not configured. Add it in Settings → Connected Accounts.")
+
+    since_dt = datetime.fromisoformat(since) if since else None
+
+    connector = ChorusConnector(api_key=api_key, base_url=base_url)
+    try:
+        calls = await connector.list_calls(since=since_dt)
+    finally:
+        await connector.close()
+
+    until_dt = datetime.fromisoformat(until) if until else None
+    result = []
+    for c in calls:
+        if until_dt and c.date > until_dt:
+            continue
+        result.append({
+            "call_id": c.call_id,
+            "date": c.date.isoformat(),
+            "account": c.account,
+            "opportunity": c.opportunity,
+            "stage": c.stage,
+            "rep_email": c.rep_email,
+            "se_email": c.se_email,
+            "has_transcript": bool(c.transcript),
+        })
+
+    return result
+
+
+class ChorusSyncSelectedRequest(BaseModel):
+    call_ids: list[str]
+
+
+@router.post("/chorus/sync-selected")
+async def chorus_sync_selected(
+    req: ChorusSyncSelectedRequest,
+    db: Session = Depends(db_session),
+) -> dict:
+    """Sync a specific list of Chorus call IDs into the DB."""
+    from app.core.settings import get_settings as _gs
+    from app.services.connectors.chorus import ChorusConnector
+    from app.services.connectors.chorus_sync import ChorusSyncService
+    from app.models.entities import User
+
+    settings = _gs()
+    api_key = settings.call_api_key or settings.chorus_api_key
+    base_url = settings.call_base_url or settings.chorus_base_url or "https://api.chorus.ai"
+
+    if not api_key:
+        users = db.query(User).filter(User.org_id == 1).all()
+        for u in users:
+            accts = u.connected_accounts or {}
+            chorus = accts.get("chorus", {})
+            if isinstance(chorus, dict) and chorus.get("access_token"):
+                api_key = chorus["access_token"]
+                break
+
+    if not api_key:
+        raise HTTPException(status_code=400, detail="Chorus API key not configured.")
+
+    connector = ChorusConnector(api_key=api_key, base_url=base_url)
+    try:
+        svc = ChorusSyncService(connector=connector, db=db)
+        result = await svc.sync_selected_calls(req.call_ids)
+        return {
+            "synced": result.calls_stored,
+            "transcripts_indexed": result.transcripts_indexed,
+            "errors": result.errors,
+        }
+    finally:
+        await connector.close()
