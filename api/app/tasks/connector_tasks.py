@@ -28,9 +28,21 @@ def sync_chorus(org_id: int) -> dict:
     from app.services.connectors.chorus_sync import ChorusSyncService
 
     api_key = settings.call_api_key or settings.chorus_api_key
-    base_url = settings.call_base_url or settings.chorus_base_url
+    base_url = settings.call_base_url or settings.chorus_base_url or "https://api.chorus.ai"
 
-    if not api_key or not base_url:
+    if not api_key:
+        from app.models.entities import User
+
+        with SessionLocal() as db:
+            users = db.query(User).filter(User.org_id == org_id).all()
+            for u in users:
+                accounts = u.connected_accounts or {}
+                chorus = accounts.get("chorus", {})
+                if isinstance(chorus, dict) and chorus.get("access_token"):
+                    api_key = chorus["access_token"]
+                    break
+
+    if not api_key:
         return {"error": "Chorus API key or base URL not configured"}
 
     async def _sync():

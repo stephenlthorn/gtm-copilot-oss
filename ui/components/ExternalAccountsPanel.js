@@ -31,7 +31,7 @@ function ProviderRow({ provider, initialConnected }) {
       const res = await fetch(`/api/auth/connect/${provider.id}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ api_key: apiKey.trim() }),
+        body: JSON.stringify({ access_token: apiKey.trim() }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data?.detail || data?.error || `Failed to connect ${provider.label}.`);

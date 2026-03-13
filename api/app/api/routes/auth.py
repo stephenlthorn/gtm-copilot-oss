@@ -112,6 +112,9 @@ def get_current_user(
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
 
+    accounts = user.connected_accounts or {}
+    connected_providers = {k: bool(v.get("access_token")) for k, v in accounts.items() if isinstance(v, dict)}
+
     return {
         "id": user.id,
         "email": user.email,
@@ -119,6 +122,7 @@ def get_current_user(
         "role": user.role.value if user.role else "sales_rep",
         "org_id": user.org_id,
         "preferences": user.preferences or {},
+        "connected_providers": connected_providers,
     }
 
 
@@ -176,3 +180,26 @@ def connect_provider(
     user.connected_accounts = accounts
     db.commit()
     return {"status": "connected", "provider": provider}
+
+
+@router.delete("/connect/{provider}")
+def disconnect_provider(
+    provider: str,
+    request: Request,
+    db: Session = Depends(db_session),
+) -> dict:
+    from app.models.entities import User
+
+    user_email = request.headers.get("X-User-Email", "")
+    if not user_email:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
+    user = db.query(User).filter(User.email == user_email).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    accounts = dict(user.connected_accounts or {})
+    accounts.pop(provider, None)
+    user.connected_accounts = accounts
+    db.commit()
+    return {"status": "disconnected", "provider": provider}
