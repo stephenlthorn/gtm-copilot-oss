@@ -9,6 +9,7 @@ import IndexHealthPanel from '../../../components/admin/IndexHealthPanel';
 import AiCoachingPanel from '../../../components/admin/AiCoachingPanel';
 import McpServersPanel from '../../../components/admin/McpServersPanel';
 import NotificationDefaultsPanel from '../../../components/admin/NotificationDefaultsPanel';
+import TiDBConfigPanel from '../../../components/admin/TiDBConfigPanel';
 
 export default async function AdminPage() {
   const [docsRaw, auditsRaw, callsRaw] = await Promise.all([
@@ -97,6 +98,7 @@ export default async function AdminPage() {
         <McpServersPanel />
 
         <NotificationDefaultsPanel />
+        <TiDBConfigPanel />
       </div>
     </>
   );

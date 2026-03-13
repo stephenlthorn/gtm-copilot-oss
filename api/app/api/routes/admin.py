@@ -606,3 +606,20 @@ def sync_feishu(request: Request, db: Session = Depends(db_session)) -> dict:
         status=AuditStatus.OK,
     )
     return {"status": status_value, "message": message, **result}
+
+
+
+@router.get("/db-config")
+def get_db_config() -> dict:
+    """Return current database provider and TiDB connection settings (password masked)."""
+    s = get_settings()
+    return {
+        "database_provider": s.database_provider,
+        "tidb_host": s.tidb_host or "",
+        "tidb_port": s.tidb_port,
+        "tidb_user": s.tidb_user or "",
+        "tidb_password": "***" if s.tidb_password else "",
+        "tidb_database": s.tidb_database,
+        "tidb_ssl_ca": s.tidb_ssl_ca or "",
+        "database_url_preview": s.effective_database_url.split("@")[-1] if "@" in s.effective_database_url else s.effective_database_url,
+    }
