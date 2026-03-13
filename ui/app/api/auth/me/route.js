@@ -25,5 +25,6 @@ export async function GET() {
     name: session.name,
     expires_at: session.expires_at,
     connected_providers,
+    has_openai_key: Boolean(session.openai_key),
   });
 }

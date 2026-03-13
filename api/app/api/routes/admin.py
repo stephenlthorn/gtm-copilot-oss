@@ -797,15 +797,25 @@ async def chorus_preview(
     try:
         calls = await connector.list_calls(since=since_dt)
     except Exception as exc:
+        import traceback as _tb
+        _log2 = __import__('logging').getLogger(__name__)
+        _log2.error("Chorus list_calls exception: %s: %s\n%s", type(exc).__name__, exc, _tb.format_exc())
         await connector.close()
-        raise HTTPException(status_code=502, detail=f"Chorus API error: {exc}")
+        raise HTTPException(status_code=502, detail=f"Chorus API error: {type(exc).__name__}: {exc}")
     finally:
         await connector.close()
 
-    until_dt = datetime.fromisoformat(until) if until else None
+    import logging as _logging
+    _log = _logging.getLogger(__name__)
+    _log.info("Chorus preview: %d raw calls returned before until filter", len(calls))
+    if calls:
+        _log.info("Chorus first call date: %r (type: %s)", calls[0].date, type(calls[0].date).__name__)
+
+    from datetime import timedelta
+    until_dt = (datetime.fromisoformat(until) + timedelta(days=1)) if until else None
     result = []
     for c in calls:
-        if until_dt and c.date > until_dt:
+        if until_dt and c.date.replace(tzinfo=None) >= until_dt:
             continue
         result.append({
             "call_id": c.call_id,
@@ -819,6 +829,66 @@ async def chorus_preview(
         })
 
     return result
+
+
+@router.post("/chorus/sync-all")
+async def chorus_sync_all(
+    since: str | None = Query(default=None, description="YYYY-MM-DD"),
+    db: Session = Depends(db_session),
+) -> dict:
+    """Fetch all Chorus calls (optionally from a date) and sync them into TiDB."""
+    from app.core.settings import get_settings as _gs
+    from app.services.connectors.chorus import ChorusConnector
+    from app.services.connectors.chorus_sync import ChorusSyncService
+    from app.models.entities import User
+    from datetime import datetime
+
+    settings = _gs()
+    api_key = settings.call_api_key or settings.chorus_api_key
+    base_url = settings.call_base_url or settings.chorus_base_url or "https://chorus.ai/v3"
+
+    if not api_key:
+        users = db.query(User).filter(User.org_id == 1).all()
+        for u in users:
+            accts = u.connected_accounts or {}
+            chorus = accts.get("chorus", {})
+            if isinstance(chorus, dict) and chorus.get("access_token"):
+                api_key = chorus["access_token"]
+                if chorus.get("base_url"):
+                    base_url = chorus["base_url"]
+                break
+
+    if not api_key:
+        raise HTTPException(status_code=400, detail="Chorus API key not configured.")
+
+    since_dt = datetime.fromisoformat(since) if since else None
+    connector = ChorusConnector(api_key=api_key, base_url=base_url)
+    try:
+        calls = await connector.list_calls(since=since_dt)
+        svc = ChorusSyncService(connector=connector, db=db)
+        stored = 0
+        indexed = 0
+        errors: list[str] = []
+        for call_data in calls:
+            from sqlalchemy import select as _sel
+            from app.models import ChorusCall as _CC
+            existing = db.execute(_sel(_CC).where(_CC.chorus_call_id == call_data.call_id)).scalar_one_or_none()
+            if existing:
+                continue
+            try:
+                row = svc._store_call(call_data)
+                stored += 1
+                transcript = await svc._fetch_and_store_transcript(call_data, row)
+                if transcript:
+                    indexed += 1
+                svc._create_artifact(call_data, transcript)
+                db.flush()
+            except Exception as exc:
+                errors.append(f"{call_data.call_id}: {exc}")
+        db.commit()
+        return {"calls_fetched": len(calls), "calls_stored": stored, "transcripts_indexed": indexed, "errors": errors}
+    finally:
+        await connector.close()
 
 
 class ChorusSyncSelectedRequest(BaseModel):

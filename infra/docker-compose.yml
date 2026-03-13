@@ -50,6 +50,7 @@ services:
         condition: service_started
     volumes:
       - ../data:/app/data
+      - ~/.codex:/root/.codex:ro
     ports:
       - "8000:8000"
 
@@ -73,6 +74,7 @@ services:
         condition: service_started
     volumes:
       - ../data:/app/data
+      - ~/.codex:/root/.codex:ro
     command: celery -A app.worker.celery_app worker --loglevel=info
 
   beat:
@@ -95,6 +97,7 @@ services:
         condition: service_started
     volumes:
       - ../data:/app/data
+      - ~/.codex:/root/.codex:ro
     command: celery -A app.worker.celery_app beat --loglevel=info
 
   ui:

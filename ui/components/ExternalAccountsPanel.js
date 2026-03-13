@@ -9,10 +9,14 @@ const PROVIDERS = [
   { id: 'chorus', label: 'Chorus', type: 'api_key', hasBaseUrl: true },
 ];
 
+const PROVIDER_DEFAULTS = {
+  chorus: { base_url: 'https://chorus.ai/v3' },
+};
+
 function ProviderRow({ provider, initialConnected }) {
   const [connected, setConnected] = useState(initialConnected);
   const [apiKey, setApiKey] = useState('');
-  const [baseUrl, setBaseUrl] = useState('');
+  const [baseUrl, setBaseUrl] = useState(PROVIDER_DEFAULTS[provider.id]?.base_url || '');
   const [showInput, setShowInput] = useState(false);
   const [working, setWorking] = useState(false);
   const [message, setMessage] = useState('');
@@ -135,7 +139,7 @@ function ProviderRow({ provider, initialConnected }) {
               className="input"
               value={baseUrl}
               onChange={(e) => setBaseUrl(e.target.value)}
-              placeholder="Base URL (default: https://chorus.ai/v3)"
+              placeholder="Base URL"
               autoComplete="off"
               style={{ maxWidth: '380px', fontFamily: 'monospace', fontSize: '0.78rem' }}
             />

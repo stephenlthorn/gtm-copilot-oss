@@ -80,6 +80,24 @@ export default function ChorusCallsPanel() {
     }
   };
 
+  const syncAll = async () => {
+    setSyncing(true);
+    setMessage('');
+    try {
+      const params = new URLSearchParams();
+      if (since) params.set('since', since);
+      const res = await fetch(`/api/admin/chorus/sync-all?${params}`, { method: 'POST' });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.detail || 'Sync failed');
+      const errs = data.errors?.length ? ` (${data.errors.length} errors)` : '';
+      setMessage(`✓ Fetched ${data.calls_fetched}, synced ${data.calls_stored}, ${data.transcripts_indexed} transcripts indexed${errs}`);
+    } catch (err) {
+      setMessage(`✗ ${err.message}`);
+    } finally {
+      setSyncing(false);
+    }
+  };
+
   return (
     <div className="panel">
       <div className="panel-header">
@@ -120,12 +138,20 @@ export default function ChorusCallsPanel() {
           >
             {loading ? 'Fetching…' : 'Search'}
           </button>
+          <button
+            className="btn"
+            onClick={syncAll}
+            disabled={syncing}
+            style={{ fontSize: '0.8rem', padding: '0.3rem 0.9rem', marginLeft: 'auto' }}
+          >
+            {syncing ? 'Syncing…' : 'Sync All'}
+          </button>
           {selected.size > 0 && (
             <button
               className="btn btn-primary"
               onClick={syncSelected}
               disabled={syncing}
-              style={{ fontSize: '0.8rem', padding: '0.3rem 0.9rem', marginLeft: 'auto' }}
+              style={{ fontSize: '0.8rem', padding: '0.3rem 0.9rem' }}
             >
               {syncing ? 'Syncing…' : `Sync ${selected.size} selected`}
             </button>

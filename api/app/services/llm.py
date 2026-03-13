@@ -1097,6 +1097,7 @@ class LLMService:
         model: str | None = None,
         persona_name: str | None = "sales_representative",
         persona_prompt: str | None = None,
+        tools: list[dict] | None = None,
     ) -> dict[str, Any] | None:
         system_prompt = self._compose_persona_system_prompt(SYSTEM_REP_EXECUTION, persona_name, persona_prompt)
         context = "\n\n".join([f"[{h.source_id}:{h.chunk_id}] {h.text[:1200]}" for h in hits[:8]])
@@ -1111,7 +1112,7 @@ class LLMService:
             "- recommended_assets (array of strings)\n"
             "- next_meeting_agenda (array of strings)\n"
         )
-        llm = self._responses_json(system_prompt, prompt, model=model)
+        llm = self._responses_json(system_prompt, prompt, model=model, tools=tools)
         if not isinstance(llm, dict) or not isinstance(llm.get("summary"), str):
             return None
         return {
@@ -1132,6 +1133,7 @@ class LLMService:
         model: str | None = None,
         persona_name: str | None = "sales_representative",
         persona_prompt: str | None = None,
+        tools: list[dict] | None = None,
     ) -> dict[str, Any] | None:
         system_prompt = self._compose_persona_system_prompt(SYSTEM_REP_EXECUTION, persona_name, persona_prompt)
         context = "\n\n".join([f"[{h.source_id}:{h.chunk_id}] {h.text[:1200]}" for h in hits[:8]])
@@ -1144,7 +1146,7 @@ class LLMService:
             "- questions (array of strings)\n"
             "- intent (array of strings with rationale for each question)\n"
         )
-        llm = self._responses_json(system_prompt, prompt, model=model)
+        llm = self._responses_json(system_prompt, prompt, model=model, tools=tools)
         if not isinstance(llm, dict):
             return None
         questions = self._normalize_string_list(llm.get("questions"), limit=count)
@@ -1167,6 +1169,7 @@ class LLMService:
         model: str | None = None,
         persona_name: str | None = "sales_representative",
         persona_prompt: str | None = None,
+        tools: list[dict] | None = None,
     ) -> dict[str, Any] | None:
         system_prompt = self._compose_persona_system_prompt(SYSTEM_REP_EXECUTION, persona_name, persona_prompt)
         context = "\n\n".join([f"[{h.source_id}:{h.chunk_id}] {h.text[:1200]}" for h in hits[:8]])
@@ -1182,7 +1185,7 @@ class LLMService:
             "- body (string)\n"
             "- key_points (array of strings)\n"
         )
-        llm = self._responses_json(system_prompt, prompt, model=model)
+        llm = self._responses_json(system_prompt, prompt, model=model, tools=tools)
         if not isinstance(llm, dict):
             return None
         subject = llm.get("subject")
@@ -1206,6 +1209,7 @@ class LLMService:
         model: str | None = None,
         persona_name: str | None = "sales_representative",
         persona_prompt: str | None = None,
+        tools: list[dict] | None = None,
     ) -> dict[str, Any] | None:
         system_prompt = self._compose_persona_system_prompt(SYSTEM_REP_EXECUTION, persona_name, persona_prompt)
         context = "\n\n".join([f"[{h.source_id}:{h.chunk_id}] {h.text[:1200]}" for h in hits[:8]])
@@ -1218,7 +1222,7 @@ class LLMService:
             "- risks (array of objects: severity, signal, impact, mitigation)\n"
             "- action_plan (array of strings)\n"
         )
-        llm = self._responses_json(system_prompt, prompt, model=model)
+        llm = self._responses_json(system_prompt, prompt, model=model, tools=tools)
         if not isinstance(llm, dict):
             return None
         risks = self._normalize_risk_items(llm.get("risks"), limit=8)

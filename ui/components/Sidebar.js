@@ -9,7 +9,6 @@ const PERSONAS = [
   { href: '/rep',       label: 'Sales Rep',     icon: '◎' },
   { href: '/se',        label: 'Sales Engineer', icon: '⬡' },
   { href: '/marketing', label: 'Marketing',      icon: '◈' },
-  { href: '/admin',     label: 'Admin',          icon: '⊞' },
 ];
 
 const UTILITY = [

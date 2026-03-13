@@ -57,6 +57,12 @@ class GTMModuleService:
         config: KBConfig | None = self.db.get(KBConfig, 1)
         return config.llm_model if config else None
 
+    def _resolve_tools(self) -> list[dict] | None:
+        config: KBConfig | None = self.db.get(KBConfig, 1)
+        if config and config.web_search_enabled:
+            return [{"type": "web_search_preview"}]
+        return None
+
     def module_enabled(self, key: str) -> bool:
         config: KBConfig | None = self.db.get(KBConfig, 1)
         if config is None:
@@ -245,6 +251,7 @@ class GTMModuleService:
         ask = "Build an execution-ready account brief for the rep."
         hits = self._collect_hits(account=account, ask=ask, user_email=user, chorus_call_id=chorus_call_id)
         model = self._resolve_model()
+        tools = self._resolve_tools()
         persona_name, persona_prompt = self._resolve_persona("sales_representative")
         llm_payload = self.llm.answer_rep_account_brief(
             account=account,
@@ -253,6 +260,7 @@ class GTMModuleService:
             model=model,
             persona_name=persona_name,
             persona_prompt=persona_prompt,
+            tools=tools,
         )
 
         if llm_payload is None:
@@ -330,6 +338,7 @@ class GTMModuleService:
         ask = "Generate sharp next-call discovery questions with intent."
         hits = self._collect_hits(account=account, ask=ask, user_email=user, chorus_call_id=chorus_call_id)
         model = self._resolve_model()
+        tools = self._resolve_tools()
         persona_name, persona_prompt = self._resolve_persona("sales_representative")
         llm_payload = self.llm.answer_rep_discovery_questions(
             account=account,
@@ -339,6 +348,7 @@ class GTMModuleService:
             model=model,
             persona_name=persona_name,
             persona_prompt=persona_prompt,
+            tools=tools,
         )
 
         if llm_payload is None:
@@ -438,6 +448,7 @@ class GTMModuleService:
 
         hits = self._collect_hits(account=account, ask=ask, user_email=user, chorus_call_id=chorus_call_id)
         model = self._resolve_model()
+        tools = self._resolve_tools()
         persona_name, persona_prompt = self._resolve_persona("sales_representative")
         llm_payload = self.llm.answer_rep_follow_up_draft(
             account=account,
@@ -449,6 +460,7 @@ class GTMModuleService:
             model=model,
             persona_name=persona_name,
             persona_prompt=persona_prompt,
+            tools=tools,
         )
 
         if llm_payload is None:
@@ -526,6 +538,7 @@ class GTMModuleService:
         hits = self._collect_hits(account=account, ask=ask, user_email=user, chorus_call_id=chorus_call_id)
 
         model = self._resolve_model()
+        tools = self._resolve_tools()
         persona_name, persona_prompt = self._resolve_persona("sales_representative")
         llm_payload = self.llm.answer_rep_deal_risk(
             account=account,
@@ -534,6 +547,7 @@ class GTMModuleService:
             model=model,
             persona_name=persona_name,
             persona_prompt=persona_prompt,
+            tools=tools,
         )
 
         if llm_payload is None:
