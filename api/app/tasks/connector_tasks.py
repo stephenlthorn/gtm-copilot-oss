@@ -28,7 +28,7 @@ def sync_chorus(org_id: int) -> dict:
     from app.services.connectors.chorus_sync import ChorusSyncService
 
     api_key = settings.call_api_key or settings.chorus_api_key
-    base_url = settings.call_base_url or settings.chorus_base_url or "https://api.chorus.ai"
+    base_url = settings.call_base_url or settings.chorus_base_url or "https://chorus.ai/v3"
 
     if not api_key:
         from app.models.entities import User

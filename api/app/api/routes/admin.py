@@ -773,7 +773,7 @@ async def chorus_preview(
 
     settings = _gs()
     api_key = settings.call_api_key or settings.chorus_api_key
-    base_url = settings.call_base_url or settings.chorus_base_url or "https://api.chorus.ai"
+    base_url = settings.call_base_url or settings.chorus_base_url or "https://chorus.ai/v3"
 
     if not api_key:
         users = db.query(User).filter(User.org_id == 1).all()
@@ -782,15 +782,14 @@ async def chorus_preview(
             chorus = accts.get("chorus", {})
             if isinstance(chorus, dict) and chorus.get("access_token"):
                 api_key = chorus["access_token"]
-                if not base_url or base_url == "https://api.chorus.ai":
-                    base_url = chorus.get("base_url") or base_url
+                base_url = chorus.get("base_url") or base_url
                 break
 
     if not api_key:
         raise HTTPException(status_code=400, detail="Chorus API key not configured. Add it in Settings → Connected Accounts.")
 
-    if not base_url or base_url == "https://api.chorus.ai":
-        raise HTTPException(status_code=400, detail="Chorus base URL not configured. Add your Chorus API base URL in Settings → Connected Accounts.")
+    if not base_url:
+        raise HTTPException(status_code=400, detail="Chorus base URL not configured.")
 
     since_dt = datetime.fromisoformat(since) if since else None
 
@@ -839,7 +838,7 @@ async def chorus_sync_selected(
 
     settings = _gs()
     api_key = settings.call_api_key or settings.chorus_api_key
-    base_url = settings.call_base_url or settings.chorus_base_url or "https://api.chorus.ai"
+    base_url = settings.call_base_url or settings.chorus_base_url or "https://chorus.ai/v3"
 
     if not api_key:
         users = db.query(User).filter(User.org_id == 1).all()

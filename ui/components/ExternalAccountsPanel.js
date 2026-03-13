@@ -26,10 +26,6 @@ function ProviderRow({ provider, initialConnected }) {
       setMessage('Please enter an API key.');
       return;
     }
-    if (provider.hasBaseUrl && !baseUrl.trim()) {
-      setMessage('Please enter the API base URL.');
-      return;
-    }
     setWorking(true);
     setMessage('');
     const payload = { access_token: apiKey.trim() };
@@ -139,7 +135,7 @@ function ProviderRow({ provider, initialConnected }) {
               className="input"
               value={baseUrl}
               onChange={(e) => setBaseUrl(e.target.value)}
-              placeholder={`${provider.label} API base URL (e.g. https://chorus.example.com)`}
+              placeholder="Base URL (default: https://chorus.ai/v3)"
               autoComplete="off"
               style={{ maxWidth: '380px', fontFamily: 'monospace', fontSize: '0.78rem' }}
             />
