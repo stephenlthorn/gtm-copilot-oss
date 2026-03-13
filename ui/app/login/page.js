@@ -17,7 +17,7 @@ export default function LoginPage() {
     bad_pkce: 'Invalid session data. Please try again.',
     state_mismatch: 'Security check failed. Please try again.',
     no_code: 'No authorization code received.',
-    exchange_failed: 'Could not exchange token with OpenAI. Please try again.',
+    exchange_failed: 'Could not sign in with Google. Please try again.',
     expired: 'Your session expired. Please log in again.',
   };
 
@@ -55,7 +55,7 @@ export default function LoginPage() {
 
         <p className="login-heading">Sign in to continue</p>
         <p className="login-sub">
-          Uses ChatGPT OAuth. For guaranteed API access, you can also configure `OPENAI_API_KEY`.
+          Sign in with your company Google account to access GTM Copilot.
         </p>
 
         {(errorParam || error) && (
@@ -71,7 +71,7 @@ export default function LoginPage() {
             onClick={handleLogin}
             disabled={loading}
           >
-            {loading ? 'Redirecting to OpenAI...' : 'Login with ChatGPT'}
+            {loading ? 'Redirecting to Google...' : 'Sign in with Google'}
           </button>
         </div>
 

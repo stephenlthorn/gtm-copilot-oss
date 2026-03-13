@@ -60,7 +60,7 @@ export async function GET(request) {
     refresh_token: tokens.refresh_token || null,
     expires_at: Date.now() + (tokens.expires_in || 3600) * 1000,
     email,
-    name: claims.name || claims.email || 'ChatGPT User',
+    name: claims.name || claims.email || '',
   };
 
   // Resolve role: check ROLE_MAP env (JSON mapping email→role), then USER_ROLE default.
