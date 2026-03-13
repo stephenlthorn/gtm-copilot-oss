@@ -6,12 +6,13 @@ const PROVIDERS = [
   { id: 'salesforce', label: 'Salesforce', type: 'oauth' },
   { id: 'zoominfo', label: 'ZoomInfo', type: 'api_key' },
   { id: 'linkedin', label: 'LinkedIn', type: 'api_key' },
-  { id: 'chorus', label: 'Chorus', type: 'api_key' },
+  { id: 'chorus', label: 'Chorus', type: 'api_key', hasBaseUrl: true },
 ];
 
 function ProviderRow({ provider, initialConnected }) {
   const [connected, setConnected] = useState(initialConnected);
   const [apiKey, setApiKey] = useState('');
+  const [baseUrl, setBaseUrl] = useState('');
   const [showInput, setShowInput] = useState(false);
   const [working, setWorking] = useState(false);
   const [message, setMessage] = useState('');
@@ -25,13 +26,19 @@ function ProviderRow({ provider, initialConnected }) {
       setMessage('Please enter an API key.');
       return;
     }
+    if (provider.hasBaseUrl && !baseUrl.trim()) {
+      setMessage('Please enter the API base URL.');
+      return;
+    }
     setWorking(true);
     setMessage('');
+    const payload = { access_token: apiKey.trim() };
+    if (provider.hasBaseUrl) payload.base_url = baseUrl.trim();
     try {
       const res = await fetch(`/api/auth/connect/${provider.id}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ access_token: apiKey.trim() }),
+        body: JSON.stringify(payload),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data?.detail || data?.error || `Failed to connect ${provider.label}.`);
@@ -125,25 +132,38 @@ function ProviderRow({ provider, initialConnected }) {
       </div>
 
       {showInput && !connected && provider.type === 'api_key' && (
-        <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', paddingLeft: '112px' }}>
-          <input
-            type="password"
-            className="input"
-            value={apiKey}
-            onChange={(e) => setApiKey(e.target.value)}
-            placeholder={`${provider.label} API key`}
-            autoComplete="off"
-            style={{ flex: 1, maxWidth: '320px' }}
-          />
-          <button
-            type="button"
-            className="btn btn-primary"
-            onClick={connectApiKey}
-            disabled={working}
-            style={{ fontSize: '0.78rem', padding: '0.3rem 0.75rem' }}
-          >
-            {working ? 'Saving…' : 'Save'}
-          </button>
+        <div style={{ display: 'grid', gap: '0.4rem', paddingLeft: '112px' }}>
+          {provider.hasBaseUrl && (
+            <input
+              type="text"
+              className="input"
+              value={baseUrl}
+              onChange={(e) => setBaseUrl(e.target.value)}
+              placeholder={`${provider.label} API base URL (e.g. https://chorus.example.com)`}
+              autoComplete="off"
+              style={{ maxWidth: '380px', fontFamily: 'monospace', fontSize: '0.78rem' }}
+            />
+          )}
+          <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+            <input
+              type="password"
+              className="input"
+              value={apiKey}
+              onChange={(e) => setApiKey(e.target.value)}
+              placeholder={`${provider.label} API key`}
+              autoComplete="off"
+              style={{ flex: 1, maxWidth: '320px' }}
+            />
+            <button
+              type="button"
+              className="btn btn-primary"
+              onClick={connectApiKey}
+              disabled={working}
+              style={{ fontSize: '0.78rem', padding: '0.3rem 0.75rem' }}
+            >
+              {working ? 'Saving…' : 'Save'}
+            </button>
+          </div>
         </div>
       )}
     </div>

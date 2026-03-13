@@ -782,16 +782,24 @@ async def chorus_preview(
             chorus = accts.get("chorus", {})
             if isinstance(chorus, dict) and chorus.get("access_token"):
                 api_key = chorus["access_token"]
+                if not base_url or base_url == "https://api.chorus.ai":
+                    base_url = chorus.get("base_url") or base_url
                 break
 
     if not api_key:
         raise HTTPException(status_code=400, detail="Chorus API key not configured. Add it in Settings → Connected Accounts.")
+
+    if not base_url or base_url == "https://api.chorus.ai":
+        raise HTTPException(status_code=400, detail="Chorus base URL not configured. Add your Chorus API base URL in Settings → Connected Accounts.")
 
     since_dt = datetime.fromisoformat(since) if since else None
 
     connector = ChorusConnector(api_key=api_key, base_url=base_url)
     try:
         calls = await connector.list_calls(since=since_dt)
+    except Exception as exc:
+        await connector.close()
+        raise HTTPException(status_code=502, detail=f"Chorus API error: {exc}")
     finally:
         await connector.close()
 

@@ -43,6 +43,7 @@ class PreferencesUpdate(BaseModel):
 class ConnectProviderRequest(BaseModel):
     access_token: str
     instance_url: str | None = None
+    base_url: str | None = None
 
 
 @router.get("/google")
@@ -187,6 +188,7 @@ def connect_provider(
     accounts[provider] = {
         "access_token": req.access_token,
         "instance_url": req.instance_url,
+        "base_url": req.base_url,
         "connected": True,
     }
     user.connected_accounts = accounts
