@@ -3,15 +3,13 @@
 import { useState, useEffect } from 'react';
 
 const MODELS = [
-  { id: 'gpt-4.1',      label: 'GPT-4.1',      reasoning: false },
-  { id: 'gpt-4.1-mini', label: 'GPT-4.1 mini', reasoning: false },
-  { id: 'gpt-4.1-nano', label: 'GPT-4.1 nano', reasoning: false },
-  { id: 'o4-mini',      label: 'o4-mini',       reasoning: true  },
-  { id: 'o3',           label: 'o3',            reasoning: true  },
-  { id: 'o3-mini',      label: 'o3-mini',       reasoning: true  },
+  { id: 'gpt-5.3-codex',     label: 'GPT-5.3 Codex',     efforts: ['none', 'minimal', 'low', 'medium', 'high', 'xhigh'] },
+  { id: 'gpt-5.4',           label: 'GPT-5.4',            efforts: ['none', 'minimal', 'low', 'medium', 'high', 'xhigh'] },
+  { id: 'gpt-5.2-codex',     label: 'GPT-5.2 Codex',     efforts: ['none', 'minimal', 'low', 'medium', 'high', 'xhigh'] },
+  { id: 'gpt-5.1-codex-max', label: 'GPT-5.1 Codex Max', efforts: ['none', 'low', 'medium', 'high'] },
+  { id: 'gpt-5.2',           label: 'GPT-5.2',            efforts: ['none', 'minimal', 'low', 'medium', 'high', 'xhigh'] },
+  { id: 'gpt-5.1-codex-mini',label: 'GPT-5.1 Codex Mini',efforts: ['none', 'low', 'medium', 'high'] },
 ];
-
-const REASONING_EFFORTS = ['low', 'medium', 'high'];
 
 export default function KBConfigPanel() {
   const [config, setConfig] = useState(null);
@@ -182,25 +180,29 @@ export default function KBConfigPanel() {
             </button>
           ))}
         </div>
-        {MODELS.find(m => m.id === config.llm_model)?.reasoning && (
-          <div style={{ marginTop: '0.75rem' }}>
-            <label style={{ fontSize: '0.8rem', color: 'var(--dim)', display: 'block', marginBottom: '0.5rem' }}>
-              THINKING LEVEL
-            </label>
-            <div style={{ display: 'flex', gap: '0.5rem' }}>
-              {REASONING_EFFORTS.map(level => (
-                <button
-                  key={level}
-                  className={(config.reasoning_effort || 'medium') === level ? 'btn btn-primary' : 'btn'}
-                  style={{ fontSize: '0.75rem', textTransform: 'capitalize' }}
-                  onClick={() => set('reasoning_effort', level)}
-                >
-                  {level}
-                </button>
-              ))}
+        {(() => {
+          const efforts = MODELS.find(m => m.id === config.llm_model)?.efforts;
+          if (!efforts) return null;
+          return (
+            <div style={{ marginTop: '0.75rem' }}>
+              <label style={{ fontSize: '0.8rem', color: 'var(--dim)', display: 'block', marginBottom: '0.5rem' }}>
+                THINKING LEVEL
+              </label>
+              <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+                {efforts.map(level => (
+                  <button
+                    key={level}
+                    className={(config.reasoning_effort || 'medium') === level ? 'btn btn-primary' : 'btn'}
+                    style={{ fontSize: '0.75rem', textTransform: 'capitalize' }}
+                    onClick={() => set('reasoning_effort', level)}
+                  >
+                    {level}
+                  </button>
+                ))}
+              </div>
             </div>
-          </div>
-        )}
+          );
+        })()}
       </div>
 
       {/* Tool toggles */}
