@@ -1,8 +1,13 @@
 from app.models.entities import (
+    Account,
     AuditLog,
     AuditStatus,
     CallArtifact,
     ChorusCall,
+    Contact,
+    CRMSource,
+    Deal,
+    DealStatus,
     FeishuUserCredential,
     GTMAccountProfile,
     GTMGeneratedAsset,
@@ -21,10 +26,15 @@ from app.models.entities import (
 )
 
 __all__ = [
+    "Account",
     "AuditLog",
     "AuditStatus",
     "CallArtifact",
     "ChorusCall",
+    "Contact",
+    "CRMSource",
+    "Deal",
+    "DealStatus",
     "FeishuUserCredential",
     "GTMAccountProfile",
     "GTMGeneratedAsset",
