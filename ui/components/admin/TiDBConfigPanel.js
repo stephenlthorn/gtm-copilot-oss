@@ -16,6 +16,7 @@ export default function TiDBConfigPanel() {
   const [form, setForm] = useState({ host: '', port: '', user: '', password: '', database: '', ssl_ca: '' });
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [restarting, setRestarting] = useState(false);
   const [message, setMessage] = useState('');
   const [editing, setEditing] = useState(false);
 
@@ -36,6 +37,21 @@ export default function TiDBConfigPanel() {
       .catch(() => setCfg(null))
       .finally(() => setLoading(false));
   }, []);
+
+  const restartApi = async () => {
+    setRestarting(true);
+    setMessage('');
+    try {
+      await fetch('/api/admin/restart-api', { method: 'POST' });
+      setMessage('✓ API restarting — page will reload in 10 seconds…');
+      setTimeout(() => window.location.reload(), 10000);
+    } catch {
+      setMessage('✓ API restarting…');
+      setTimeout(() => window.location.reload(), 10000);
+    } finally {
+      setRestarting(false);
+    }
+  };
 
   const save = async () => {
     setSaving(true);
@@ -75,13 +91,23 @@ export default function TiDBConfigPanel() {
             </span>
           )}
           {!loading && (
-            <button
-              className="btn"
-              style={{ fontSize: '0.75rem', padding: '0.2rem 0.6rem' }}
-              onClick={() => { setEditing((e) => !e); setMessage(''); }}
-            >
-              {editing ? 'Cancel' : 'Edit'}
-            </button>
+            <div style={{ display: 'flex', gap: '0.4rem' }}>
+              <button
+                className="btn"
+                style={{ fontSize: '0.75rem', padding: '0.2rem 0.6rem' }}
+                onClick={restartApi}
+                disabled={restarting}
+              >
+                {restarting ? 'Restarting…' : 'Restart API'}
+              </button>
+              <button
+                className="btn"
+                style={{ fontSize: '0.75rem', padding: '0.2rem 0.6rem' }}
+                onClick={() => { setEditing((e) => !e); setMessage(''); }}
+              >
+                {editing ? 'Cancel' : 'Edit'}
+              </button>
+            </div>
           )}
         </div>
       </div>
@@ -125,9 +151,19 @@ export default function TiDBConfigPanel() {
                 {saving ? 'Saving…' : 'Save credentials'}
               </button>
             </div>
-            <p style={{ fontSize: '0.75rem', color: 'var(--text-3)', margin: 0 }}>
-              After saving, restart the API container for the new connection to take effect.
-            </p>
+            <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
+              <p style={{ fontSize: '0.75rem', color: 'var(--text-3)', margin: 0 }}>
+                After saving, restart the API container for the new connection to take effect.
+              </p>
+              <button
+                className="btn"
+                onClick={restartApi}
+                disabled={restarting}
+                style={{ fontSize: '0.75rem', padding: '0.2rem 0.6rem', whiteSpace: 'nowrap' }}
+              >
+                {restarting ? 'Restarting…' : 'Restart API now'}
+              </button>
+            </div>
           </div>
         )}
 

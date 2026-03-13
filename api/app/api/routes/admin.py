@@ -733,6 +733,31 @@ def save_tidb_config(
     return {"ok": True, "message": "TiDB credentials saved. Restart containers to apply."}
 
 
+@router.post("/restart-api")
+def restart_api() -> dict:
+    """Restart the API container via Docker socket (self-restart)."""
+    import subprocess, threading, os
+
+    container_name = os.environ.get("HOSTNAME", "")  # Docker sets HOSTNAME to container ID
+
+    def _restart():
+        import time
+        time.sleep(1)
+        # Try docker restart via socket; falls back to os._exit to trigger a container restart
+        try:
+            result = subprocess.run(
+                ["docker", "restart", container_name],
+                timeout=10, capture_output=True,
+            )
+            if result.returncode != 0:
+                os._exit(0)
+        except Exception:
+            os._exit(0)
+
+    threading.Thread(target=_restart, daemon=True).start()
+    return {"ok": True, "message": "API container restarting…"}
+
+
 @router.get("/chorus/preview")
 async def chorus_preview(
     since: str | None = Query(default=None, description="ISO date, e.g. 2025-01-01"),
