@@ -26,30 +26,27 @@ def upgrade() -> None:
         uuid_type = UUID(as_uuid=True)
         json_type = JSONB(astext_type=sa.Text())
         def json_default(v): return sa.text(f"'{v}'::jsonb")
+        def json_col(v): return {"nullable": False, "server_default": json_default(v)}
     else:
         uuid_type = sa.String(36)
         json_type = sa.JSON()
-        def json_default(v): return sa.text(f"'{v}'")
+        # TiDB/MySQL: ALTER TABLE ADD COLUMN rejects expression defaults (error 1674).
+        # Use nullable=True with no server_default; application supplies values.
+        def json_default(v): return None
+        def json_col(v): return {"nullable": True}
 
     op.add_column("kb_config", sa.Column("se_poc_kit_url", sa.Text(), nullable=True))
-    op.add_column(
-        "kb_config",
-        sa.Column(
-            "feature_flags_json",
-            json_type,
-            nullable=False,
-            server_default=json_default("{}"),
-        ),
-    )
+    # TiDB: ALTER TABLE ADD COLUMN rejects expression defaults (error 1674); use nullable.
+    op.add_column("kb_config", sa.Column("feature_flags_json", json_type, **json_col("{}")))
 
     op.create_table(
         "gtm_module_runs",
         sa.Column("id", uuid_type, primary_key=True),
         sa.Column("module_name", sa.String(length=128), nullable=False),
         sa.Column("actor", sa.String(length=255), nullable=False),
-        sa.Column("input", json_type, nullable=False, server_default=json_default("{}")),
-        sa.Column("retrieval", json_type, nullable=False, server_default=json_default("{}")),
-        sa.Column("output", json_type, nullable=False, server_default=json_default("{}")),
+        sa.Column("input", json_type, **json_col("{}")),
+        sa.Column("retrieval", json_type, **json_col("{}")),
+        sa.Column("output", json_type, **json_col("{}")),
         sa.Column("status", sa.String(length=32), nullable=False),
         sa.Column("error_message", sa.Text(), nullable=True),
         sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.text("CURRENT_TIMESTAMP"), nullable=False),
@@ -68,7 +65,7 @@ def upgrade() -> None:
         sa.Column("industry", sa.String(length=128), nullable=True),
         sa.Column("owner_email", sa.String(length=255), nullable=True),
         sa.Column("se_email", sa.String(length=255), nullable=True),
-        sa.Column("metadata", json_type, nullable=False, server_default=json_default("{}")),
+        sa.Column("metadata", json_type, **json_col("{}")),
         sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.text("CURRENT_TIMESTAMP"), nullable=False),
         sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.text("CURRENT_TIMESTAMP"), nullable=False),
     )
@@ -84,7 +81,7 @@ def upgrade() -> None:
         sa.Column("owner_email", sa.String(length=255), nullable=True),
         sa.Column("source_call_id", sa.String(length=255), nullable=True),
         sa.Column("due_date", sa.Date(), nullable=True),
-        sa.Column("metadata", json_type, nullable=False, server_default=json_default("{}")),
+        sa.Column("metadata", json_type, **json_col("{}")),
         sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.text("CURRENT_TIMESTAMP"), nullable=False),
     )
     op.create_index("ix_gtm_risk_signals_account", "gtm_risk_signals", ["account"])
@@ -99,7 +96,7 @@ def upgrade() -> None:
         sa.Column("status", sa.String(length=64), nullable=False),
         sa.Column("readiness_score", sa.Integer(), nullable=False),
         sa.Column("readiness_summary", sa.Text(), nullable=False),
-        sa.Column("plan_json", json_type, nullable=False, server_default=json_default("{}")),
+        sa.Column("plan_json", json_type, **json_col("{}")),
         sa.Column("poc_kit_url", sa.Text(), nullable=True),
         sa.Column("created_by", sa.String(length=255), nullable=False),
         sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.text("CURRENT_TIMESTAMP"), nullable=False),
@@ -117,7 +114,7 @@ def upgrade() -> None:
         sa.Column("asset_type", sa.String(length=128), nullable=False),
         sa.Column("title", sa.String(length=512), nullable=False),
         sa.Column("content", sa.Text(), nullable=False),
-        sa.Column("metadata", json_type, nullable=False, server_default=json_default("{}")),
+        sa.Column("metadata", json_type, **json_col("{}")),
         sa.Column("content_hash", sa.String(length=64), nullable=False),
         sa.Column("created_by", sa.String(length=255), nullable=False),
         sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.text("CURRENT_TIMESTAMP"), nullable=False),
@@ -133,8 +130,8 @@ def upgrade() -> None:
         sa.Column("region", sa.String(length=128), nullable=False),
         sa.Column("vertical", sa.String(length=128), nullable=False),
         sa.Column("summary", sa.Text(), nullable=False),
-        sa.Column("top_signals", json_type, nullable=False, server_default=json_default("[]")),
-        sa.Column("recommended_plays", json_type, nullable=False, server_default=json_default("[]")),
+        sa.Column("top_signals", json_type, **json_col("[]")),
+        sa.Column("recommended_plays", json_type, **json_col("[]")),
         sa.Column("created_by", sa.String(length=255), nullable=False),
         sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.text("CURRENT_TIMESTAMP"), nullable=False),
     )

@@ -34,10 +34,21 @@ def _json_type(is_pg: bool):
 
 
 def _json_default(value: str, is_pg: bool):
-    """Return a server_default for a JSON column."""
+    """Return a server_default for a JSON column.
+
+    TiDB/MySQL 8.x requires expression defaults for JSON columns:
+      DEFAULT (JSON_OBJECT()) or DEFAULT (JSON_ARRAY())
+    Plain string literals like DEFAULT '{}' are rejected with error 1101.
+    """
     if is_pg:
         return sa.text(f"'{value}'::jsonb")
-    return sa.text(f"'{value}'")
+    # TiDB / MySQL 8.0.13+ expression-default syntax
+    if value == "{}":
+        return sa.text("(JSON_OBJECT())")
+    if value == "[]":
+        return sa.text("(JSON_ARRAY())")
+    # Fallback: no server default (application must supply the value)
+    return None
 
 
 def upgrade() -> None:

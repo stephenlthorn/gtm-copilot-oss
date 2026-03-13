@@ -1,19 +1,29 @@
 services:
-  # PostgreSQL (default for local development).
-  # To use TiDB Cloud instead, comment out the 'db' service and set
-  # DATABASE_PROVIDER=tidb plus the TIDB_* env vars in your .env file.
-  # The application will build a mysql+pymysql:// connection string
-  # automatically when DATABASE_PROVIDER=tidb.
-  db:
-    image: pgvector/pgvector:pg16
-    environment:
-      POSTGRES_DB: gtm_copilot
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
+  # TiDB (local standalone — MySQL-compatible with vector search support)
+  tidb:
+    image: pingcap/tidb:v8.5.0
     ports:
-      - "5432:5432"
+      - "4000:4000"   # MySQL-compatible protocol
+      - "10080:10080" # TiDB status / metrics
     volumes:
-      - postgres_data:/var/lib/postgresql/data
+      - tidb_data:/tmp/tidb
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://127.0.0.1:10080/status"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 15s
+
+  # One-shot service: create the `gtm_copilot` database inside TiDB
+  init-db:
+    image: mysql:8.0
+    command: >
+      mysql -h tidb -P 4000 -u root --connect-timeout=10
+            -e "CREATE DATABASE IF NOT EXISTS gtm_copilot CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;"
+    depends_on:
+      tidb:
+        condition: service_healthy
+    restart: on-failure
 
   redis:
     image: redis:7
@@ -27,15 +37,17 @@ services:
     env_file:
       - ../.env
     environment:
-      # Default: PostgreSQL.  Override DATABASE_PROVIDER and TIDB_* in .env for TiDB Cloud.
-      DATABASE_URL: postgresql+psycopg://postgres:postgres@db:5432/gtm_copilot
+      DATABASE_URL: mysql+pymysql://root:@tidb:4000/gtm_copilot
+      DATABASE_PROVIDER: tidb
       REDIS_URL: redis://redis:6379/0
       SENTRY_DSN: ${SENTRY_DSN:-}
       ENVIRONMENT: ${ENVIRONMENT:-development}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
     depends_on:
-      - db
-      - redis
+      init-db:
+        condition: service_completed_successfully
+      redis:
+        condition: service_started
     volumes:
       - ../data:/app/data
     ports:
@@ -48,14 +60,17 @@ services:
     env_file:
       - ../.env
     environment:
-      DATABASE_URL: postgresql+psycopg://postgres:postgres@db:5432/gtm_copilot
+      DATABASE_URL: mysql+pymysql://root:@tidb:4000/gtm_copilot
+      DATABASE_PROVIDER: tidb
       REDIS_URL: redis://redis:6379/0
       SENTRY_DSN: ${SENTRY_DSN:-}
       ENVIRONMENT: ${ENVIRONMENT:-development}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
     depends_on:
-      - db
-      - redis
+      init-db:
+        condition: service_completed_successfully
+      redis:
+        condition: service_started
     volumes:
       - ../data:/app/data
     command: celery -A app.worker.celery_app worker --loglevel=info
@@ -67,14 +82,17 @@ services:
     env_file:
       - ../.env
     environment:
-      DATABASE_URL: postgresql+psycopg://postgres:postgres@db:5432/gtm_copilot
+      DATABASE_URL: mysql+pymysql://root:@tidb:4000/gtm_copilot
+      DATABASE_PROVIDER: tidb
       REDIS_URL: redis://redis:6379/0
       SENTRY_DSN: ${SENTRY_DSN:-}
       ENVIRONMENT: ${ENVIRONMENT:-development}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
     depends_on:
-      - db
-      - redis
+      init-db:
+        condition: service_completed_successfully
+      redis:
+        condition: service_started
     volumes:
       - ../data:/app/data
     command: celery -A app.worker.celery_app beat --loglevel=info
@@ -93,4 +111,4 @@ services:
       - api
 
 volumes:
-  postgres_data:
+  tidb_data:

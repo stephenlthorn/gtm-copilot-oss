@@ -19,8 +19,12 @@ def _normalize_database_url(url: str) -> str:
 
 def _build_engine_kwargs(url: str) -> dict:
     """Build engine keyword arguments appropriate for the database backend."""
+    import os
+
     kwargs: dict = {"pool_pre_ping": True}
-    if "pymysql" in url and settings.tidb_ssl_ca:
+    # Only enable SSL when a CA cert path is set AND the file exists on disk.
+    # Skipped for local TiDB (no SSL) or when the cert hasn't been mounted yet.
+    if "pymysql" in url and settings.tidb_ssl_ca and os.path.isfile(settings.tidb_ssl_ca):
         import ssl as _ssl
 
         ssl_ctx = _ssl.create_default_context(cafile=settings.tidb_ssl_ca)
