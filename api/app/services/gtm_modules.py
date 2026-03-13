@@ -7,6 +7,8 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+import httpx
+
 from app.models import (
     AuditStatus,
     CallArtifact,
@@ -21,6 +23,7 @@ from app.models import (
     OutboundMessage,
     SourceType,
 )
+from app.models.entities import Account
 from app.prompts.personas import get_default_persona_prompt, normalize_persona
 from app.retrieval.service import HybridRetriever
 from app.retrieval.types import RetrievedChunk
@@ -247,12 +250,36 @@ class GTMModuleService:
         user: str,
         account: str,
         chorus_call_id: str | None = None,
+        website: str | None = None,
     ) -> tuple[dict[str, Any], dict[str, Any]]:
         ask = "Build an execution-ready account brief for the rep."
         hits = self._collect_hits(account=account, ask=ask, user_email=user, chorus_call_id=chorus_call_id)
         model = self._resolve_model()
         tools = self._resolve_tools()
         persona_name, persona_prompt = self._resolve_persona("sales_representative")
+
+        # Look up Account record for website / industry / employee_count
+        account_record = self.db.execute(
+            select(Account).where(Account.name == account).limit(1)
+        ).scalar_one_or_none()
+        effective_website = website or (account_record.website if account_record else None)
+        account_industry = account_record.industry if account_record else None
+        account_employee_count = account_record.employee_count if account_record else None
+
+        # Fetch company homepage for context (best-effort, ~3k chars)
+        website_content: str | None = None
+        if effective_website:
+            try:
+                url = effective_website if effective_website.startswith("http") else f"https://{effective_website}"
+                resp = httpx.get(url, timeout=10.0, follow_redirects=True, headers={"User-Agent": "Mozilla/5.0"})
+                if resp.status_code == 200:
+                    import re
+                    text = re.sub(r"<[^>]+>", " ", resp.text)
+                    text = re.sub(r"\s+", " ", text).strip()
+                    website_content = text[:3000]
+            except Exception:
+                pass
+
         llm_payload = self.llm.answer_rep_account_brief(
             account=account,
             ask=ask,
@@ -261,6 +288,9 @@ class GTMModuleService:
             persona_name=persona_name,
             persona_prompt=persona_prompt,
             tools=tools,
+            website_content=website_content,
+            account_industry=account_industry,
+            account_employee_count=account_employee_count,
         )
 
         if llm_payload is None:
@@ -268,32 +298,44 @@ class GTMModuleService:
             summary = artifact.summary if artifact else (
                 f"{account} is active and requires an updated discovery and validation plan before the next meeting."
             )
-            business_context = [
-                f"Current motion: {(call.stage if call else 'discovery').title() if (call and call.stage) else 'Discovery'}.",
-                "Confirm decision process, timeline, and technical success criteria.",
-            ]
-            decision_criteria = [
-                "Performance vs incumbent on representative query set.",
-                "Operational simplicity and migration risk.",
-                "Commercial fit and procurement timeline alignment.",
-            ]
-            recommended_assets = [
-                "Platform architecture one-pager for the current workload",
-                "Competitor comparison sheet aligned to decision criteria",
-                "POC checklist with milestone owners",
-            ]
-            next_meeting_agenda = [
-                "Confirm top latency and throughput SLOs.",
-                "Finalize technical validation scope and data set.",
-                "Agree owner/date for each open blocker.",
-            ]
             payload = {
                 "account": account,
                 "summary": summary,
-                "business_context": business_context,
-                "decision_criteria": decision_criteria,
-                "recommended_assets": recommended_assets,
-                "next_meeting_agenda": next_meeting_agenda,
+                "prospect_information": {"name": "", "title": "", "time_at_company": "", "previous_role": ""},
+                "company_context": {
+                    "employee_count": account_employee_count,
+                    "revenue": "",
+                    "industry": account_industry or "",
+                    "product_service": "",
+                    "competitors": [],
+                },
+                "architecture_hypothesis": {"databases": [], "apps_microservices": "", "cloud_infrastructure": ""},
+                "pain_hypothesis": [{"pain": "Scaling bottlenecks with existing database", "evidence": "Hypothesis — no transcript data available"}],
+                "tidb_value_propositions": [{"pain": "Scaling bottlenecks", "value_prop": "TiDB's HTAP architecture handles mixed transactional and analytical workloads without ETL pipelines"}],
+                "meeting_goal": "Confirm technical validation scope and align on next steps.",
+                "meeting_flow": {
+                    "agenda": ["Introductions (5 min)", "Discovery: current architecture (15 min)", "TiDB value prop demo (20 min)", "Next steps (10 min)"],
+                    "time_allocation": {"Discovery": "15 min", "Demo": "20 min", "Next steps": "10 min"},
+                },
+                "business_context": [
+                    f"Current motion: {(call.stage if call else 'discovery').title() if (call and call.stage) else 'Discovery'}.",
+                    "Confirm decision process, timeline, and technical success criteria.",
+                ],
+                "decision_criteria": [
+                    "Performance vs incumbent on representative query set.",
+                    "Operational simplicity and migration risk.",
+                    "Commercial fit and procurement timeline alignment.",
+                ],
+                "recommended_assets": [
+                    "Platform architecture one-pager for the current workload",
+                    "Competitor comparison sheet aligned to decision criteria",
+                    "POC checklist with milestone owners",
+                ],
+                "next_meeting_agenda": [
+                    "Confirm top latency and throughput SLOs.",
+                    "Finalize technical validation scope and data set.",
+                    "Agree owner/date for each open blocker.",
+                ],
                 "citations": self._citations(hits),
             }
         else:

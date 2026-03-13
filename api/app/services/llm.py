@@ -1156,25 +1156,99 @@ class LLMService:
         persona_name: str | None = "sales_representative",
         persona_prompt: str | None = None,
         tools: list[dict] | None = None,
+        website_content: str | None = None,
+        account_industry: str | None = None,
+        account_employee_count: int | None = None,
     ) -> dict[str, Any] | None:
-        system_prompt = self._compose_persona_system_prompt(SYSTEM_REP_EXECUTION, persona_name, persona_prompt)
-        context = "\n\n".join([f"[{h.source_id}:{h.chunk_id}] {h.text[:1200]}" for h in hits[:8]])
-        prompt = (
-            f"Account: {account}\n"
-            f"Request: {ask}\n"
-            f"Evidence:\n{context}\n\n"
-            "Return strict JSON with keys:\n"
-            "- summary (string)\n"
-            "- business_context (array of strings)\n"
-            "- decision_criteria (array of strings)\n"
-            "- recommended_assets (array of strings)\n"
-            "- next_meeting_agenda (array of strings)\n"
+        system_prompt = (
+            "You are a world-class pre-call research analyst for enterprise B2B sales at TiDB.\n"
+            "Generate a comprehensive 7-section account brief to prepare a sales rep for their next meeting.\n\n"
+            "Sections:\n"
+            "1. prospect_information – Name, role/title, time at company, relevant previous role\n"
+            "2. company_context – Employee count, revenue, industry, product/service, key competitors\n"
+            "3. architecture_hypothesis – Databases, apps/microservices, cloud/infrastructure\n"
+            "4. pain_hypothesis – At least 2 pains with evidence from call transcripts or web research\n"
+            "5. tidb_value_propositions – Map each pain to a specific TiDB value prop\n"
+            "6. meeting_goal – Desired outcome of the next meeting\n"
+            "7. meeting_flow – Agenda and time allocation\n\n"
+            "Respond ONLY with valid JSON:\n"
+            '{\n'
+            '  "summary": "2-3 sentence executive summary",\n'
+            '  "prospect_information": {"name": "", "title": "", "time_at_company": "", "previous_role": ""},\n'
+            '  "company_context": {"employee_count": null, "revenue": "", "industry": "", "product_service": "", "competitors": []},\n'
+            '  "architecture_hypothesis": {"databases": [], "apps_microservices": "", "cloud_infrastructure": ""},\n'
+            '  "pain_hypothesis": [{"pain": "", "evidence": ""}],\n'
+            '  "tidb_value_propositions": [{"pain": "", "value_prop": ""}],\n'
+            '  "meeting_goal": "",\n'
+            '  "meeting_flow": {"agenda": [], "time_allocation": {}},\n'
+            '  "business_context": [],\n'
+            '  "decision_criteria": [],\n'
+            '  "recommended_assets": [],\n'
+            '  "next_meeting_agenda": []\n'
+            "}\n\n"
+            "Use all available evidence. Where data is missing, make reasoned hypotheses and label them as such."
         )
+        if persona_prompt:
+            system_prompt += f"\n\nAdditional instructions:\n{persona_prompt}"
+
+        context = "\n\n".join([f"[{h.source_id}:{h.chunk_id}] {h.text[:1200]}" for h in hits[:8]])
+        parts = [
+            f"Account: {account}",
+            f"Industry: {account_industry or 'Unknown'}",
+            f"Employee Count: {account_employee_count or 'Unknown'}",
+            f"Request: {ask}",
+        ]
+        if website_content:
+            parts.append(f"\n--- Company Website Content ---\n{website_content[:3000]}")
+        if context:
+            parts.append(f"\n--- Call Transcript Evidence ---\n{context}")
+        prompt = "\n".join(parts)
+
         llm = self._responses_json(system_prompt, prompt, model=model, tools=tools)
         if not isinstance(llm, dict) or not isinstance(llm.get("summary"), str):
             return None
+
+        def _parse_list_of_dicts(raw: Any, keys: list[str]) -> list[dict]:
+            if not isinstance(raw, list):
+                return []
+            result = []
+            for item in raw:
+                if isinstance(item, dict):
+                    result.append({k: str(item.get(k, "")) for k in keys})
+            return result
+
+        prospect = llm.get("prospect_information") or {}
+        company = llm.get("company_context") or {}
+        arch = llm.get("architecture_hypothesis") or {}
+        flow = llm.get("meeting_flow") or {}
+
         return {
             "summary": llm["summary"].strip(),
+            "prospect_information": {
+                "name": str(prospect.get("name", "")),
+                "title": str(prospect.get("title", "")),
+                "time_at_company": str(prospect.get("time_at_company", "")),
+                "previous_role": str(prospect.get("previous_role", "")),
+            },
+            "company_context": {
+                "employee_count": company.get("employee_count"),
+                "revenue": str(company.get("revenue", "")),
+                "industry": str(company.get("industry", "")),
+                "product_service": str(company.get("product_service", "")),
+                "competitors": [str(c) for c in (company.get("competitors") or [])],
+            },
+            "architecture_hypothesis": {
+                "databases": [str(d) for d in (arch.get("databases") or [])],
+                "apps_microservices": str(arch.get("apps_microservices", "")),
+                "cloud_infrastructure": str(arch.get("cloud_infrastructure", "")),
+            },
+            "pain_hypothesis": _parse_list_of_dicts(llm.get("pain_hypothesis"), ["pain", "evidence"]),
+            "tidb_value_propositions": _parse_list_of_dicts(llm.get("tidb_value_propositions"), ["pain", "value_prop"]),
+            "meeting_goal": str(llm.get("meeting_goal", "")),
+            "meeting_flow": {
+                "agenda": [str(a) for a in (flow.get("agenda") or [])],
+                "time_allocation": {str(k): str(v) for k, v in (flow.get("time_allocation") or {}).items()},
+            },
             "business_context": self._normalize_string_list(llm.get("business_context"), limit=6),
             "decision_criteria": self._normalize_string_list(llm.get("decision_criteria"), limit=6),
             "recommended_assets": self._normalize_string_list(llm.get("recommended_assets"), limit=6),

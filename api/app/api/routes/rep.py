@@ -80,6 +80,7 @@ def rep_account_brief(
             user=req.user,
             account=req.account,
             chorus_call_id=req.chorus_call_id,
+            website=req.website,
         )
         write_audit_log(
             db,
