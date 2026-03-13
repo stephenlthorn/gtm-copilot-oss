@@ -11,6 +11,24 @@ router = APIRouter()
 settings = get_settings()
 
 
+def _get_or_create_user(db: Session, email: str):
+    from app.models.entities import User, UserRole
+
+    user = db.query(User).filter(User.email == email).first()
+    if not user:
+        user = User(
+            google_id=email,
+            email=email,
+            name=email.split("@")[0],
+            role=UserRole.sales_rep,
+            org_id=1,
+        )
+        db.add(user)
+        db.commit()
+        db.refresh(user)
+    return user
+
+
 class OpenAIKeyRequest(BaseModel):
     api_key: str
 
@@ -108,9 +126,7 @@ def get_current_user(
     if not user_email:
         raise HTTPException(status_code=401, detail="Not authenticated")
 
-    user = db.query(User).filter(User.email == user_email).first()
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
+    user = _get_or_create_user(db, user_email)
 
     accounts = user.connected_accounts or {}
     connected_providers = {k: bool(v.get("access_token")) for k, v in accounts.items() if isinstance(v, dict)}
@@ -138,9 +154,7 @@ def update_preferences(
     if not user_email:
         raise HTTPException(status_code=401, detail="Not authenticated")
 
-    user = db.query(User).filter(User.email == user_email).first()
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
+    user = _get_or_create_user(db, user_email)
 
     prefs = dict(user.preferences or {})
     updates = req.model_dump(exclude_none=True)
@@ -163,9 +177,7 @@ def connect_provider(
     if not user_email:
         raise HTTPException(status_code=401, detail="Not authenticated")
 
-    user = db.query(User).filter(User.email == user_email).first()
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
+    user = _get_or_create_user(db, user_email)
 
     valid_providers = {"salesforce", "zoominfo", "linkedin", "chorus"}
     if provider not in valid_providers:
@@ -194,9 +206,7 @@ def disconnect_provider(
     if not user_email:
         raise HTTPException(status_code=401, detail="Not authenticated")
 
-    user = db.query(User).filter(User.email == user_email).first()
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
+    user = _get_or_create_user(db, user_email)
 
     accounts = dict(user.connected_accounts or {})
     accounts.pop(provider, None)
