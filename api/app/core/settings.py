@@ -35,6 +35,11 @@ class Settings(BaseSettings):
     openai_base_url: str | None = None
     openai_api_key: str | None = None
     openai_model: str = "gpt-4.1"
+
+    minimax_api_key: str | None = None
+    minimax_group_id: str | None = None
+    minimax_base_url: str = "https://api.minimax.io/anthropic"
+    minimax_model: str = "MiniMax-M2.5"
     openai_embedding_model: str = "text-embedding-3-small"
     enterprise_mode: bool = False
     security_require_private_llm_endpoint: bool = False

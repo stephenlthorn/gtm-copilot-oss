@@ -14,6 +14,7 @@ import subprocess
 from typing import Any
 from urllib.parse import urlparse
 
+import anthropic
 import httpx
 from openai import OpenAI
 
@@ -56,6 +57,8 @@ class LLMService:
         self.clients: list[OpenAI] = []
         self._openai_client_keys: set[str] = set()
         self.codex_credentials: list[CodexCredential] = []
+        self.anthropic_client: anthropic.Anthropic | None = None
+        self.anthropic_model: str = "MiniMax-M2.5"
         self.last_error: str | None = None
         self._register_clients(api_key)
         if not self.clients and self.settings.security_fail_closed_on_missing_llm_key:
@@ -76,6 +79,14 @@ class LLMService:
 
         if self.settings.openai_api_key:
             self._register_openai_client(self.settings.openai_api_key)
+
+        if self.settings.minimax_api_key:
+            self._register_anthropic_client(
+                api_key=self.settings.minimax_api_key,
+                base_url=self.settings.minimax_base_url,
+                model=self.settings.minimax_model,
+                extra_headers={"x-minimax-group-id": self.settings.minimax_group_id} if self.settings.minimax_group_id else {},
+            )
 
         if not self.disable_codex_auth:
             payload, api_key, auth_credential = self._load_codex_auth_state()
@@ -105,6 +116,45 @@ class LLMService:
             kwargs["base_url"] = self.settings.openai_base_url
         self.clients.append(OpenAI(**kwargs))
         self._openai_client_keys.add(normalized)
+
+    def _register_anthropic_client(
+        self,
+        api_key: str,
+        base_url: str,
+        model: str,
+        extra_headers: dict[str, str] | None = None,
+    ) -> None:
+        self.anthropic_client = anthropic.Anthropic(
+            api_key=api_key,
+            base_url=base_url,
+            default_headers=extra_headers or {},
+        )
+        self.anthropic_model = model
+
+    def _call_anthropic(
+        self,
+        system_prompt: str,
+        user_prompt: str,
+        model: str | None = None,
+    ) -> str | None:
+        if not self.anthropic_client:
+            return None
+        try:
+            msg = self.anthropic_client.messages.create(
+                model=model or self.anthropic_model,
+                max_tokens=4096,
+                system=system_prompt,
+                messages=[{"role": "user", "content": user_prompt}],
+            )
+            # M2.5 returns ThinkingBlocks + TextBlocks; find the first text block
+            return next(
+                (block.text for block in msg.content if hasattr(block, "text") and block.text),
+                None,
+            )
+        except Exception as exc:
+            self.logger.warning("Anthropic call failed: %s: %s", type(exc).__name__, exc)
+            self.last_error = f"{type(exc).__name__}: {exc}"
+            return None
 
     def _add_codex_credential(self, credential: CodexCredential) -> None:
         if not credential.access_token:
@@ -717,6 +767,10 @@ class LLMService:
                 self.last_error = f"{type(exc).__name__}: {exc}"
                 continue
 
+        anthropic_text = self._call_anthropic(system_prompt, safe_user_prompt, model=model)
+        if anthropic_text:
+            return self._extract_json_object(anthropic_text)
+
         codex_text = self._call_codex_responses_text(
             system_prompt=system_prompt,
             user_prompt=safe_user_prompt,
@@ -763,6 +817,10 @@ class LLMService:
                 self.logger.warning("LLM text call failed (%s: %s) — trying next path", type(exc).__name__, exc)
                 self.last_error = f"{type(exc).__name__}: {exc}"
                 continue
+
+        anthropic_text = self._call_anthropic(system_prompt, safe_user_prompt, model=model)
+        if anthropic_text:
+            return anthropic_text
 
         return self._call_codex_responses_text(
             system_prompt=system_prompt,
