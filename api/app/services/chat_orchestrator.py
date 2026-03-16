@@ -7,8 +7,10 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.settings import Settings, get_settings
-from app.models import ChorusCall, KBConfig, SourceType
+from app.models import ChorusCall, KBConfig, SourceType, UserPreference
+from app.models.feedback import AIFeedback
 from app.prompts.personas import DEFAULT_PERSONA, get_default_persona_prompt, normalize_persona
+from app.prompts.source_profiles import get_source_profile, format_source_instructions
 from app.retrieval.service import HybridRetriever
 from app.services.llm import LLMService
 from app.services.query_rewrite import QueryRewriter
@@ -241,6 +243,51 @@ class ChatOrchestrator:
         persona_prompt = custom_prompt or get_default_persona_prompt(persona_name)
         return persona_name, persona_prompt
 
+    def _retrieve_feedback_corrections(self, query_embedding: list[float] | None, mode: str, limit: int = 3) -> list[str]:
+        """Retrieve top relevant negative feedback corrections for RAG injection."""
+        if self.db is None or query_embedding is None:
+            return []
+        try:
+            stmt = (
+                select(AIFeedback)
+                .where(AIFeedback.rating == "negative")
+                .where(AIFeedback.correction.is_not(None))
+                .where(AIFeedback.embedding.is_not(None))
+                .limit(50)
+            )
+            rows = self.db.execute(stmt).scalars().all()
+            if not rows:
+                return []
+
+            import json as _json
+            import math
+
+            def cosine_sim(a: list[float], b: list[float]) -> float:
+                if not a or not b:
+                    return 0.0
+                dot = sum(x * y for x, y in zip(a, b))
+                na = math.sqrt(sum(x * x for x in a))
+                nb = math.sqrt(sum(x * x for x in b))
+                if na == 0 or nb == 0:
+                    return 0.0
+                return dot / (na * nb)
+
+            scored: list[tuple[float, str]] = []
+            for row in rows:
+                emb = row.embedding
+                if isinstance(emb, str):
+                    emb = _json.loads(emb)
+                if not isinstance(emb, list):
+                    continue
+                sim = cosine_sim(query_embedding, emb)
+                if sim > 0.3:
+                    scored.append((sim, row.correction))
+
+            scored.sort(key=lambda x: x[0], reverse=True)
+            return [correction for _, correction in scored[:limit] if correction]
+        except Exception:
+            return []
+
     def run(self, *, mode: str, user: str, message: str, top_k: int, filters: dict, context: dict) -> tuple[dict, dict]:
         blocked = self._guardrail_external_messaging(message)
         if blocked:
@@ -255,6 +302,8 @@ class ChatOrchestrator:
             if mode == "oracle":
                 llm_model, llm_tools = self._resolve_llm_config(None, self.settings, mode)
                 persona_name, persona_prompt = self._resolve_persona_config(None)
+                source_profile = get_source_profile(mode)
+                source_instructions = format_source_instructions(source_profile)
                 data = self.llm.answer_oracle(
                     message,
                     [],
@@ -263,6 +312,7 @@ class ChatOrchestrator:
                     allow_ungrounded=True,
                     persona_name=persona_name,
                     persona_prompt=persona_prompt,
+                    source_instructions=source_instructions or None,
                 )
                 data["citations"] = []
                 return data, {"top_k": 0, "results": []}
@@ -281,6 +331,23 @@ class ChatOrchestrator:
         allowed_sources = self._resolve_allowed_sources(kb_config, mode)
         llm_model, llm_tools = self._resolve_llm_config(kb_config, self.settings, mode)
         persona_name, persona_prompt = self._resolve_persona_config(kb_config)
+
+        custom_profiles = getattr(kb_config, 'source_profiles_json', None) if kb_config else None
+        source_profile = get_source_profile(mode, custom_profiles if custom_profiles else None)
+        source_instructions = format_source_instructions(source_profile)
+
+        user_pref: UserPreference | None = None
+        user_email = (user or "").strip().lower()
+        if user_email and self.db is not None:
+            user_pref = self.db.get(UserPreference, user_email)
+
+        resolved_model = llm_model
+        resolved_reasoning = getattr(kb_config, "reasoning_effort", None) if kb_config else None
+        if user_pref:
+            if user_pref.llm_model:
+                resolved_model = user_pref.llm_model
+            if user_pref.reasoning_effort:
+                resolved_reasoning = user_pref.reasoning_effort
 
         mode_filters = dict(filters or {})
         mode_filters["viewer_email"] = (user or "").strip().lower()
@@ -306,6 +373,20 @@ class ChatOrchestrator:
         rewritten = self.rewriter.rewrite(message, mode)
         hits = self.retriever.search(rewritten, top_k=resolved_top_k, filters=mode_filters)
 
+        # Feedback RAG injection
+        feedback_corrections: list[str] = []
+        try:
+            from app.services.embedding import EmbeddingService
+            emb_svc = EmbeddingService()
+            q_embedding = emb_svc.embed(message)
+            feedback_corrections = self._retrieve_feedback_corrections(q_embedding, mode)
+        except Exception:
+            pass
+
+        if feedback_corrections:
+            corrections_text = "\n".join(f"- {c}" for c in feedback_corrections)
+            persona_prompt = (persona_prompt or "") + f"\n\nPast corrections from user feedback:\n{corrections_text}"
+
         citations = [
             {
                 "title": hit.title,
@@ -324,10 +405,12 @@ class ChatOrchestrator:
             data = self.llm.answer_call_assistant(
                 message,
                 hits,
-                model=llm_model,
+                model=resolved_model,
                 tools=llm_tools,
                 persona_name=persona_name,
                 persona_prompt=persona_prompt,
+                reasoning_effort=resolved_reasoning,
+                source_instructions=source_instructions or None,
             )
             data["citations"] = citations
             return data, self.retriever.retrieval_payload(hits, resolved_top_k)
@@ -335,10 +418,12 @@ class ChatOrchestrator:
         data = self.llm.answer_oracle(
             message,
             hits,
-            model=llm_model,
+            model=resolved_model,
             tools=llm_tools,
             persona_name=persona_name,
             persona_prompt=persona_prompt,
+            reasoning_effort=resolved_reasoning,
+            source_instructions=source_instructions or None,
         )
         data["citations"] = citations
         return data, self.retriever.retrieval_payload(hits, resolved_top_k)

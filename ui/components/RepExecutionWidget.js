@@ -1,6 +1,7 @@
 'use client';
 
 import { useMemo, useState } from 'react';
+import FeedbackButtons from './FeedbackButtons';
 
 function Section({ title, children }) {
   return (
@@ -230,6 +231,11 @@ export default function RepExecutionWidget() {
                 )}
               </Section>
             )}
+            <FeedbackButtons
+              mode="rep"
+              queryText={account}
+              originalResponse={fullSolution || brief || questions || risk || draft}
+            />
           </div>
         )}
       </div>

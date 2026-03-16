@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import FeedbackButtons from './FeedbackButtons';
 
 export default function MarketingIntelligenceWidget() {
   const [regions, setRegions] = useState('East, Central');
@@ -150,6 +151,7 @@ export default function MarketingIntelligenceWidget() {
                 </div>
               </>
             )}
+            <FeedbackButtons mode="marketing" queryText={campaignGoal} originalResponse={fullSolution || data} />
           </div>
         )}
       </div>

@@ -7,11 +7,11 @@ from app.db.session import engine
 
 
 def init_db(create_extension: bool = True) -> None:
+    dialect = engine.dialect.name
     with engine.begin() as conn:
-        if create_extension:
+        if create_extension and dialect == "postgresql":
             try:
                 conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
             except Exception:
-                # Non-Postgres backends (e.g., sqlite tests) do not support extensions.
                 pass
         Base.metadata.create_all(bind=conn)

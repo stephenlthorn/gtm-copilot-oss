@@ -3,12 +3,15 @@
 import { useState, useEffect } from 'react';
 
 const MODELS = [
-  { id: 'gpt-5.3-codex',    label: '5.3 Codex' },
-  { id: 'gpt-5.2-codex',    label: '5.2 Codex' },
-  { id: 'gpt-5.1-codex',    label: '5.1 Codex' },
-  { id: 'gpt-5.1',          label: 'GPT-5.1'   },
-  { id: 'gpt-5-codex-mini', label: 'Mini'      },
+  { id: 'gpt-5.4',           label: '5.4',        reasoning: true  },
+  { id: 'gpt-5.3-codex',     label: '5.3 Codex',  reasoning: true  },
+  { id: 'o3',                label: 'o3',          reasoning: true  },
+  { id: 'o4-mini',           label: 'o4-mini',     reasoning: true  },
+  { id: 'gpt-5.1-codex',     label: '5.1 Codex',  reasoning: true  },
+  { id: 'gpt-5-codex-mini',  label: 'Mini',        reasoning: false },
 ];
+
+const THINKING_LEVELS = ['low', 'medium', 'high'];
 
 export default function KBConfigPanel() {
   const [config, setConfig] = useState(null);
@@ -141,6 +144,26 @@ export default function KBConfigPanel() {
             ))}
           </div>
         </div>
+        {MODELS.find(m => m.id === config.llm_model)?.reasoning && (
+          <div style={{ marginTop: '0.75rem' }}>
+            <label style={{ fontSize: '0.8rem', color: 'var(--dim)', display: 'block', marginBottom: '0.5rem' }}>
+              THINKING LEVEL
+            </label>
+            <div style={{ display: 'flex', gap: '0.5rem' }}>
+              {THINKING_LEVELS.map(level => (
+                <button
+                  key={level}
+                  className={(config.reasoning_effort || 'medium') === level ? 'btn btn-primary' : 'btn'}
+                  style={{ fontSize: '0.75rem', textTransform: 'capitalize' }}
+                  onClick={() => set('reasoning_effort', level)}
+                >
+                  {level}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
 
         {/* Retrieval depth */}
         <div style={{ display: 'grid', gap: '0.4rem' }}>

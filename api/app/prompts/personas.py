@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from app.prompts.templates import TIDB_EXPERT_CONTEXT
+
 DEFAULT_PERSONA = "sales_representative"
 
 PERSONA_DEFAULT_PROMPTS: dict[str, str] = {
@@ -13,7 +15,8 @@ PERSONA_DEFAULT_PROMPTS: dict[str, str] = {
     ),
     "se": (
         "Prioritize technical validation. Focus on architecture fit, migration risks, "
-        "POC design, and concrete technical proof points relevant to the workload."
+        "POC design, and concrete technical proof points relevant to the workload.\n\n"
+        + TIDB_EXPERT_CONTEXT
     ),
 }
 

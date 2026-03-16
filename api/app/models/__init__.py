@@ -18,9 +18,12 @@ from app.models.entities import (
     MessageMode,
     OutboundMessage,
     SourceType,
+    UserPreference,
 )
+from app.models.feedback import AIFeedback
 
 __all__ = [
+    "AIFeedback",
     "AuditLog",
     "AuditStatus",
     "CallArtifact",
@@ -40,4 +43,5 @@ __all__ = [
     "MessageMode",
     "OutboundMessage",
     "SourceType",
+    "UserPreference",
 ]

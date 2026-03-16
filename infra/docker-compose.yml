@@ -1,4 +1,7 @@
 services:
+  # PostgreSQL with pgvector - for local development only.
+  # For production, consider TiDB Cloud Serverless (set DATABASE_URL to a
+  # mysql+pymysql:// connection string and remove the db service).
   db:
     image: pgvector/pgvector:pg16
     environment:

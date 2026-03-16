@@ -7,6 +7,7 @@ import GTMFeaturePanel from '../../../components/GTMFeaturePanel';
 import KBConfigPanel from '../../../components/KBConfigPanel';
 import KnowledgeSourcesPanel from '../../../components/KnowledgeSourcesPanel';
 import CallsPanel from '../../../components/CallsPanel';
+import SourceProfilesPanel from '../../../components/SourceProfilesPanel';
 
 const SectionLabel = ({ id, children, first = false }) => (
   <div
@@ -38,6 +39,7 @@ export default async function SettingsPage() {
   let personaPrompt = '';
   let sePocKitUrl = '';
   let featureFlags = {};
+  let sourceProfiles = {};
   try {
     const cfg = await apiGet('/admin/kb-config');
     if (cfg?.llm_model) liveModel = cfg.llm_model;
@@ -45,6 +47,7 @@ export default async function SettingsPage() {
     if (cfg?.persona_prompt) personaPrompt = cfg.persona_prompt;
     if (cfg?.se_poc_kit_url) sePocKitUrl = cfg.se_poc_kit_url;
     if (cfg?.feature_flags_json && typeof cfg.feature_flags_json === 'object') featureFlags = cfg.feature_flags_json;
+    if (cfg?.source_profiles_json && typeof cfg.source_profiles_json === 'object') sourceProfiles = cfg.source_profiles_json;
   } catch { /* use defaults */ }
 
   const [docsRaw, auditsRaw, callsRaw] = await Promise.all([
@@ -141,6 +144,7 @@ export default async function SettingsPage() {
         <SectionLabel id="persona">AI Persona</SectionLabel>
         <PersonaPromptPanel initialPersona={personaName} initialPrompt={personaPrompt} />
         <GTMFeaturePanel initialPocKitUrl={sePocKitUrl} initialFeatureFlags={featureFlags} />
+        <SourceProfilesPanel initialProfiles={sourceProfiles} />
 
         {/* ── Data & Sync ──────────────────────────── */}
         <SectionLabel id="data">Data &amp; Sync</SectionLabel>
