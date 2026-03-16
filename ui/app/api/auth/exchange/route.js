@@ -1,6 +1,8 @@
 import { NextResponse } from 'next/server';
 import { exchangeCode, parseIdToken } from '../../../../lib/pkce';
 
+const ALLOWED_DOMAIN = process.env.ALLOWED_EMAIL_DOMAIN || 'pingcap.com';
+
 export async function GET(request) {
   const { searchParams } = new URL(request.url);
   const code = searchParams.get('code');
@@ -35,12 +37,18 @@ export async function GET(request) {
   }
 
   const claims = tokens.id_token ? parseIdToken(tokens.id_token) : {};
+  const email = claims.email || '';
+
+  if (!email.endsWith(`@${ALLOWED_DOMAIN}`)) {
+    return NextResponse.redirect(new URL('/login?error=unauthorized_domain', request.url));
+  }
+
   const session = {
     access_token: tokens.access_token,
     refresh_token: tokens.refresh_token || null,
     expires_at: Date.now() + (tokens.expires_in || 3600) * 1000,
-    email: claims.email || 'user@openai.com',
-    name: claims.name || claims.email || 'ChatGPT User',
+    email,
+    name: claims.name || email,
   };
 
   const res = NextResponse.redirect(new URL('/rep', request.url));

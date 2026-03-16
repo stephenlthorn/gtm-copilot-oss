@@ -49,7 +49,6 @@ export async function exchangeCode(code, verifier) {
 }
 
 export function parseIdToken(idToken) {
-  // JWT decode (no verification — demo tool; in prod verify with JWKS)
   const parts = idToken.split('.');
   if (parts.length < 2) return {};
   try {

@@ -6,10 +6,8 @@ import { usePathname } from 'next/navigation';
 import { useState } from 'react';
 
 const PERSONAS = [
-  { href: '/rep',       label: 'Sales Rep',     icon: '◎' },
-  { href: '/se',        label: 'Sales Engineer', icon: '⬡' },
-  { href: '/marketing', label: 'Marketing',      icon: '◈' },
-  { href: '/admin',     label: 'Admin',          icon: '⊞' },
+  { href: '/rep', label: 'Sales Rep',      icon: '◎' },
+  { href: '/se',  label: 'Sales Engineer', icon: '⬡' },
 ];
 
 const UTILITY = [
@@ -42,7 +40,7 @@ export default function Sidebar({ email, hasSession = false }) {
           <Link
             key={href}
             href={href}
-            className={`nav-link${pathname.startsWith(href) ? ' active' : ''}`}
+            className={`nav-link${pathname === href || pathname.startsWith(href + '/') ? ' active' : ''}`}
           >
             <span className="nav-link-icon">{icon}</span>
             {label}
@@ -54,7 +52,7 @@ export default function Sidebar({ email, hasSession = false }) {
           <Link
             key={href}
             href={href}
-            className={`nav-link${pathname.startsWith(href) ? ' active' : ''}`}
+            className={`nav-link${pathname === href || pathname.startsWith(href + '/') ? ' active' : ''}`}
           >
             <span className="nav-link-icon">{icon}</span>
             {label}

@@ -25,3 +25,4 @@ data/fake_drive/*
 !data/fake_drive/.gitkeep
 docs/plans/
 presentations/
+.worktrees/

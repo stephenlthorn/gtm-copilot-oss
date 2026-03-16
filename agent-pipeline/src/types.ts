@@ -1,4 +1,4 @@
-export type ProviderName = "claude" | "openai" | "minimax";
+export type ProviderName = "openai";
 
 export type ProviderSpec = {
   readonly provider: ProviderName;

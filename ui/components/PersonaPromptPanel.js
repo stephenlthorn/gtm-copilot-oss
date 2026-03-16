@@ -10,14 +10,8 @@ const PERSONAS = [
       'Prioritize deal progression. Provide concise next steps, discovery questions, and follow-up messaging suggestions tied to account priorities.',
   },
   {
-    id: 'marketing_specialist',
-    label: 'Marketing Specialist',
-    defaultPrompt:
-      'Prioritize positioning and pipeline generation. Recommend campaign angles, content hooks, and measurable GTM actions aligned to persona and industry.',
-  },
-  {
     id: 'se',
-    label: 'SE',
+    label: 'Sales Engineer',
     defaultPrompt:
       'Prioritize technical validation. Focus on architecture fit, migration risks, POC design, and concrete technical proof points for the workload.',
   },
