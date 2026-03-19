@@ -33,8 +33,8 @@ graph TB
     subgraph services["Core Services"]
         ORCH["ChatOrchestrator<br/>(oracle / call_assistant / research)"]
         REWRITER["QueryRewriter"]
-        RETRIEVER_V1["HybridRetriever (v1)<br/>pgvector: embedding <=> query_vec"]
-        RETRIEVER_V2["HybridRetrievalService (v2)<br/>TiDB: VEC_COSINE_DISTANCE()"]
+        RETRIEVER_V1["HybridRetriever (v1)<br/>VEC_COSINE_DISTANCE()"]
+        RETRIEVER_V2["HybridRetrievalService (v2)<br/>TiDB: VEC_COSINE_DISTANCE() + RRF"]
         EMBED["EmbeddingService"]
         LLM["LLMService<br/>(OpenAI + Anthropic/MiniMax + Codex)"]
         GTM["GTMModuleService<br/>(12+ role-specific modules)"]
@@ -61,9 +61,8 @@ graph TB
         CHUNKER["Chunking Utils<br/>(markdown / pdf / slides / turns)"]
     end
 
-    subgraph storage["Storage Layer (dual-database)"]
-        TIDB[("TiDB Cloud (production)<br/>VEC_COSINE_DISTANCE()<br/>MATCH AGAINST fulltext<br/>MySQL protocol :4000")]
-        PG[("PostgreSQL 16 + pgvector (dev)<br/>embedding <=> query_vec<br/>ivfflat index")]
+    subgraph storage["Storage Layer"]
+        TIDB[("TiDB Cloud v8.5<br/>VEC_COSINE_DISTANCE()<br/>MATCH AGAINST fulltext<br/>MySQL protocol :4000")]
         REDIS[("Redis<br/>(Celery broker + sessions)")]
     end
 
@@ -100,7 +99,7 @@ graph TB
     ORCH --> RETRIEVER_V1 & RETRIEVER_V2
     GTM --> RESEARCH
     RESEARCH --> RETRIEVER_V2 & LLM
-    RETRIEVER_V1 --> EMBED & PG
+    RETRIEVER_V1 --> EMBED & TIDB
     RETRIEVER_V2 --> EMBED & TIDB
 
     LLM --> OPENAI
@@ -111,8 +110,8 @@ graph TB
     TRANSCRIPT_ING --> CALL_API & CHUNKER & EMBED & ARTIFACT
     SF_SYNC --> SALESFORCE
 
-    DRIVE_ING & FEISHU_ING & TRANSCRIPT_ING & SF_SYNC --> TIDB & PG
-    AUDIT --> TIDB & PG
+    DRIVE_ING & FEISHU_ING & TRANSCRIPT_ING & SF_SYNC --> TIDB
+    AUDIT --> TIDB
 
     BEAT --> WORKER
     WORKER --> REDIS
@@ -130,7 +129,7 @@ sequenceDiagram
     participant L as LLMService
     participant AI as OpenAI API
     participant A as AuditService
-    participant DB as TiDB / PostgreSQL
+    participant DB as TiDB Cloud
 
     C->>R: {mode: "oracle", message: "How to position TiDB vs SingleStore?"}
     R->>O: run(mode="oracle", message, user, top_k, filters, context)
@@ -167,7 +166,7 @@ sequenceDiagram
     participant AI as OpenAI API
     participant L as LLMService
     participant A as AuditService
-    participant DB as TiDB / PostgreSQL
+    participant DB as TiDB Cloud
 
     C->>R: {mode: "call_assistant", message: "What risks from the Acme call?"}
     R->>O: run(mode="call_assistant", ...)
@@ -187,7 +186,7 @@ sequenceDiagram
     AI-->>ES: vector[1536]
     ES-->>HR: query_vec
 
-    Note over HR: TiDB (v2):<br/>SELECT *, VEC_COSINE_DISTANCE(embedding, query_vec)<br/>AS distance FROM knowledge_index<br/>WHERE org_id = :org_id ORDER BY distance ASC<br/>LIMIT 20<br/><br/>PostgreSQL (v1):<br/>ORDER BY embedding <=> query_vec LIMIT 320<br/><br/>+ Keyword: MATCH AGAINST (TiDB)<br/>or regex word boundary (PG)<br/><br/>Score = 0.50*vec + 0.30*kw<br/>+ 0.10*title + source_bias + domain_boost
+    Note over HR: Vector: VEC_COSINE_DISTANCE(embedding, query_vec)<br/>FROM knowledge_index<br/>WHERE org_id = :org_id ORDER BY distance ASC<br/>LIMIT 20<br/><br/>Keyword: MATCH(chunk_text) AGAINST<br/>(:query IN NATURAL LANGUAGE MODE)<br/><br/>Score = 0.50*vec + 0.30*kw<br/>+ 0.10*title + source_bias + domain_boost
 
     HR->>DB: Vector + Keyword SQL queries
     DB-->>HR: candidate chunks
@@ -316,17 +315,11 @@ flowchart TB
     QUERY --> EMBED_Q["EmbeddingService.embed(query)<br/>query_vec 1536 dims"]
     QUERY --> EXTRACT["Extract query terms<br/>(3+ chars, filter stop words)"]
 
-    EMBED_Q --> VEC_DB{DATABASE_PROVIDER?}
-    VEC_DB -->|tidb| VEC_TIDB["TiDB Vector Search<br/>SELECT *, VEC_COSINE_DISTANCE(embedding, query_vec)<br/>AS distance FROM knowledge_index<br/>ORDER BY distance ASC LIMIT 20"]
-    VEC_DB -->|postgresql| VEC_PG["pgvector Search<br/>ORDER BY embedding <=> query_vec<br/>LIMIT max(200, top_k * 40)"]
-    EXTRACT --> KW_DB{DATABASE_PROVIDER?}
-    KW_DB -->|tidb| KW_TIDB["TiDB Fulltext<br/>MATCH(chunk_text) AGAINST<br/>(:query IN NATURAL LANGUAGE MODE)"]
-    KW_DB -->|postgresql| KW_PG["PostgreSQL Keyword<br/>regex word-boundary match<br/>on chunk text"]
+    EMBED_Q --> VEC_TIDB["TiDB Vector Search<br/>SELECT *, VEC_COSINE_DISTANCE(embedding, query_vec)<br/>AS distance FROM knowledge_index<br/>ORDER BY distance ASC LIMIT 20"]
+    EXTRACT --> KW_TIDB["TiDB Fulltext<br/>MATCH(chunk_text) AGAINST<br/>(:query IN NATURAL LANGUAGE MODE)"]
 
-    VEC_TIDB --> MERGE["Merge candidates<br/>(Reciprocal Rank Fusion for v2)"]
-    VEC_PG --> MERGE
+    VEC_TIDB --> MERGE["Merge candidates<br/>(Reciprocal Rank Fusion)"]
     KW_TIDB --> MERGE
-    KW_PG --> MERGE
 
     MERGE --> SCORE["Score each chunk"]
 
@@ -374,7 +367,7 @@ erDiagram
         int chunk_index
         text text
         int token_count
-        vector_1536 embedding "pgvector Vector(1536) or TiDB JSON array"
+        json embedding "1536-dim vector (JSON array)"
         jsonb metadata "heading page slide start_time_sec end_time_sec"
         varchar content_hash "SHA256"
         timestamptz created_at
@@ -668,8 +661,6 @@ Copy `.env.example` to `.env` and fill in the values below.
 
 | Variable | Description |
 |---|---|
-| `DATABASE_URL` | PostgreSQL connection string (local dev fallback) |
-| `DATABASE_PROVIDER` | `postgresql` or `tidb` |
 | `TIDB_HOST` | TiDB Cloud host |
 | `TIDB_PORT` | TiDB Cloud port (default `4000`) |
 | `TIDB_USER` | TiDB Cloud username |
@@ -817,28 +808,27 @@ class ChatOrchestrator:
     # Returns (response_dict, retrieval_payload)
 ```
 
-### HybridRetriever v1 (`retrieval/service.py`) — PostgreSQL
+### HybridRetriever v1 (`retrieval/service.py`)
 
 ```python
 class HybridRetriever:
     def search(query: str, *, top_k: int = 8,
                filters: dict | None = None) -> list[RetrievedChunk]
-    # 1. Vector: ORDER BY embedding <=> query_vec LIMIT max(200, top_k*40)
-    # 2. Keyword: regex word-boundary match on chunk text
+    # 1. Vector: VEC_COSINE_DISTANCE(embedding, query_vec) LIMIT top_k*40
+    # 2. Keyword: MATCH(chunk_text) AGAINST(:query IN NATURAL LANGUAGE MODE)
     # 3. Score: 0.50*vec + 0.30*kw + 0.10*title + source_bias + domain_boost
     # 4. Filter by source_type, account; dedup by chunk_id
 ```
 
-### HybridRetrievalService v2 (`services/indexing/retrieval.py`) — TiDB-aware
+### HybridRetrievalService v2 (`services/indexing/retrieval.py`)
 
 ```python
 class HybridRetrievalService:
     def search(query: str, org_id: int, *, top_k: int = 8,
                filters: dict | None = None) -> list[RetrievedChunk]
-    # Detects dialect (mysql/mariadb -> TiDB path, postgresql -> pgvector path)
-    # TiDB: VEC_COSINE_DISTANCE() + MATCH AGAINST fulltext
-    # PG fallback: embedding <=> + regex keyword
+    # TiDB Cloud: VEC_COSINE_DISTANCE() + MATCH AGAINST fulltext
     # Merge via Reciprocal Rank Fusion (RRF)
+    # Multi-tenant: all queries scoped by org_id
 ```
 
 ### EmbeddingService (`services/embedding.py`)
@@ -896,23 +886,6 @@ ORDER BY relevance DESC
 LIMIT 20
 ```
 
-**PostgreSQL vector search (dev)**:
-```sql
-SELECT kc.id, kc.text, kc.metadata, kc.embedding,
-       kd.title, kd.source_type, kd.source_id, kd.url, kd.tags
-FROM kb_chunks kc
-JOIN kb_documents kd ON kd.id = kc.document_id
-ORDER BY kc.embedding <=> :query_vec
-LIMIT :candidate_limit
-```
-
-**PostgreSQL ivfflat index**:
-```sql
-CREATE INDEX ix_kb_chunks_embedding
-ON kb_chunks USING ivfflat (embedding vector_cosine_ops)
-WITH (lists = 100);
-```
-
 ---
 
 ## Development
@@ -951,13 +924,13 @@ npm run dev
 /api
   /app
     /api/routes        # FastAPI endpoints: chat, kb, rep, se, marketing, admin, auth, slack
-    /core              # Settings (dual-DB config), constants, auth
-    /db                # SQLAlchemy base, session factory (TiDB + PG), init_db
+    /core              # Settings, constants, auth
+    /db                # SQLAlchemy base, session factory (TiDB Cloud), init_db
     /ingest            # Drive + Feishu + Chorus connectors and ingestors
     /models            # ORM models: v1 (kb_documents, kb_chunks, chorus_calls, etc.)
                        #              v2 (users, accounts, deals, knowledge_index, etc.)
     /prompts           # System prompt templates (oracle, call coach)
-    /retrieval         # HybridRetriever v1 (pgvector-first)
+    /retrieval         # HybridRetriever v1
     /schemas           # Pydantic request/response contracts
     /services
       /chat_orchestrator.py  # RAG orchestration (oracle / call_assistant / research)
@@ -982,7 +955,7 @@ npm run dev
         google_oauth.py       # Google OAuth + PKCE
       /mcp/                   # 15 MCP server integrations
     /utils             # Chunking, redaction, hashing, email utils
-  /alembic             # DB migrations (handles both TiDB + PG)
+  /alembic             # DB migrations (TiDB Cloud)
 /workers               # Celery task definitions
 /ui                    # Next.js 14 frontend (Sales / Marketing / SE dashboards)
 /infra                 # Docker Compose: TiDB v8.5 + Redis + API + Worker + Beat + UI
