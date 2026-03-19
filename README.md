@@ -20,38 +20,51 @@ graph TB
 
     subgraph api_layer["FastAPI Backend (Python 3.11)"]
         CHAT_ROUTE["POST /chat"]
-        KB_ROUTE["GET /kb/search<br/>GET /kb/inspect/:id"]
-        ADMIN_ROUTE["POST /admin/sync/drive<br/>POST /admin/sync/calls<br/>POST /admin/sync/feishu<br/>GET /admin/health<br/>GET /admin/audit<br/>GET|PUT /admin/kb-config<br/>GET /admin/security/settings"]
-        CALLS_ROUTE["GET /calls<br/>GET /calls/:id<br/>POST /calls/:id/regenerate-draft"]
+        KB_ROUTE["GET /kb/search<br/>GET /knowledge"]
+        REP_ROUTE["POST /rep/account-brief<br/>POST /rep/follow-up-draft<br/>POST /rep/deal-risk"]
+        SE_ROUTE["POST /se/poc-plan<br/>POST /se/architecture-fit<br/>POST /se/competitor-coach"]
+        MKT_ROUTE["POST /marketing/intelligence<br/>POST /marketing/battle-card"]
+        ADMIN_ROUTE["POST /admin/sync/*<br/>GET /admin/audit<br/>GET|PUT /admin/kb-config<br/>POST /admin/mcp/enable"]
+        AUTH_ROUTE["POST /auth/google<br/>POST /auth/openai-key<br/>POST /auth/connect-provider"]
         MSG_ROUTE["POST /messages/draft"]
-        AUTH_ROUTE["Auth Service<br/>(OAuth / PKCE)"]
+        SLACK_ROUTE["POST /slack/events<br/>POST /slack/actions"]
     end
 
     subgraph services["Core Services"]
-        ORCH["ChatOrchestrator"]
+        ORCH["ChatOrchestrator<br/>(oracle / call_assistant / research)"]
         REWRITER["QueryRewriter"]
-        RETRIEVER["HybridRetriever"]
+        RETRIEVER_V1["HybridRetriever (v1)<br/>pgvector: embedding <=> query_vec"]
+        RETRIEVER_V2["HybridRetrievalService (v2)<br/>TiDB: VEC_COSINE_DISTANCE()"]
         EMBED["EmbeddingService"]
-        LLM["LLMService"]
+        LLM["LLMService<br/>(OpenAI + Anthropic/MiniMax + Codex)"]
+        GTM["GTMModuleService<br/>(12+ role-specific modules)"]
+        RESEARCH["AccountBriefResearcher<br/>PostCallPipeline<br/>RefinementService"]
         ARTIFACT["ArtifactGenerator"]
         MESSAGING["MessagingService"]
         AUDIT["AuditService"]
         TIDB_DOCS["TiDBDocsRetriever<br/>(live docs.pingcap.com)"]
     end
 
+    subgraph mcp["MCP Server Integrations (15)"]
+        MCP_TIDB["TiDB Cloud + Observability"]
+        MCP_CRM["Salesforce"]
+        MCP_INTEL["ZoomInfo / LinkedIn / Crunchbase"]
+        MCP_COMM["Slack / Gmail / Calendar"]
+        MCP_CONTENT["Drive / Feishu / GitHub / Firecrawl"]
+    end
+
     subgraph ingest["Ingestion Pipelines"]
-        DRIVE_CONN["DriveConnector"]
-        DRIVE_ING["DriveIngestor"]
-        FEISHU_CONN["FeishuConnector"]
-        FEISHU_ING["FeishuIngestor"]
-        CHORUS_CONN["CallConnector"]
-        TRANSCRIPT_ING["TranscriptIngestor"]
+        DRIVE_ING["DriveIngestor + DriveConnector"]
+        FEISHU_ING["FeishuIngestor + FeishuConnector"]
+        TRANSCRIPT_ING["TranscriptIngestor + CallConnector"]
+        SF_SYNC["SalesforceSyncService"]
         CHUNKER["Chunking Utils<br/>(markdown / pdf / slides / turns)"]
     end
 
-    subgraph storage["Storage Layer"]
-        PG[("PostgreSQL 16<br/>+ pgvector")]
-        REDIS[("Redis<br/>(Celery broker)")]
+    subgraph storage["Storage Layer (dual-database)"]
+        TIDB[("TiDB Cloud (production)<br/>VEC_COSINE_DISTANCE()<br/>MATCH AGAINST fulltext<br/>MySQL protocol :4000")]
+        PG[("PostgreSQL 16 + pgvector (dev)<br/>embedding <=> query_vec<br/>ivfflat index")]
+        REDIS[("Redis<br/>(Celery broker + sessions)")]
     end
 
     subgraph external["External Services"]
@@ -59,69 +72,51 @@ graph TB
         FEISHU_API["Feishu (Lark) API"]
         CALL_API["Call Transcript API"]
         OPENAI["OpenAI API<br/>(Chat + Embeddings)"]
-        DDG["DuckDuckGo<br/>(docs.pingcap.com search)"]
+        FIRECRAWL["Firecrawl API"]
         SMTP_SVC["SMTP Server"]
         SLACK_API["Slack API"]
-        FIRECRAWL["Firecrawl API"]
+        SALESFORCE["Salesforce API"]
     end
 
     subgraph worker["Celery Worker + Beat"]
-        WORKER["Background Tasks"]
-        BEAT["Daily Ingestion Schedule<br/>(every 24h)"]
+        WORKER["sync_drive / sync_calls<br/>sync_salesforce / research_task<br/>market_intel_task"]
+        BEAT["Daily Ingestion<br/>(every 24h)"]
     end
 
-    UI --> CHAT_ROUTE
-    UI --> KB_ROUTE
-    UI --> ADMIN_ROUTE
-    UI --> CALLS_ROUTE
-    UI --> MSG_ROUTE
+    UI --> CHAT_ROUTE & REP_ROUTE & SE_ROUTE & MKT_ROUTE & ADMIN_ROUTE
     CLI --> KB_ROUTE
     API_CLIENT --> CHAT_ROUTE
 
     CHAT_ROUTE --> ORCH
-    KB_ROUTE --> RETRIEVER
-    ADMIN_ROUTE --> DRIVE_ING
-    ADMIN_ROUTE --> TRANSCRIPT_ING
-    ADMIN_ROUTE --> FEISHU_ING
-    CALLS_ROUTE --> ARTIFACT
+    REP_ROUTE --> GTM
+    SE_ROUTE --> GTM
+    MKT_ROUTE --> GTM
+    KB_ROUTE --> RETRIEVER_V1 & RETRIEVER_V2
     MSG_ROUTE --> MESSAGING
+    SLACK_ROUTE --> SLACK_API
+    AUTH_ROUTE --> OPENAI
 
-    ORCH --> REWRITER
-    ORCH --> RETRIEVER
-    ORCH --> LLM
-    ORCH --> AUDIT
-    RETRIEVER --> EMBED
-    RETRIEVER --> PG
+    ORCH --> REWRITER & LLM & AUDIT
+    ORCH --> RETRIEVER_V1 & RETRIEVER_V2
+    GTM --> RESEARCH
+    RESEARCH --> RETRIEVER_V2 & LLM
+    RETRIEVER_V1 --> EMBED & PG
+    RETRIEVER_V2 --> EMBED & TIDB
 
-    DRIVE_ING --> DRIVE_CONN
-    DRIVE_ING --> CHUNKER
-    DRIVE_ING --> EMBED
-    DRIVE_CONN --> GDRIVE
-    FEISHU_ING --> FEISHU_CONN
-    FEISHU_ING --> CHUNKER
-    FEISHU_ING --> EMBED
-    FEISHU_CONN --> FEISHU_API
-    TRANSCRIPT_ING --> CHORUS_CONN
-    TRANSCRIPT_ING --> CHUNKER
-    TRANSCRIPT_ING --> EMBED
-    TRANSCRIPT_ING --> ARTIFACT
-    CHORUS_CONN --> CALL_API
-
-    EMBED --> OPENAI
     LLM --> OPENAI
-    TIDB_DOCS --> DDG
-    MESSAGING --> SMTP_SVC
-    MESSAGING --> SLACK_API
+    LLM --> mcp
 
-    DRIVE_ING --> PG
-    FEISHU_ING --> PG
-    TRANSCRIPT_ING --> PG
-    AUDIT --> PG
+    DRIVE_ING --> GDRIVE & CHUNKER & EMBED
+    FEISHU_ING --> FEISHU_API & CHUNKER & EMBED
+    TRANSCRIPT_ING --> CALL_API & CHUNKER & EMBED & ARTIFACT
+    SF_SYNC --> SALESFORCE
 
-    WORKER --> DRIVE_ING
-    WORKER --> TRANSCRIPT_ING
+    DRIVE_ING & FEISHU_ING & TRANSCRIPT_ING & SF_SYNC --> TIDB & PG
+    AUDIT --> TIDB & PG
+
     BEAT --> WORKER
     WORKER --> REDIS
+    WORKER --> DRIVE_ING & TRANSCRIPT_ING & SF_SYNC
 ```
 
 ### RAG Query Flow — Oracle Mode (Direct LLM)
@@ -135,7 +130,7 @@ sequenceDiagram
     participant L as LLMService
     participant AI as OpenAI API
     participant A as AuditService
-    participant DB as PostgreSQL
+    participant DB as TiDB / PostgreSQL
 
     C->>R: {mode: "oracle", message: "How to position TiDB vs SingleStore?"}
     R->>O: run(mode="oracle", message, user, top_k, filters, context)
@@ -172,7 +167,7 @@ sequenceDiagram
     participant AI as OpenAI API
     participant L as LLMService
     participant A as AuditService
-    participant DB as PostgreSQL
+    participant DB as TiDB / PostgreSQL
 
     C->>R: {mode: "call_assistant", message: "What risks from the Acme call?"}
     R->>O: run(mode="call_assistant", ...)
@@ -192,7 +187,7 @@ sequenceDiagram
     AI-->>ES: vector[1536]
     ES-->>HR: query_vec
 
-    Note over HR: 1. Vector search:<br/>SELECT ... FROM kb_chunks kc<br/>JOIN kb_documents kd ON kd.id = kc.document_id<br/>ORDER BY kc.embedding <=> query_vec<br/>LIMIT 320<br/><br/>2. Keyword search:<br/>regex word boundary matching<br/><br/>3. Score = 0.50*vec + 0.30*kw<br/>+ 0.10*title + source_bias<br/>+ domain_boost
+    Note over HR: TiDB (v2):<br/>SELECT *, VEC_COSINE_DISTANCE(embedding, query_vec)<br/>AS distance FROM knowledge_index<br/>WHERE org_id = :org_id ORDER BY distance ASC<br/>LIMIT 20<br/><br/>PostgreSQL (v1):<br/>ORDER BY embedding <=> query_vec LIMIT 320<br/><br/>+ Keyword: MATCH AGAINST (TiDB)<br/>or regex word boundary (PG)<br/><br/>Score = 0.50*vec + 0.30*kw<br/>+ 0.10*title + source_bias + domain_boost
 
     HR->>DB: Vector + Keyword SQL queries
     DB-->>HR: candidate chunks
@@ -321,11 +316,17 @@ flowchart TB
     QUERY --> EMBED_Q["EmbeddingService.embed(query)<br/>query_vec 1536 dims"]
     QUERY --> EXTRACT["Extract query terms<br/>(3+ chars, filter stop words)"]
 
-    EMBED_Q --> VEC_SEARCH["Vector Search (pgvector)<br/>ORDER BY embedding <=> query_vec<br/>LIMIT max(200, top_k * 40)"]
-    EXTRACT --> KW_SEARCH["Keyword Search<br/>regex word-boundary match<br/>on chunk text"]
+    EMBED_Q --> VEC_DB{DATABASE_PROVIDER?}
+    VEC_DB -->|tidb| VEC_TIDB["TiDB Vector Search<br/>SELECT *, VEC_COSINE_DISTANCE(embedding, query_vec)<br/>AS distance FROM knowledge_index<br/>ORDER BY distance ASC LIMIT 20"]
+    VEC_DB -->|postgresql| VEC_PG["pgvector Search<br/>ORDER BY embedding <=> query_vec<br/>LIMIT max(200, top_k * 40)"]
+    EXTRACT --> KW_DB{DATABASE_PROVIDER?}
+    KW_DB -->|tidb| KW_TIDB["TiDB Fulltext<br/>MATCH(chunk_text) AGAINST<br/>(:query IN NATURAL LANGUAGE MODE)"]
+    KW_DB -->|postgresql| KW_PG["PostgreSQL Keyword<br/>regex word-boundary match<br/>on chunk text"]
 
-    VEC_SEARCH --> MERGE["Merge candidates"]
-    KW_SEARCH --> MERGE
+    VEC_TIDB --> MERGE["Merge candidates<br/>(Reciprocal Rank Fusion for v2)"]
+    VEC_PG --> MERGE
+    KW_TIDB --> MERGE
+    KW_PG --> MERGE
 
     MERGE --> SCORE["Score each chunk"]
 
@@ -348,11 +349,13 @@ flowchart TB
 
 ### Database Schema
 
+#### V1 Tables (Knowledge Base + Calls)
+
 ```mermaid
 erDiagram
     kb_documents {
         uuid id PK
-        enum source_type "google_drive | feishu | calls | tidb_docs_online"
+        enum source_type "google_drive | feishu | chorus | tidb_docs_online"
         varchar source_id "file ID or call ID"
         varchar title
         text url
@@ -371,15 +374,15 @@ erDiagram
         int chunk_index
         text text
         int token_count
-        vector_1536 embedding "pgvector cosine"
+        vector_1536 embedding "pgvector Vector(1536) or TiDB JSON array"
         jsonb metadata "heading page slide start_time_sec end_time_sec"
         varchar content_hash "SHA256"
         timestamptz created_at
     }
 
-    call_records {
+    chorus_calls {
         uuid id PK
-        varchar call_id UK
+        varchar chorus_call_id UK
         date date
         varchar account
         varchar opportunity
@@ -394,7 +397,7 @@ erDiagram
 
     call_artifacts {
         uuid id PK
-        varchar call_id
+        varchar chorus_call_id
         text summary
         jsonb objections
         jsonb competitors_mentioned
@@ -411,12 +414,12 @@ erDiagram
         timestamptz created_at
         enum mode "draft | sent | blocked"
         enum channel "email | slack"
-        jsonb to
-        jsonb cc
+        jsonb to_recipients
+        jsonb cc_recipients
         varchar subject
         text body
         text reason_blocked
-        varchar call_id
+        varchar chorus_call_id
         uuid artifact_id FK
         varchar content_hash
     }
@@ -439,7 +442,7 @@ erDiagram
         text google_drive_folder_ids
         bool feishu_enabled
         varchar feishu_folder_token
-        bool calls_enabled
+        bool chorus_enabled
         int retrieval_top_k "default 8"
         varchar llm_model "default gpt-4.1"
         bool web_search_enabled
@@ -447,10 +450,140 @@ erDiagram
         timestamptz updated_at
     }
 
+    google_drive_user_credentials {
+        uuid id PK
+        varchar user_email UK
+        text encrypted_token "AES-256"
+        timestamptz created_at
+        timestamptz updated_at
+    }
+
     kb_documents ||--o{ kb_chunks : "has chunks"
-    call_records ||--o| call_artifacts : "generates artifact"
+    chorus_calls ||--o| call_artifacts : "generates artifact"
     call_artifacts ||--o{ outbound_messages : "sources draft"
-    kb_documents }o--|| call_records : "linked via source_id"
+    kb_documents }o--|| chorus_calls : "linked via source_id"
+```
+
+#### V2 Tables (Multi-Tenant GTM Platform)
+
+```mermaid
+erDiagram
+    users {
+        uuid id PK
+        varchar email UK
+        varchar name
+        enum role "sales_rep | se | marketing | admin"
+        int org_id FK
+        text encrypted_openai_key "AES-256 per-user"
+        timestamptz created_at
+    }
+
+    knowledge_index {
+        uuid id PK
+        int org_id FK
+        varchar source_type
+        varchar source_id
+        varchar title
+        text chunk_text
+        json embedding "1536-dim vector (JSON array for TiDB)"
+        jsonb metadata
+        varchar content_hash
+        timestamptz created_at
+    }
+
+    accounts {
+        uuid id PK
+        int org_id FK
+        varchar name
+        varchar industry
+        varchar segment
+        varchar territory
+        varchar salesforce_id
+        timestamptz created_at
+    }
+
+    deals {
+        uuid id PK
+        uuid account_id FK
+        varchar name
+        varchar stage
+        decimal amount
+        date close_date
+        varchar salesforce_id
+        timestamptz created_at
+    }
+
+    research_reports {
+        uuid id PK
+        int org_id FK
+        uuid account_id FK
+        varchar report_type "pre_call | post_call | competitive"
+        jsonb sections "7-section account brief JSON"
+        varchar model_info
+        timestamptz created_at
+    }
+
+    ai_refinements {
+        uuid id PK
+        uuid user_id FK
+        varchar scope "personal | team"
+        text refinement_text
+        float effectiveness_score
+        bool active
+        timestamptz created_at
+    }
+
+    conversations {
+        uuid id PK
+        uuid user_id FK
+        uuid account_id FK
+        varchar mode "oracle | call_assistant | research"
+        timestamptz created_at
+    }
+
+    messages {
+        uuid id PK
+        uuid conversation_id FK
+        enum role "user | assistant | tool"
+        text content
+        jsonb tool_calls
+        jsonb tool_results
+        timestamptz created_at
+    }
+
+    source_registry {
+        uuid id PK
+        int org_id FK
+        varchar provider "salesforce | firecrawl | zoominfo | etc"
+        jsonb config "encrypted credentials"
+        bool enabled
+        timestamptz created_at
+    }
+
+    api_usage_log {
+        uuid id PK
+        int org_id FK
+        varchar provider
+        varchar endpoint
+        int tokens_used
+        decimal cost_usd
+        timestamptz created_at
+    }
+
+    sync_status {
+        uuid id PK
+        int org_id FK
+        varchar source "drive | feishu | chorus | salesforce"
+        enum status "ok | error | running"
+        timestamptz last_sync
+        text error_message
+    }
+
+    users ||--o{ conversations : "has"
+    users ||--o{ ai_refinements : "creates"
+    conversations ||--o{ messages : "contains"
+    accounts ||--o{ deals : "has"
+    accounts ||--o{ research_reports : "about"
 ```
 
 ### Messaging Guard Rails
@@ -680,10 +813,11 @@ class ChatOrchestrator:
             top_k: int, filters: dict, context: dict) -> tuple[dict, dict]
     # mode="oracle": LLM-direct (no DB), allow_ungrounded=True
     # mode="call_assistant": QueryRewriter -> HybridRetriever -> LLM with evidence
+    # mode="research": GTMModuleService dispatch (account briefs, POC plans, etc.)
     # Returns (response_dict, retrieval_payload)
 ```
 
-### HybridRetriever (`retrieval/service.py`)
+### HybridRetriever v1 (`retrieval/service.py`) — PostgreSQL
 
 ```python
 class HybridRetriever:
@@ -692,8 +826,19 @@ class HybridRetriever:
     # 1. Vector: ORDER BY embedding <=> query_vec LIMIT max(200, top_k*40)
     # 2. Keyword: regex word-boundary match on chunk text
     # 3. Score: 0.50*vec + 0.30*kw + 0.10*title + source_bias + domain_boost
-    # 4. Filter by source_type, account
-    # 5. Dedup by chunk_id, sort by score DESC, return top_k
+    # 4. Filter by source_type, account; dedup by chunk_id
+```
+
+### HybridRetrievalService v2 (`services/indexing/retrieval.py`) — TiDB-aware
+
+```python
+class HybridRetrievalService:
+    def search(query: str, org_id: int, *, top_k: int = 8,
+               filters: dict | None = None) -> list[RetrievedChunk]
+    # Detects dialect (mysql/mariadb -> TiDB path, postgresql -> pgvector path)
+    # TiDB: VEC_COSINE_DISTANCE() + MATCH AGAINST fulltext
+    # PG fallback: embedding <=> + regex keyword
+    # Merge via Reciprocal Rank Fusion (RRF)
 ```
 
 ### EmbeddingService (`services/embedding.py`)
@@ -710,6 +855,7 @@ class EmbeddingService:
 
 ```python
 class LLMService:
+    # Multi-client: OpenAI (primary) + Anthropic/MiniMax (fallback) + Codex (JWT auth)
     def answer_oracle(message, hits, *, model=None, tools=None,
                       allow_ungrounded=False) -> dict
     # Returns {answer, follow_up_questions}
@@ -719,9 +865,38 @@ class LLMService:
     # Returns {what_happened, risks, next_steps, questions_to_ask_next_call}
 ```
 
+### GTMModuleService (`services/gtm_modules.py`)
+
+```python
+class GTMModuleService:
+    # 12+ role-specific AI modules:
+    # Sales: rep_account_brief, rep_discovery_questions, rep_follow_up_draft, rep_deal_risk
+    # SE: se_poc_plan, se_poc_readiness, se_architecture_fit, se_competitor_coach
+    # Marketing: marketing_intelligence, marketing_battle_card
+    # Each module: retrieves from knowledge_index -> LLM generation -> stores result
+```
+
 ### Key SQL Queries
 
-**Vector similarity search (pgvector)**:
+**TiDB vector search (production)**:
+```sql
+SELECT *, VEC_COSINE_DISTANCE(embedding, :query_vec) AS distance
+FROM knowledge_index
+WHERE org_id = :org_id
+ORDER BY distance ASC
+LIMIT 20
+```
+
+**TiDB fulltext search**:
+```sql
+SELECT *, MATCH(chunk_text) AGAINST(:query IN NATURAL LANGUAGE MODE) AS relevance
+FROM knowledge_index
+WHERE org_id = :org_id AND MATCH(chunk_text) AGAINST(:query IN NATURAL LANGUAGE MODE)
+ORDER BY relevance DESC
+LIMIT 20
+```
+
+**PostgreSQL vector search (dev)**:
 ```sql
 SELECT kc.id, kc.text, kc.metadata, kc.embedding,
        kd.title, kd.source_type, kd.source_id, kd.url, kd.tags
@@ -731,7 +906,7 @@ ORDER BY kc.embedding <=> :query_vec
 LIMIT :candidate_limit
 ```
 
-**ivfflat index**:
+**PostgreSQL ivfflat index**:
 ```sql
 CREATE INDEX ix_kb_chunks_embedding
 ON kb_chunks USING ivfflat (embedding vector_cosine_ops)
@@ -775,25 +950,47 @@ npm run dev
 ```
 /api
   /app
-    /api/routes        # FastAPI route handlers
-    /core              # Config, auth, security
-    /db                # Database models and migrations
-    /ingest            # Knowledge source connectors
-    /models            # ORM models
-    /prompts           # LLM prompt templates
-    /retrieval         # Hybrid search service
-    /schemas           # Pydantic request/response schemas
-    /services          # Business logic (research, chat, notifications)
-    /utils             # Shared utilities
-  /alembic             # Database migrations
+    /api/routes        # FastAPI endpoints: chat, kb, rep, se, marketing, admin, auth, slack
+    /core              # Settings (dual-DB config), constants, auth
+    /db                # SQLAlchemy base, session factory (TiDB + PG), init_db
+    /ingest            # Drive + Feishu + Chorus connectors and ingestors
+    /models            # ORM models: v1 (kb_documents, kb_chunks, chorus_calls, etc.)
+                       #              v2 (users, accounts, deals, knowledge_index, etc.)
+    /prompts           # System prompt templates (oracle, call coach)
+    /retrieval         # HybridRetriever v1 (pgvector-first)
+    /schemas           # Pydantic request/response contracts
+    /services
+      /chat_orchestrator.py  # RAG orchestration (oracle / call_assistant / research)
+      /llm.py               # Multi-client LLM (OpenAI + Anthropic + Codex)
+      /embedding.py          # Embedding service (OpenAI + hash fallback)
+      /gtm_modules.py        # 12+ role-specific AI modules
+      /messaging.py           # Email draft/send with domain guard rails
+      /slack.py               # Webhook verification + async posting
+      /audit.py               # Action logging
+      /query_rewrite.py       # Query rewriting
+      /token_crypto.py        # AES-256 encryption for stored keys
+      /indexing/
+        retrieval.py          # HybridRetrievalService v2 (TiDB-aware, RRF)
+      /research/
+        account_brief_researcher.py  # 7-section pre-call research
+        postcall_pipeline.py         # Post-call action extraction
+        refinement_service.py        # User feedback + effectiveness tracking
+      /connectors/
+        salesforce_sync.py    # CRM account/deal sync
+        firecrawl.py          # On-demand web scraping
+      /auth/
+        google_oauth.py       # Google OAuth + PKCE
+      /mcp/                   # 15 MCP server integrations
+    /utils             # Chunking, redaction, hashing, email utils
+  /alembic             # DB migrations (handles both TiDB + PG)
 /workers               # Celery task definitions
-/ui                    # Next.js frontend
-/infra                 # Docker Compose files
-/tests                 # Test suite
+/ui                    # Next.js 14 frontend (Sales / Marketing / SE dashboards)
+/infra                 # Docker Compose: TiDB v8.5 + Redis + API + Worker + Beat + UI
+/tests                 # Unit + integration tests
 /data
-  /fake_drive          # Local fixture documents for dev
-  /fake_calls          # Local fixture call transcripts for dev
-/scripts               # Utility scripts
+  /fake_drive          # Local fixture documents (+ optional GitHub repos)
+  /fake_chorus         # Local fixture call transcripts
+/scripts               # Utility scripts (sync_github_sources, seed_sqlite_mvp, etc.)
 /docs
   architecture.excalidraw  # System architecture diagram
 ```
