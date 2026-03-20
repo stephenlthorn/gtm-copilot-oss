@@ -1,5 +1,6 @@
 'use client';
 import { useState, useEffect } from 'react';
+import { HARDCODED_DEFAULTS } from './ChatWorkspace';
 
 const SECTION_LABELS = {
   pre_call: 'Pre-Call Intel',
@@ -13,8 +14,9 @@ const SECTION_LABELS = {
 
 export default function TemplatesPanel() {
   const [activeSection, setActiveSection] = useState('pre_call');
-  const [ownTemplates, setOwnTemplates] = useState({});  // section_key -> {content, template_name}
-  const [allTemplates, setAllTemplates] = useState([]);   // [{user_email, section_key, content, template_name}]
+  const [view, setView] = useState('default'); // 'default' | 'custom'
+  const [ownTemplates, setOwnTemplates] = useState({});
+  const [allTemplates, setAllTemplates] = useState([]);
   const [editContent, setEditContent] = useState('');
   const [editName, setEditName] = useState('');
   const [saving, setSaving] = useState(false);
@@ -37,7 +39,7 @@ export default function TemplatesPanel() {
 
   useEffect(() => {
     const own = ownTemplates[activeSection];
-    setEditContent(own?.content || '');
+    setEditContent(own?.content || HARDCODED_DEFAULTS[activeSection] || '');
     setEditName(own?.template_name || `${SECTION_LABELS[activeSection]} (Custom)`);
     setSelectedOtherUser('');
     setSaveMsg('');
@@ -46,7 +48,12 @@ export default function TemplatesPanel() {
   const loadOtherUser = (email) => {
     setSelectedOtherUser(email);
     const found = allTemplates.find(t => t.user_email === email && t.section_key === activeSection);
-    if (found) setEditContent(found.content);
+    if (found) { setEditContent(found.content); setView('custom'); }
+  };
+
+  const loadDefault = () => {
+    setEditContent(HARDCODED_DEFAULTS[activeSection] || '');
+    setSaveMsg('');
   };
 
   const save = async () => {
@@ -60,7 +67,7 @@ export default function TemplatesPanel() {
       if (res.ok) {
         setOwnTemplates(prev => ({ ...prev, [activeSection]: { content: editContent, template_name: editName } }));
         setSaveMsg('Saved.');
-        setTimeout(() => setSaveMsg(''), 2000);
+        setTimeout(() => setSaveMsg(''), 2500);
       } else {
         setSaveMsg('Save failed.');
       }
@@ -70,6 +77,8 @@ export default function TemplatesPanel() {
   };
 
   const otherUsersForSection = allTemplates.filter(t => t.section_key === activeSection);
+  const defaultContent = HARDCODED_DEFAULTS[activeSection] || '';
+  const hasCustom = Boolean(ownTemplates[activeSection]);
 
   return (
     <div style={{ display: 'grid', gap: '1rem' }}>
@@ -80,53 +89,107 @@ export default function TemplatesPanel() {
             key={key}
             className={`btn${activeSection === key ? ' btn-primary' : ''}`}
             style={{ fontSize: '0.78rem', padding: '0.3rem 0.65rem' }}
-            onClick={() => setActiveSection(key)}
+            onClick={() => { setActiveSection(key); setView('default'); }}
           >
             {label}
           </button>
         ))}
       </div>
 
-      {/* Load other user's template */}
-      {otherUsersForSection.length > 0 && (
-        <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
-          <label style={{ fontSize: '0.75rem', color: 'var(--text-2)', whiteSpace: 'nowrap' }}>Load from:</label>
-          <select className="input" style={{ flex: 1 }} value={selectedOtherUser} onChange={e => loadOtherUser(e.target.value)}>
-            <option value="">— select a teammate —</option>
-            {otherUsersForSection.map(t => (
-              <option key={t.user_email} value={t.user_email}>{t.user_email.split('@')[0]} — {t.template_name}</option>
-            ))}
-          </select>
+      {/* Default / Custom toggle */}
+      <div style={{ display: 'flex', gap: '0.5rem', borderBottom: '1px solid var(--border)', paddingBottom: '0.65rem' }}>
+        <button
+          className={`btn${view === 'default' ? ' btn-primary' : ''}`}
+          style={{ fontSize: '0.75rem', padding: '0.25rem 0.6rem' }}
+          onClick={() => setView('default')}
+        >
+          Default
+        </button>
+        <button
+          className={`btn${view === 'custom' ? ' btn-primary' : ''}`}
+          style={{ fontSize: '0.75rem', padding: '0.25rem 0.6rem' }}
+          onClick={() => setView('custom')}
+        >
+          {hasCustom ? 'My Custom ✓' : 'My Custom'}
+        </button>
+      </div>
+
+      {view === 'default' ? (
+        /* ── Default view (read-only) ── */
+        <div style={{ display: 'grid', gap: '0.75rem' }}>
+          <div style={{ fontSize: '0.72rem', color: 'var(--text-3)' }}>
+            This is the system default template for <strong>{SECTION_LABELS[activeSection]}</strong>. Read-only — create a custom version to override it.
+          </div>
+          <pre style={{
+            background: 'var(--bg-2)',
+            border: '1px solid var(--border)',
+            borderRadius: '6px',
+            padding: '0.85rem 1rem',
+            fontSize: '0.78rem',
+            lineHeight: 1.65,
+            whiteSpace: 'pre-wrap',
+            wordBreak: 'break-word',
+            color: 'var(--text)',
+            maxHeight: '520px',
+            overflowY: 'auto',
+            margin: 0,
+          }}>
+            {defaultContent}
+          </pre>
+          <button
+            className="btn btn-primary"
+            style={{ alignSelf: 'start' }}
+            onClick={() => { loadDefault(); setView('custom'); }}
+          >
+            Use as starting point →
+          </button>
+        </div>
+      ) : (
+        /* ── Custom editor ── */
+        <div style={{ display: 'grid', gap: '0.75rem' }}>
+          {/* Load another user's template */}
+          {otherUsersForSection.length > 0 && (
+            <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+              <label style={{ fontSize: '0.75rem', color: 'var(--text-2)', whiteSpace: 'nowrap' }}>Load from teammate:</label>
+              <select className="input" style={{ flex: 1 }} value={selectedOtherUser} onChange={e => loadOtherUser(e.target.value)}>
+                <option value="">— select —</option>
+                {otherUsersForSection.map(t => (
+                  <option key={t.user_email} value={t.user_email}>{t.user_email.split('@')[0]} — {t.template_name}</option>
+                ))}
+              </select>
+            </div>
+          )}
+
+          <div style={{ display: 'grid', gap: '0.35rem' }}>
+            <label style={{ fontSize: '0.75rem', color: 'var(--text-2)', fontWeight: 500 }}>Template Name</label>
+            <input className="input" value={editName} onChange={e => setEditName(e.target.value)} />
+          </div>
+
+          <div style={{ display: 'grid', gap: '0.35rem' }}>
+            <label style={{ fontSize: '0.75rem', color: 'var(--text-2)', fontWeight: 500 }}>Template Content</label>
+            <div style={{ fontSize: '0.7rem', color: 'var(--text-3)' }}>
+              Placeholders: {'{account}'} {'{prospect_name}'} {'{prospect_linkedin}'} {'{website}'} {'{call_context}'} {'{competitor}'} {'{email_to}'} {'{email_tone}'}
+            </div>
+            <textarea
+              className="input"
+              rows={16}
+              value={editContent}
+              onChange={e => setEditContent(e.target.value)}
+              style={{ fontFamily: 'monospace', fontSize: '0.78rem', minHeight: '300px', resize: 'vertical' }}
+            />
+          </div>
+
+          <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center', flexWrap: 'wrap' }}>
+            <button className="btn btn-primary" onClick={save} disabled={saving || !editContent.trim()}>
+              {saving ? 'Saving…' : 'Save My Template'}
+            </button>
+            <button className="btn" onClick={() => { loadDefault(); }} style={{ fontSize: '0.75rem' }}>
+              Reset to Default
+            </button>
+            {saveMsg && <span style={{ fontSize: '0.78rem', color: 'var(--text-2)' }}>{saveMsg}</span>}
+          </div>
         </div>
       )}
-
-      {/* Template name */}
-      <div style={{ display: 'grid', gap: '0.35rem' }}>
-        <label style={{ fontSize: '0.75rem', color: 'var(--text-2)', fontWeight: 500 }}>Template Name</label>
-        <input className="input" value={editName} onChange={e => setEditName(e.target.value)} />
-      </div>
-
-      {/* Template content */}
-      <div style={{ display: 'grid', gap: '0.35rem' }}>
-        <label style={{ fontSize: '0.75rem', color: 'var(--text-2)', fontWeight: 500 }}>Template Content</label>
-        <div style={{ fontSize: '0.7rem', color: 'var(--text-3)', marginBottom: '0.25rem' }}>
-          Use {'{account}'}, {'{prospect_name}'}, {'{call_context}'}, {'{competitor}'}, etc. as placeholders.
-        </div>
-        <textarea
-          className="input"
-          rows={12}
-          value={editContent}
-          onChange={e => setEditContent(e.target.value)}
-          style={{ fontFamily: 'monospace', fontSize: '0.8rem', minHeight: '220px', resize: 'vertical' }}
-        />
-      </div>
-
-      <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center' }}>
-        <button className="btn btn-primary" onClick={save} disabled={saving || !editContent.trim()}>
-          {saving ? 'Saving…' : 'Save My Template'}
-        </button>
-        {saveMsg && <span style={{ fontSize: '0.78rem', color: 'var(--text-2)' }}>{saveMsg}</span>}
-      </div>
     </div>
   );
 }

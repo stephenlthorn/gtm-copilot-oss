@@ -1,3 +1,4 @@
+import Link from 'next/link';
 import { getSession } from '../../../lib/session';
 import { apiGet } from '../../../lib/api';
 import GoogleDrivePanel from '../../../components/GoogleDrivePanel';
@@ -69,7 +70,8 @@ export default async function SettingsPage() {
           <div className="topbar-title">Settings</div>
           <div className="topbar-meta">Account · knowledge · AI · data</div>
         </div>
-        <div className="topbar-right">
+        <div className="topbar-right" style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+          <Link href="/chat" style={{ fontSize: '0.78rem', color: 'var(--text-2)', padding: '0.3rem 0.6rem', borderRadius: '4px', textDecoration: 'none', border: '1px solid var(--border)' }}>← Back to Chat</Link>
           <span className={`tag ${liveMode ? 'tag-green' : ''}`}>{liveMode ? 'Live data' : 'No data yet'}</span>
         </div>
       </div>

@@ -194,93 +194,244 @@ export default function ChatWorkspace() {
   );
 }
 
-// Hardcoded defaults (fallback when backend unavailable)
-const HARDCODED_DEFAULTS = {
-  pre_call: `I'm preparing for a call with {prospect_name} at {account} ({website}). Research the following and fill in each section completely.
+// Hardcoded defaults (source of truth — also seeded to DB)
+export const HARDCODED_DEFAULTS = {
+  pre_call: `I'm preparing for a sales call with {prospect_name} at {account} ({website}). Please research this prospect and company thoroughly and complete each section below.
 
 **Section 1 — Prospect Information**
-- Name: {prospect_name}
-- LinkedIn: {prospect_linkedin}
-- Role / Title: [find from LinkedIn or web]
-- Time at current company: [find from LinkedIn]
-- Relevant previous company or role: [find from LinkedIn]
+Research {prospect_name} ({prospect_linkedin}) and document:
+• Name: {prospect_name}
+• Role / Title:
+• Time at current company:
+• Relevant previous company or role:
+
+Example:
+Prospect: John Smith
+Role: Director of Platform Engineering
+Time at company: 3 years
+Previous company: Stripe – Senior Infrastructure Engineer
 
 **Section 2 — Company Context**
-- Company: {account}
-- # of employees or revenue range: [find from web/Crunchbase]
-- Industry: [identify]
-- Product or service they provide: [summarize]
-- Key competitors: [list 2-3]
+Research {account} ({website}) and document:
+• # of employees or revenue range:
+• Industry:
+• Product or service they provide:
+• Key competitors:
 
 **Section 3 — Current Architecture Hypothesis**
-Based on job postings, GitHub, BuiltWith, and news:
-- Databases they likely use: [e.g. Aurora, MySQL, PostgreSQL]
-- Applications or microservices: [describe if known]
-- Cloud provider / infrastructure: [AWS / GCP / Azure / hybrid]
+Based on job postings, GitHub, BuiltWith, Stackshare, and news — hypothesize:
+• Databases they likely use:
+• Applications or microservices:
+• Cloud provider / infrastructure:
+
+Example:
+Databases: Aurora, Redis
+Cloud: AWS
+Architecture: microservices-based platform
 
 **Section 4 — Pain Hypothesis**
-Identify at least two likely pains (e.g. scaling database clusters, operational complexity, cost of infrastructure, analytics latency, MySQL sharding limits):
-1. [Pain 1 + evidence or signal]
-2. [Pain 2 + evidence or signal]
+Document at least two potential pains the prospect may have.
+Examples: scaling database clusters, operational complexity, cost of infrastructure, analytics latency, MySQL sharding limits
+
+1. Pain:
+   Signal / evidence:
+2. Pain:
+   Signal / evidence:
 
 **Section 5 — Relevant TiDB Value Propositions**
 Match each pain to a specific TiDB capability:
-- Pain: [Pain 1] → Value Prop: [TiDB capability]
-- Pain: [Pain 2] → Value Prop: [TiDB capability]
+
+Pain: [Pain 1]
+Value Prop:
+
+Pain: [Pain 2]
+Value Prop:
+
+Example:
+Pain: operational complexity
+Value Prop: No manual sharding; automatic recovery after failure; one system for OLTP and OLAP
 
 **Section 6 — Meeting Goal**
-Suggested desired outcome of the meeting (e.g. schedule architecture deep dive, obtain data for sizing exercise, introduce platform team stakeholders):
-[Suggest based on company stage and pain]
+Define the desired outcome of this meeting. Suggest one:
+• Schedule architecture deep dive
+• Obtain data for sizing exercise
+• Introduce platform team stakeholders
+• Confirm champion and access to economic buyer
+
+Suggested goal based on research:
 
 **Section 7 — Meeting Flow Agreement**
-Suggest how the meeting should run:
-- Who does introductions: [Rep / SE]
-- Who leads discovery: [Rep]
-- Who handles technical questions: [SE]
-- Suggested time allocation: [e.g. 5 min intro, 20 min discovery, 15 min demo/overview, 5 min next steps]
-- Who asks for next steps: [Rep]`,
+Document how the meeting will run:
+• Who does introductions:
+• Who leads discovery:
+• Who handles technical questions:
+• Time allocation (e.g. 5 min intro / 20 min discovery / 10 min TiDB overview / 5 min next steps):
+• Who asks for next steps:`,
 
-  post_call: `I just completed a call with {account}. Here are the call details:
+  post_call: `I just completed a sales call with {account}. Here are the call details:
 
 {call_context}
 
-Please analyze and produce:
-1. **Call Summary** — key topics discussed, decisions made
-2. **Next Steps** — agreed actions with owners (Rep, SE, Prospect)
-3. **Action Items** — broken out per person: Rep / SE / {account} contact
-4. **MEDDPICC Analysis** — for each element (Metrics, Economic Buyer, Decision Criteria, Decision Process, Paper Process, Implicate Pain, Champion, Competition): what was established vs. what is missing
-5. **Qualification Assessment** — is this deal actually qualified? What are the top 3 gaps to close?`,
+Please analyze the call and produce a complete post-call brief:
+
+**Call Summary**
+Summarize the key topics discussed, decisions made, and overall tone of the call.
+
+**Next Steps**
+List all agreed-upon next steps with owners and target dates.
+
+**Action Items by Person**
+
+Rep:
+•
+
+SE:
+•
+
+{account} Contact:
+•
+
+**MEDDPICC Analysis**
+For each element, note what was established on this call and what is still missing:
+
+Metrics (quantifiable impact / value):
+Economic Buyer (who controls budget):
+Decision Criteria (what they will evaluate):
+Decision Process (how they make the decision):
+Paper Process (legal / procurement / security steps):
+Implicate Pain (is the pain urgent enough to act?):
+Champion (who is selling internally for us?):
+Competition (what else are they evaluating?):
+
+**Qualification Assessment**
+• Is this deal actually qualified? (Yes / No / Conditional)
+• Top 3 qualification gaps to close:
+  1.
+  2.
+  3.
+• Recommended next action to advance:`,
 
   follow_up: `Draft a follow-up email for my call with {account}.
 
-Recipients: To: {email_to} | CC: {email_cc}
+To: {email_to}
+CC: {email_cc}
 Tone: {email_tone}
-Call context: {call_context}
 
-Include: summary of what was discussed, agreed next steps with owners, clear CTA for the next meeting.`,
+Call context:
+{call_context}
 
-  tal: `Build a target account list for the following criteria:
-- Regions: {regions}
-- Industry: {industry}
-- Revenue range: \${revenue_min}M – \${revenue_max}M
-- Reference account: {account}
-- Additional context: {context}
+The email should include:
+1. A brief thank-you and summary of what was discussed
+2. Agreed next steps with clear owners and dates
+3. Any resources or materials promised during the call
+4. A clear call-to-action for scheduling the next meeting
 
-Return the top {top_n} accounts most likely to need TiDB. For each: company name, why they're a fit, estimated revenue, and key signal.`,
+Keep it concise and professional. Match the {email_tone} tone:
+• crisp = brief and direct
+• executive = polished and high-level
+• technical = detailed and specific`,
 
-  se_poc_plan: `Create a technical POC evaluation roadmap for {account}.
+  tal: `Build a target account list based on the following criteria:
+
+Reference account: {account}
+Regions / Territory: {regions}
+Industry vertical: {industry}
+Revenue range: \${revenue_min}M – \${revenue_max}M
+Additional context: {context}
+
+Return the top {top_n} accounts most likely to benefit from TiDB. For each account provide:
+• Company name
+• Why they are a strong TiDB fit (specific signal)
+• Estimated revenue or employee count
+• Key pain signal (job postings, tech stack, news)
+• Recommended entry point (who to target, what angle)
+
+Prioritize companies showing signals of: MySQL/Aurora at scale, database sharding, high-volume OLTP, real-time analytics needs, or significant infrastructure investment.`,
+
+  se_poc_plan: `Create a detailed technical POC evaluation roadmap for {account}.
+
 Offering: {target_offering}
 Call context: {call_context}
 
-Include: POC objectives, success criteria, technical requirements, 4-week milestone plan, resources needed, risk factors.`,
+Produce a complete POC plan including:
+
+**POC Objectives**
+What success looks like for the customer and for us.
+
+**Success Criteria**
+Specific, measurable criteria the customer will use to evaluate TiDB. Include at least 3.
+
+**Technical Requirements**
+What we need from the customer to run the POC (access, data, team members, environments).
+
+**4-Week Milestone Plan**
+Week 1: Setup and baseline
+Week 2: Core workload migration / test
+Week 3: Performance and scale testing
+Week 4: Results review and business case
+
+**Resources Required**
+From TiDB side and from customer side.
+
+**Risk Factors & Mitigations**
+Top 3 risks and how to address them.
+
+**Recommended POC Kit**
+Suggest relevant TiDB documentation, benchmarks, or migration tools.`,
 
   se_arch_fit: `Analyze TiDB architecture fit for {account}.
+
 Call context: {call_context}
 
-Cover: current database signals, scalability pain, MySQL/Oracle compatibility needs, HTAP potential, migration complexity, TiDB placement recommendation.`,
+Produce a complete architecture fit analysis:
 
-  se_competitor: `Competitor coaching for {account} — primary competitor: {competitor}.
+**Current State Assessment**
+Based on call context and research — what database and infrastructure does {account} likely use today?
+
+**Scalability Pain Signals**
+What evidence suggests they are hitting scale limits with their current stack?
+
+**MySQL / PostgreSQL / Oracle Compatibility**
+How compatible is their existing workload with TiDB's MySQL compatibility layer?
+
+**HTAP Opportunity**
+Is there a real-time analytics or HTAP use case? Describe it if present.
+
+**Migration Complexity Assessment**
+Rate migration complexity (Low / Medium / High) and explain why.
+
+**TiDB Placement Recommendation**
+Where does TiDB fit in their architecture?
+(Replace primary DB / Add as analytics layer / Modernize sharded MySQL / Greenfield new service)
+
+**Target State Architecture**
+Describe what the architecture would look like with TiDB in place.`,
+
+  se_competitor: `Competitor coaching for {account} — primary competitor in this deal: {competitor}.
+
 Call context: {call_context}
 
-Provide: competitive positioning vs {competitor}, top 5 objections and TiDB responses, where TiDB wins and where to be careful, recommended proof points.`,
+Produce a complete competitive coaching brief:
+
+**Competitive Positioning vs {competitor}**
+Where TiDB wins, where to be careful, and where it is a draw.
+
+**Top 5 Objections & TiDB Responses**
+1. Objection: | Response:
+2. Objection: | Response:
+3. Objection: | Response:
+4. Objection: | Response:
+5. Objection: | Response:
+
+**{competitor} Weaknesses to Probe**
+Key questions to ask the customer that expose {competitor} limitations.
+
+**TiDB Proof Points**
+Specific benchmarks, case studies, or technical references that counter {competitor}'s strengths.
+
+**Recommended Demo or POC Focus**
+What to show in a demo or POC that {competitor} cannot match.
+
+**Deal Strategy Recommendation**
+Given what we know about {account} and {competitor}, what is the recommended win strategy?`,
 };
