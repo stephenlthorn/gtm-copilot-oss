@@ -1,5 +1,6 @@
 'use client';
 import { useState, useEffect, useRef } from 'react';
+import Link from 'next/link';
 import PersistentChat from './PersistentChat';
 import PreCallFields from './SectionFields/PreCallFields';
 import PostCallFields from './SectionFields/PostCallFields';
@@ -126,8 +127,30 @@ export default function ChatWorkspace() {
 
   const canPopulate = Boolean(fieldValues.account?.trim());
 
+  const [loggingOut, setLoggingOut] = useState(false);
+  const handleLogout = async () => {
+    setLoggingOut(true);
+    await fetch('/api/auth/logout', { method: 'POST' });
+    window.location.href = '/login';
+  };
+
   return (
-    <div className="rep-split">
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100vh' }}>
+      {/* Top bar */}
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0.45rem 1rem', borderBottom: '1px solid var(--border)', background: 'var(--bg-2)', flexShrink: 0, gap: '0.5rem' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+          <span style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--text)' }}>GTM Copilot</span>
+          <span style={{ fontSize: '0.7rem', color: 'var(--text-3)' }}>Revenue Intelligence</span>
+        </div>
+        <div style={{ display: 'flex', gap: '0.35rem' }}>
+          <Link href="/settings" style={{ fontSize: '0.78rem', color: 'var(--text-2)', padding: '0.3rem 0.6rem', borderRadius: '4px', textDecoration: 'none', border: '1px solid var(--border)' }}>⚙ Settings</Link>
+          <button onClick={handleLogout} disabled={loggingOut} style={{ fontSize: '0.78rem', color: 'var(--text-2)', padding: '0.3rem 0.6rem', borderRadius: '4px', background: 'transparent', border: '1px solid var(--border)', cursor: 'pointer' }}>
+            {loggingOut ? 'Signing out…' : '→ Sign out'}
+          </button>
+        </div>
+      </div>
+
+    <div className="rep-split" style={{ flex: 1, minHeight: 0 }}>
       {/* LEFT */}
       <div className="rep-inputs">
         <div className="rep-inputs-scroll">
@@ -167,19 +190,55 @@ export default function ChatWorkspace() {
       {/* RIGHT */}
       <PersistentChat draft={chatDraft} populateSignal={populateSignal} />
     </div>
+    </div>
   );
 }
 
 // Hardcoded defaults (fallback when backend unavailable)
 const HARDCODED_DEFAULTS = {
-  pre_call: `I'm preparing for a call with {prospect_name} at {account} ({website}).
+  pre_call: `I'm preparing for a call with {prospect_name} at {account} ({website}). Research the following and fill in each section completely.
 
-Please provide:
-1. Company overview and recent news for {account}
-2. LinkedIn background on {prospect_name}: {prospect_linkedin}
-3. Technology stack signals (database, infrastructure)
-4. Funding, headcount, and growth trajectory
-5. Likely pain points relevant to TiDB`,
+**Section 1 — Prospect Information**
+- Name: {prospect_name}
+- LinkedIn: {prospect_linkedin}
+- Role / Title: [find from LinkedIn or web]
+- Time at current company: [find from LinkedIn]
+- Relevant previous company or role: [find from LinkedIn]
+
+**Section 2 — Company Context**
+- Company: {account}
+- # of employees or revenue range: [find from web/Crunchbase]
+- Industry: [identify]
+- Product or service they provide: [summarize]
+- Key competitors: [list 2-3]
+
+**Section 3 — Current Architecture Hypothesis**
+Based on job postings, GitHub, BuiltWith, and news:
+- Databases they likely use: [e.g. Aurora, MySQL, PostgreSQL]
+- Applications or microservices: [describe if known]
+- Cloud provider / infrastructure: [AWS / GCP / Azure / hybrid]
+
+**Section 4 — Pain Hypothesis**
+Identify at least two likely pains (e.g. scaling database clusters, operational complexity, cost of infrastructure, analytics latency, MySQL sharding limits):
+1. [Pain 1 + evidence or signal]
+2. [Pain 2 + evidence or signal]
+
+**Section 5 — Relevant TiDB Value Propositions**
+Match each pain to a specific TiDB capability:
+- Pain: [Pain 1] → Value Prop: [TiDB capability]
+- Pain: [Pain 2] → Value Prop: [TiDB capability]
+
+**Section 6 — Meeting Goal**
+Suggested desired outcome of the meeting (e.g. schedule architecture deep dive, obtain data for sizing exercise, introduce platform team stakeholders):
+[Suggest based on company stage and pain]
+
+**Section 7 — Meeting Flow Agreement**
+Suggest how the meeting should run:
+- Who does introductions: [Rep / SE]
+- Who leads discovery: [Rep]
+- Who handles technical questions: [SE]
+- Suggested time allocation: [e.g. 5 min intro, 20 min discovery, 15 min demo/overview, 5 min next steps]
+- Who asks for next steps: [Rep]`,
 
   post_call: `I just completed a call with {account}. Here are the call details:
 
