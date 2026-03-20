@@ -375,6 +375,7 @@ class UserPreference(Base):
     user_email: Mapped[str] = mapped_column(String(255), primary_key=True)
     llm_model: Mapped[str | None] = mapped_column(String(64))
     reasoning_effort: Mapped[str | None] = mapped_column(String(16))
+    retrieval_top_k: Mapped[int | None] = mapped_column(Integer, nullable=True)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
     )

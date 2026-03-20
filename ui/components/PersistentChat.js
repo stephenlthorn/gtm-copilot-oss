@@ -1,7 +1,7 @@
 'use client';
 import { useState, useEffect, useRef } from 'react';
 
-export default function PersistentChat({ draft, populateSignal, ragEnabled = true, webSearchEnabled = true }) {
+export default function PersistentChat({ draft, populateSignal, ragEnabled = true, webSearchEnabled = true, topK = 8 }) {
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
@@ -43,7 +43,7 @@ export default function PersistentChat({ draft, populateSignal, ragEnabled = tru
       const res = await fetch('/api/oracle', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ mode: 'oracle', message: q, top_k: 8, rag_enabled: ragEnabled, web_search_enabled: webSearchEnabled }),
+        body: JSON.stringify({ mode: 'oracle', message: q, top_k: topK, rag_enabled: ragEnabled, web_search_enabled: webSearchEnabled }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data?.error || 'Request failed');

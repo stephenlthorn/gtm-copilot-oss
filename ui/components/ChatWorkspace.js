@@ -9,6 +9,7 @@ import TalFields from './SectionFields/TalFields';
 import SEPocPlanFields from './SectionFields/SEPocPlanFields';
 import SEArchFitFields from './SectionFields/SEArchFitFields';
 import SECompetitorFields from './SectionFields/SECompetitorFields';
+import ModelPickerDropdown from './ModelPickerDropdown';
 
 const SECTIONS = [
   { key: 'pre_call', label: 'Pre-Call Intel' },
@@ -40,6 +41,7 @@ export default function ChatWorkspace() {
   const [populateSignal, setPopulateSignal] = useState(0); // increment to trigger populate
   const [ragEnabled, setRagEnabled] = useState(true);
   const [webSearchEnabled, setWebSearchEnabled] = useState(true);
+  const [topK, setTopK] = useState(8);
 
   // Fetch templates on mount
   useEffect(() => {
@@ -140,9 +142,9 @@ export default function ChatWorkspace() {
     <div style={{ display: 'flex', flexDirection: 'column', height: '100vh' }}>
       {/* Top bar */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0.45rem 1rem', borderBottom: '1px solid var(--border)', background: 'var(--bg-2)', flexShrink: 0, gap: '0.5rem' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
           <span style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--text)' }}>GTM Copilot</span>
-          <span style={{ fontSize: '0.7rem', color: 'var(--text-3)' }}>Revenue Intelligence</span>
+          <ModelPickerDropdown onTopKChange={setTopK} />
         </div>
         <div style={{ display: 'flex', gap: '0.35rem', alignItems: 'center' }}>
           <button
@@ -204,7 +206,7 @@ export default function ChatWorkspace() {
       </div>
 
       {/* RIGHT */}
-      <PersistentChat draft={chatDraft} populateSignal={populateSignal} ragEnabled={ragEnabled} webSearchEnabled={webSearchEnabled} />
+      <PersistentChat draft={chatDraft} populateSignal={populateSignal} ragEnabled={ragEnabled} webSearchEnabled={webSearchEnabled} topK={topK} />
     </div>
     </div>
   );

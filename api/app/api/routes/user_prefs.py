@@ -36,6 +36,8 @@ def upsert_user_preferences(
         pref.llm_model = body.llm_model or None
     if body.reasoning_effort is not None:
         pref.reasoning_effort = body.reasoning_effort or None
+    if body.retrieval_top_k is not None:
+        pref.retrieval_top_k = body.retrieval_top_k
     db.commit()
     db.refresh(pref)
     return pref

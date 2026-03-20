@@ -2,21 +2,6 @@
 
 import { useState, useEffect } from 'react';
 
-const MODELS = [
-  { id: 'gpt-5.4',           label: '5.4',         reasoning: true  },
-  { id: 'gpt-5.4-mini',      label: '5.4 Mini',    reasoning: true  },
-  { id: 'gpt-5.4-nano',      label: '5.4 Nano',    reasoning: false },
-  { id: 'gpt-5.3-codex',     label: '5.3 Codex',   reasoning: true  },
-  { id: 'o4-mini',           label: 'o4-mini',      reasoning: true  },
-  { id: 'o3',                label: 'o3',           reasoning: true  },
-  { id: 'o3-pro',            label: 'o3 Pro',       reasoning: true  },
-  { id: 'o3-mini',           label: 'o3 Mini',      reasoning: true  },
-  { id: 'gpt-5.1-codex',     label: '5.1 Codex',   reasoning: true  },
-  { id: 'gpt-5-codex-mini',  label: 'Mini',         reasoning: false },
-];
-
-const THINKING_LEVELS = ['low', 'medium', 'high'];
-
 export default function KBConfigPanel() {
   const [config, setConfig] = useState(null);
   const [error, setError] = useState('');
@@ -131,59 +116,6 @@ export default function KBConfigPanel() {
         <span className="panel-title">Knowledge Base</span>
       </div>
       <div className="panel-body" style={{ display: 'grid', gap: '1.25rem' }}>
-
-        {/* LLM Model */}
-        <div style={{ display: 'grid', gap: '0.4rem' }}>
-          <label style={{ fontSize: '0.74rem', color: 'var(--text-3)' }}>LLM Model</label>
-          <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap' }}>
-            {MODELS.map(m => (
-              <button
-                key={m.id}
-                className={config.llm_model === m.id ? 'btn btn-primary' : 'btn'}
-                style={{ fontSize: '0.75rem' }}
-                onClick={() => set('llm_model', m.id)}
-              >
-                {m.label}
-              </button>
-            ))}
-          </div>
-        </div>
-        {MODELS.find(m => m.id === config.llm_model)?.reasoning && (
-          <div style={{ marginTop: '0.75rem' }}>
-            <label style={{ fontSize: '0.8rem', color: 'var(--dim)', display: 'block', marginBottom: '0.5rem' }}>
-              THINKING LEVEL
-            </label>
-            <div style={{ display: 'flex', gap: '0.5rem' }}>
-              {THINKING_LEVELS.map(level => (
-                <button
-                  key={level}
-                  className={(config.reasoning_effort || 'medium') === level ? 'btn btn-primary' : 'btn'}
-                  style={{ fontSize: '0.75rem', textTransform: 'capitalize' }}
-                  onClick={() => set('reasoning_effort', level)}
-                >
-                  {level}
-                </button>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {/* Retrieval depth */}
-        <div style={{ display: 'grid', gap: '0.4rem' }}>
-          <label style={{ fontSize: '0.74rem', color: 'var(--text-3)' }}>Retrieval Depth (top-k)</label>
-          <div style={{ display: 'flex', gap: '0.4rem' }}>
-            {[4, 8, 12, 20].map(k => (
-              <button
-                key={k}
-                className={config.retrieval_top_k === k ? 'btn btn-primary' : 'btn'}
-                style={{ minWidth: '2.8rem' }}
-                onClick={() => set('retrieval_top_k', k)}
-              >
-                {k}
-              </button>
-            ))}
-          </div>
-        </div>
 
         {/* Tools */}
         <div style={{ display: 'grid', gap: '0.4rem' }}>

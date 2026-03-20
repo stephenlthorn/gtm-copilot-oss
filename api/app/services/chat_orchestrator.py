@@ -348,6 +348,8 @@ class ChatOrchestrator:
                 resolved_model = user_pref.llm_model
             if user_pref.reasoning_effort:
                 resolved_reasoning = user_pref.reasoning_effort
+            if getattr(user_pref, "retrieval_top_k", None):
+                resolved_top_k = user_pref.retrieval_top_k
 
         mode_filters = dict(filters or {})
         mode_filters["viewer_email"] = (user or "").strip().lower()
