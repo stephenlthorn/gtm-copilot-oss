@@ -21,7 +21,7 @@ class Settings(BaseSettings):
     redis_url: str = "redis://localhost:6379/0"
 
     embedding_dimensions: int = 1536
-    retrieval_top_k: int = 8
+    retrieval_top_k: int = 20
 
     openai_base_url: str | None = None
     openai_api_key: str | None = None
@@ -71,6 +71,10 @@ class Settings(BaseSettings):
     slack_bot_token: str | None = None
     slack_signing_secret: str | None = None
     slack_default_channel: str | None = None
+
+    # OSINT / research connectors
+    firecrawl_api_key: str | None = None
+    zoominfo_api_key: str | None = None
 
     tidb_ssl_ca: str | None = None
     database_backend: str = "auto"

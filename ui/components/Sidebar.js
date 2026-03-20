@@ -6,8 +6,9 @@ import { usePathname } from 'next/navigation';
 import { useState } from 'react';
 
 const PERSONAS = [
-  { href: '/rep', label: 'Sales Rep',      icon: '◎' },
-  { href: '/se',  label: 'Sales Engineer', icon: '⬡' },
+  { href: '/rep',    label: 'Sales Rep',      icon: '◎' },
+  { href: '/se',     label: 'Sales Engineer', icon: '⬡' },
+  { href: '/oracle', label: 'Ask Oracle',     icon: '◈' },
 ];
 
 const UTILITY = [

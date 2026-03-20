@@ -1,5 +1,6 @@
 import { getSession } from '../../lib/session';
 import Sidebar from '../../components/Sidebar';
+import OracleChatOverlay from '../../components/OracleChatOverlay';
 
 export default async function AppLayout({ children }) {
   const session = await getSession();
@@ -15,6 +16,7 @@ export default async function AppLayout({ children }) {
         </div>
         {children}
       </div>
+      <OracleChatOverlay />
     </div>
   );
 }
