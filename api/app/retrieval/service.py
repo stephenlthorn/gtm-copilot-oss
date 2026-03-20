@@ -193,27 +193,7 @@ class HybridRetriever:
             base_stmt = base_stmt.where(KBDocument.source_type.in_(sorted(source_filter)))
 
         rows: list[tuple[KBChunk, KBDocument]] = []
-        if dialect == "postgresql":
-            try:
-                if semantic_available:
-                    vector_rows = self.db.execute(
-                        base_stmt.where(KBChunk.embedding.is_not(None))
-                        .order_by(KBChunk.embedding.cosine_distance(q_vec))
-                        .limit(candidate_limit)
-                    ).all()
-                    rows.extend(vector_rows)
-            except Exception:
-                # Fallback if pgvector ordering fails in a specific environment.
-                self.db.rollback()
-                rows.extend(self.db.execute(base_stmt.limit(candidate_limit)).all())
-
-            if terms:
-                keyword_clauses = [KBChunk.text.ilike(f"%{term}%") for term in terms[:6]]
-                keyword_rows = self.db.execute(
-                    base_stmt.where(or_(*keyword_clauses)).limit(candidate_limit)
-                ).all()
-                rows.extend(keyword_rows)
-        elif dialect == "mysql":
+        if dialect == "mysql":
             # TiDB vector search using VEC_COSINE_DISTANCE
             try:
                 if semantic_available and q_vec:
@@ -237,7 +217,7 @@ class HybridRetriever:
                 ).all()
                 rows.extend(keyword_rows)
         else:
-            # Non-Postgres path (sqlite): use bounded candidate sets plus lexical filters.
+            # SQLite fallback for local unit tests.
             rows.extend(self.db.execute(base_stmt.limit(candidate_limit)).all())
             if terms:
                 keyword_clauses = [KBChunk.text.ilike(f"%{term}%") for term in terms[:6]]

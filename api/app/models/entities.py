@@ -4,7 +4,6 @@ import enum
 import uuid
 from datetime import date, datetime
 
-from pgvector.sqlalchemy import Vector
 from sqlalchemy import JSON, Date, DateTime, Enum, ForeignKey, Index, Integer, String, Text, UniqueConstraint, Uuid, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -14,11 +13,11 @@ from app.db.tidb_vector import TiDBVector
 
 UUID_TYPE = Uuid(as_uuid=True)
 JSON_TYPE = JSON
+# TiDB Cloud Serverless is the only supported vector backend.
+# SQLite is kept for local unit tests (stores vectors as JSON text).
 VECTOR_TYPE = (
-    Vector(DEFAULT_EMBEDDING_DIMENSIONS)
-    .with_variant(TiDBVector(DEFAULT_EMBEDDING_DIMENSIONS), "mysql")
+    TiDBVector(DEFAULT_EMBEDDING_DIMENSIONS)
     .with_variant(JSON, "sqlite")
-    .with_variant(JSON, "mariadb")
 )
 
 

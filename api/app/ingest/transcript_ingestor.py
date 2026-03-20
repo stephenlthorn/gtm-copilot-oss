@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import logging
+import time
 from datetime import date
 
 from sqlalchemy import delete, select
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from app.ingest.chorus_connector import ChorusConnector
@@ -11,6 +14,8 @@ from app.services.artifact_generator import ArtifactGenerator
 from app.services.embedding import EmbeddingService
 from app.utils.chunking import chunk_transcript_turns
 from app.utils.hashing import sha256_text
+
+logger = logging.getLogger(__name__)
 
 
 class TranscriptIngestor:
@@ -224,10 +229,19 @@ class TranscriptIngestor:
             )
         )
 
+    def _ingest_one(self, normalized: dict) -> None:
+        """Ingest a single normalized call into TiDB with rollback on failure."""
+        call = self._upsert_call(normalized)
+        doc = self._upsert_document(normalized, call)
+        snippets = self._replace_chunks(doc, normalized)
+        self._replace_artifact(normalized["chorus_call_id"], normalized, snippets)
+
     def sync(self, since: date | None = None) -> dict:
         raw_calls = self.connector.fetch_calls(since=since)
         processed = 0
         skipped = 0
+        failed = 0
+        summary_fallbacks = 0
 
         for raw in raw_calls:
             # Skip non-meeting engagements (emails, content_viewed, etc.)
@@ -243,14 +257,39 @@ class TranscriptIngestor:
                 skipped += 1
                 continue
 
-            call = self._upsert_call(normalized)
-            doc = self._upsert_document(normalized, call)
-            snippets = self._replace_chunks(doc, normalized)
-            self._replace_artifact(normalized["chorus_call_id"], normalized, snippets)
-            processed += 1
+            # Track if this call is using summary fallback instead of full transcript
+            transcript = raw.payload.get("transcript") or ""
+            if not transcript:
+                summary_fallbacks += 1
+                logger.warning(
+                    "Call %s (%s): no utterance transcript — using summary fallback",
+                    raw.chorus_call_id,
+                    raw.payload.get("account_name", "unknown"),
+                )
+
+            # Retry up to 3 times on TiDB transient errors
+            for attempt in range(3):
+                try:
+                    self._ingest_one(normalized)
+                    processed += 1
+                    break
+                except SQLAlchemyError as exc:
+                    self.db.rollback()
+                    if attempt == 2:
+                        logger.error("Failed to ingest call %s after 3 attempts: %s", raw.chorus_call_id, exc)
+                        failed += 1
+                    else:
+                        wait = 2 ** attempt
+                        logger.warning("TiDB error for call %s (attempt %d), retrying in %ds: %s", raw.chorus_call_id, attempt + 1, wait, exc)
+                        time.sleep(wait)
 
         self.db.commit()
-        return {"calls_seen": len(raw_calls), "processed": processed, "skipped": skipped}
+        result = {"calls_seen": len(raw_calls), "processed": processed, "skipped": skipped}
+        if failed:
+            result["failed"] = failed
+        if summary_fallbacks:
+            result["summary_fallbacks"] = summary_fallbacks
+        return result
 
 
 def _to_date_str(raw: object) -> str:

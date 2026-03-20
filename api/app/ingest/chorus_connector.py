@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import time
 from dataclasses import dataclass
 from datetime import date, datetime
 from pathlib import Path
@@ -102,8 +103,7 @@ class ChorusConnector:
             for page in range(max_pages):
                 url = f"{self.base_url}/v3/engagements"
                 logger.info("Fetching Chorus engagements page %d", page)
-                resp = client.get(url, headers=headers, params=params)
-                resp.raise_for_status()
+                resp = _http_get_with_retry(client, url, headers=headers, params=params)
                 data = resp.json()
 
                 records = data.get("engagements") or []
@@ -137,39 +137,58 @@ class ChorusConnector:
         call_id: str,
         engagement: dict,
     ) -> dict:
-        """Fetch full conversation (with utterance transcript) from /api/v1/conversations/:id."""
-        try:
-            url = f"{self.base_url}/api/v1/conversations/{call_id}"
-            resp = client.get(
-                url,
-                headers={**headers, "Accept": "application/vnd.api+json"},
-                timeout=30.0,
-            )
-            if resp.status_code == 404:
-                logger.debug("Conversation %s not found, using engagement data only", call_id)
-                return engagement
+        """Fetch full conversation (with utterance transcript) from /api/v1/conversations/:id.
 
-            resp.raise_for_status()
-            conv_data = resp.json()
+        Retries up to 3 times on transient errors. Full utterance-level transcript is
+        always preferred; meeting_summary is only used as a last resort when no utterances
+        are available at all.
+        """
+        url = f"{self.base_url}/api/v1/conversations/{call_id}"
+        conv_headers = {**headers, "Accept": "application/vnd.api+json"}
 
-            # Merge engagement metadata into conversation payload
-            attrs = (conv_data.get("data") or {}).get("attributes") or {}
-            result = dict(engagement)
-            result["_conversation"] = attrs
+        for attempt in range(3):
+            try:
+                resp = client.get(url, headers=conv_headers, timeout=30.0)
+                if resp.status_code == 404:
+                    logger.debug("Conversation %s not found (attempt %d)", call_id, attempt + 1)
+                    return engagement
+                if resp.status_code == 429 or resp.status_code >= 500:
+                    wait = 2 ** attempt
+                    logger.warning("Chorus %d for %s, retrying in %ds", resp.status_code, call_id, wait)
+                    time.sleep(wait)
+                    continue
+                resp.raise_for_status()
+                conv_data = resp.json()
 
-            # Build utterance transcript
-            utterances = (attrs.get("recording") or {}).get("utterances") or []
-            if utterances:
-                result["transcript"] = _build_transcript(utterances)
+                # Merge engagement metadata into conversation payload
+                attrs = (conv_data.get("data") or {}).get("attributes") or {}
+                result = dict(engagement)
+                result["_conversation"] = attrs
 
-            result["meeting_summary"] = attrs.get("summary") or engagement.get("meeting_summary")
-            result["action_items"] = attrs.get("action_items") or []
+                # Build utterance transcript — this is the primary content source
+                utterances = (attrs.get("recording") or {}).get("utterances") or []
+                if utterances:
+                    result["transcript"] = _build_transcript(utterances)
+                    logger.info("Call %s: %d utterances", call_id, len(utterances))
+                else:
+                    logger.warning("Call %s: no utterances returned (will use summary fallback)", call_id)
 
-            return result
+                result["meeting_summary"] = attrs.get("summary") or engagement.get("meeting_summary")
+                result["action_items"] = attrs.get("action_items") or []
+                return result
 
-        except Exception as exc:
-            logger.warning("Could not fetch conversation %s: %s", call_id, exc)
-            return engagement
+            except httpx.TimeoutException:
+                wait = 2 ** attempt
+                logger.warning("Timeout fetching conversation %s (attempt %d), retrying in %ds", call_id, attempt + 1, wait)
+                time.sleep(wait)
+            except Exception as exc:
+                logger.warning("Error fetching conversation %s (attempt %d): %s", call_id, attempt + 1, exc)
+                if attempt == 2:
+                    return engagement
+                time.sleep(2 ** attempt)
+
+        logger.error("All retries failed for conversation %s, using engagement data only", call_id)
+        return engagement
 
 
 def _build_transcript(utterances: list[dict]) -> str:
@@ -181,3 +200,25 @@ def _build_transcript(utterances: list[dict]) -> str:
         if text:
             lines.append(f"{speaker}: {text}")
     return "\n".join(lines)
+
+
+def _http_get_with_retry(
+    client: httpx.Client,
+    url: str,
+    *,
+    headers: dict,
+    params: dict | None = None,
+    max_attempts: int = 3,
+) -> httpx.Response:
+    """GET with exponential backoff for rate limits and server errors."""
+    for attempt in range(max_attempts):
+        resp = client.get(url, headers=headers, params=params)
+        if resp.status_code == 429 or resp.status_code >= 500:
+            wait = 2 ** attempt
+            logger.warning("HTTP %d from %s (attempt %d), retrying in %ds", resp.status_code, url, attempt + 1, wait)
+            time.sleep(wait)
+            continue
+        resp.raise_for_status()
+        return resp
+    resp.raise_for_status()
+    return resp
