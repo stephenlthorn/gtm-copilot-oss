@@ -5,7 +5,6 @@ import logging
 import re
 from dataclasses import dataclass, field
 from typing import Any
-from urllib.parse import quote_plus
 
 from sqlalchemy.orm import Session
 
@@ -13,7 +12,14 @@ from app.core.settings import get_settings
 
 logger = logging.getLogger(__name__)
 
-_SOURCE_TIMEOUT_SECONDS = 30
+_SOURCE_TIMEOUT_SECONDS = 45
+_WEB_SEARCH_TOOLS = [{"type": "web_search_preview"}]
+
+_WEB_SEARCH_SYSTEM = (
+    "You are a sales intelligence research assistant. "
+    "Search the web and return factual, structured information useful for B2B sales preparation. "
+    "Be concise. Focus on database technology, infrastructure, funding, headcount, and buying signals."
+)
 
 
 @dataclass(frozen=True)
@@ -22,10 +28,6 @@ class SourceResult:
     status: str  # "success" | "failed" | "timeout" | "skipped"
     data: dict[str, Any] = field(default_factory=dict)
     error: str | None = None
-
-
-def _slugify(name: str) -> str:
-    return re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")
 
 
 def _get_firecrawl(settings) -> Any | None:
@@ -40,15 +42,35 @@ def _get_firecrawl(settings) -> Any | None:
 
 
 class ResearchSourceRunner:
-    """Fan-out research across all active OSINT data sources.
+    """Fan-out research across all OSINT data sources.
 
-    Each source runs independently with a per-source timeout.
-    New sources (EDGAR, BuiltWith, HN) are wired in here.
+    LinkedIn, news, job postings, Crunchbase, and tech stack all use
+    OpenAI web_search_preview — no Firecrawl key required for these.
+    Firecrawl is only used for direct website scraping (optional).
+    EDGAR and HN Algolia are free with no API key.
     """
 
     def __init__(self, db: Session) -> None:
         self._db = db
         self._settings = get_settings()
+        self._llm: Any = None
+
+    def _get_llm(self):
+        if self._llm is None:
+            from app.services.llm import LLMService
+            self._llm = LLMService()
+        return self._llm
+
+    async def _llm_web_search(self, prompt: str) -> str | None:
+        """Call the LLM with web_search_preview to gather company intel."""
+        llm = self._get_llm()
+        return await asyncio.to_thread(
+            llm._responses_text,
+            _WEB_SEARCH_SYSTEM,
+            prompt,
+            None,
+            _WEB_SEARCH_TOOLS,
+        )
 
     async def run_all_sources(
         self,
@@ -61,11 +83,10 @@ class ResearchSourceRunner:
         tasks: dict[str, asyncio.Task[SourceResult]] = {}
 
         async with asyncio.TaskGroup() as tg:
-            # ── Web scraping sources (require Firecrawl key) ──────────────
-            if website:
-                tasks["company_website"] = tg.create_task(
-                    self._run("company_website", self.scrape_company_website(website))
-                )
+            # ── OpenAI web search sources (require OPENAI_API_KEY only) ──
+            tasks["linkedin"] = tg.create_task(
+                self._run("linkedin", self.search_linkedin(account_name))
+            )
             tasks["crunchbase"] = tg.create_task(
                 self._run("crunchbase", self.search_crunchbase(account_name))
             )
@@ -75,11 +96,11 @@ class ResearchSourceRunner:
             tasks["job_postings"] = tg.create_task(
                 self._run("job_postings", self.search_job_postings(account_name))
             )
-            tasks["reviews"] = tg.create_task(
-                self._run("reviews", self.search_reviews(account_name))
+            tasks["tech_stack"] = tg.create_task(
+                self._run("tech_stack", self.search_tech_stack(account_name, website))
             )
 
-            # ── Free OSINT sources (no API key needed) ────────────────────
+            # ── Free OSINT (no API key) ───────────────────────────────────
             tasks["edgar"] = tg.create_task(
                 self._run("edgar", self.search_edgar(account_name))
             )
@@ -87,13 +108,13 @@ class ResearchSourceRunner:
                 self._run("hn", self.search_hn(account_name))
             )
 
-            # ── Paid OSINT sources ────────────────────────────────────────
+            # ── Firecrawl (optional — direct website scrape) ─────────────
             if website:
-                tasks["builtwith"] = tg.create_task(
-                    self._run("builtwith", self.search_builtwith(website))
+                tasks["company_website"] = tg.create_task(
+                    self._run("company_website", self.scrape_company_website(website))
                 )
 
-            # ── Internal data sources ─────────────────────────────────────
+            # ── Internal data ─────────────────────────────────────────────
             tasks["chorus_calls"] = tg.create_task(
                 self._run("chorus_calls", self.search_chorus_calls(account_name))
             )
@@ -118,7 +139,75 @@ class ResearchSourceRunner:
             logger.exception("Source %s failed", source_name)
             return SourceResult(source_name=source_name, status="failed", error=str(exc))
 
-    # ── Web scraping ─────────────────────────────────────────────────────
+    # ── OpenAI web search sources ─────────────────────────────────────────
+
+    async def search_linkedin(self, company_name: str) -> SourceResult:
+        prompt = (
+            f"Search LinkedIn and other sources for '{company_name}' company profile. "
+            f"Find: employee count, key executives (CTO, VP Engineering, Head of Data), "
+            f"recent hires or departures, company description, headquarters, and industry. "
+            f"Return structured facts."
+        )
+        result = await self._llm_web_search(prompt)
+        if not result:
+            return SourceResult(source_name="linkedin", status="failed", error="LLM returned no result")
+        return SourceResult(source_name="linkedin", status="success", data={"summary": result})
+
+    async def search_crunchbase(self, company_name: str) -> SourceResult:
+        prompt = (
+            f"Search Crunchbase and news for '{company_name}' funding history and company details. "
+            f"Find: total funding raised, latest funding round (amount, date, investors), "
+            f"valuation if known, number of employees, founding year, and key investors. "
+            f"Return structured facts."
+        )
+        result = await self._llm_web_search(prompt)
+        if not result:
+            return SourceResult(source_name="crunchbase", status="failed", error="LLM returned no result")
+        return SourceResult(source_name="crunchbase", status="success", data={"summary": result})
+
+    async def search_news(self, company_name: str) -> SourceResult:
+        prompt = (
+            f"Search for recent news about '{company_name}' from the past 12 months. "
+            f"Focus on: infrastructure or database announcements, cloud migration, "
+            f"major product launches, acquisitions, leadership changes, or funding events "
+            f"that might affect their technology buying decisions. "
+            f"List the top 5 most relevant news items with dates."
+        )
+        result = await self._llm_web_search(prompt)
+        if not result:
+            return SourceResult(source_name="news", status="failed", error="LLM returned no result")
+        return SourceResult(source_name="news", status="success", data={"summary": result})
+
+    async def search_job_postings(self, company_name: str) -> SourceResult:
+        prompt = (
+            f"Search LinkedIn Jobs, Greenhouse, Lever, and Indeed for current open positions at '{company_name}' "
+            f"in: database engineering, data infrastructure, data platform, DBA, backend/data engineering, "
+            f"site reliability engineering, and cloud architecture. "
+            f"Identify any specific database technologies mentioned in job descriptions (MySQL, PostgreSQL, Oracle, etc.). "
+            f"This signals their current tech stack and infrastructure investment direction."
+        )
+        result = await self._llm_web_search(prompt)
+        if not result:
+            return SourceResult(source_name="job_postings", status="failed", error="LLM returned no result")
+        return SourceResult(source_name="job_postings", status="success", data={"summary": result})
+
+    async def search_tech_stack(self, company_name: str, website: str) -> SourceResult:
+        domain = re.sub(r"^https?://", "", website or "").split("/")[0] if website else company_name.lower()
+        prompt = (
+            f"Search for '{company_name}' technology stack information from multiple sources:\n"
+            f"1. Check builtwith.com for {domain} — what databases and infrastructure do they use?\n"
+            f"2. Check stackshare.io for {company_name} — what's in their tech stack?\n"
+            f"3. Search GitHub for {company_name} repositories mentioning MySQL, PostgreSQL, sharding, Vitess, or ProxySQL\n"
+            f"4. Look for engineering blog posts about their database or infrastructure\n"
+            f"Focus on: database systems (MySQL, PostgreSQL, Oracle, Aurora, MongoDB, etc.), "
+            f"cloud provider, and any signs of scaling pain or migration activity."
+        )
+        result = await self._llm_web_search(prompt)
+        if not result:
+            return SourceResult(source_name="tech_stack", status="failed", error="LLM returned no result")
+        return SourceResult(source_name="tech_stack", status="success", data={"summary": result})
+
+    # ── Direct scrape (Firecrawl, optional) ──────────────────────────────
 
     async def scrape_company_website(self, website: str) -> SourceResult:
         fc = _get_firecrawl(self._settings)
@@ -130,46 +219,6 @@ class ResearchSourceRunner:
             status="success",
             data={"title": scraped.title, "content": scraped.content[:8000], "url": website},
         )
-
-    async def search_crunchbase(self, company_name: str) -> SourceResult:
-        fc = _get_firecrawl(self._settings)
-        if not fc:
-            return SourceResult(source_name="crunchbase", status="skipped", error="FIRECRAWL_API_KEY not set")
-        # Use Firecrawl search instead of direct scrape — more reliable than slug guessing
-        results = await fc.async_search(f"site:crunchbase.com {company_name} funding employees", limit=3)
-        hits = [{"title": r.title, "url": r.url, "snippet": r.snippet} for r in results]
-        return SourceResult(source_name="crunchbase", status="success", data={"results": hits})
-
-    async def search_news(self, company_name: str) -> SourceResult:
-        fc = _get_firecrawl(self._settings)
-        if not fc:
-            return SourceResult(source_name="news", status="skipped", error="FIRECRAWL_API_KEY not set")
-        results = await fc.async_search(
-            f"{company_name} database infrastructure expansion funding 2024 2025", limit=5
-        )
-        hits = [{"title": r.title, "url": r.url, "snippet": r.snippet} for r in results]
-        return SourceResult(source_name="news", status="success", data={"results": hits})
-
-    async def search_job_postings(self, company_name: str) -> SourceResult:
-        fc = _get_firecrawl(self._settings)
-        if not fc:
-            return SourceResult(source_name="job_postings", status="skipped", error="FIRECRAWL_API_KEY not set")
-        results = await fc.async_search(
-            f"{company_name} hiring database engineer DBA platform engineer site:linkedin.com OR site:greenhouse.io OR site:lever.co",
-            limit=5,
-        )
-        hits = [{"title": r.title, "url": r.url, "snippet": r.snippet} for r in results]
-        return SourceResult(source_name="job_postings", status="success", data={"results": hits})
-
-    async def search_reviews(self, company_name: str) -> SourceResult:
-        fc = _get_firecrawl(self._settings)
-        if not fc:
-            return SourceResult(source_name="reviews", status="skipped", error="FIRECRAWL_API_KEY not set")
-        results = await fc.async_search(
-            f"{company_name} database review site:g2.com OR site:trustradius.com", limit=3
-        )
-        hits = [{"title": r.title, "url": r.url, "snippet": r.snippet} for r in results]
-        return SourceResult(source_name="reviews", status="success", data={"results": hits})
 
     async def scrape_custom_urls(self, urls: list[str]) -> SourceResult:
         fc = _get_firecrawl(self._settings)
@@ -201,20 +250,6 @@ class ResearchSourceRunner:
             return SourceResult(source_name="hn", status="success", data=data)
         except Exception as exc:
             return SourceResult(source_name="hn", status="failed", error=str(exc))
-
-    # ── Paid OSINT ────────────────────────────────────────────────────────
-
-    async def search_builtwith(self, domain: str) -> SourceResult:
-        if not self._settings.builtwith_api_key:
-            return SourceResult(source_name="builtwith", status="skipped", error="BUILTWITH_API_KEY not set")
-        try:
-            from app.services.connectors.builtwith import fetch_builtwith_data
-            # Strip protocol/path to get bare domain
-            domain_clean = re.sub(r"^https?://", "", domain).split("/")[0]
-            data = await asyncio.to_thread(fetch_builtwith_data, self._settings.builtwith_api_key, domain_clean)
-            return SourceResult(source_name="builtwith", status="success", data=data)
-        except Exception as exc:
-            return SourceResult(source_name="builtwith", status="failed", error=str(exc))
 
     # ── Internal data ─────────────────────────────────────────────────────
 
