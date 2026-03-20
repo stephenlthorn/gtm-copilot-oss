@@ -21,7 +21,7 @@ class Settings(BaseSettings):
     redis_url: str = "redis://localhost:6379/0"
 
     embedding_dimensions: int = 1536
-    retrieval_top_k: int = 8
+    retrieval_top_k: int = 20
 
     openai_base_url: str | None = None
     openai_api_key: str | None = None

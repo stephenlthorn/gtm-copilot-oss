@@ -371,7 +371,7 @@ class ChatOrchestrator:
             mode_filters["source_type"] = allowed_sources or [SourceType.CHORUS.value]
 
         rewritten = self.rewriter.rewrite(message, mode)
-        hits = self.retriever.search(rewritten, top_k=resolved_top_k, filters=mode_filters)
+        hits = self.retriever.search(rewritten, top_k=resolved_top_k, filters=mode_filters, mode=mode)
 
         # Feedback RAG injection
         feedback_corrections: list[str] = []

@@ -10,14 +10,18 @@ from sqlalchemy import literal, or_, select
 from sqlalchemy.orm import Session
 
 from app.models import KBChunk, KBDocument
+from app.retrieval.reranker import LLMReranker
 from app.retrieval.types import RetrievedChunk
 from app.services.embedding import EmbeddingService
+from app.services.query_rewrite import QueryRewriter
 
 
 class HybridRetriever:
     def __init__(self, db: Session) -> None:
         self.db = db
         self.embedder = EmbeddingService()
+        self.rewriter = QueryRewriter()
+        self.reranker = LLMReranker()
 
     @staticmethod
     def _cosine(a: list[float] | None, b: list[float] | None) -> float:
@@ -178,54 +182,118 @@ class HybridRetriever:
         matched = sum(1 for term in terms if HybridRetriever._contains_term(haystack, term))
         return min(0.24, matched * 0.07)
 
-    def search(self, query: str, *, top_k: int = 8, filters: dict | None = None) -> list[RetrievedChunk]:
-        filters = filters or {}
-        terms = self._query_terms(query)
-        semantic_available = bool(getattr(self.embedder, "client", None))
-        q_vec = self.embedder.embed(query)
-        dialect = (self.db.bind.dialect.name if self.db.bind is not None else "").lower()
+    def _fetch_candidates(
+        self,
+        query_vectors: list[list[float]],
+        base_stmt,
+        candidate_limit: int,
+        terms: list[str],
+        dialect: str,
+        semantic_available: bool,
+    ) -> list[tuple[KBChunk, KBDocument]]:
+        """Fetch candidate chunks from TiDB using all query vectors + keyword search.
 
-        source_filter = {s.lower() for s in (filters.get("source_type") or [])}
-        candidate_limit = max(200, top_k * 40)
-
-        base_stmt = select(KBChunk, KBDocument).join(KBDocument, KBChunk.document_id == KBDocument.id)
-        if source_filter:
-            base_stmt = base_stmt.where(KBDocument.source_type.in_(sorted(source_filter)))
-
+        Runs one KNN query per vector (multi-query fusion) then unions results.
+        """
         rows: list[tuple[KBChunk, KBDocument]] = []
-        if dialect == "mysql":
-            # TiDB vector search using VEC_COSINE_DISTANCE
-            try:
-                if semantic_available and q_vec:
-                    from app.db.tidb_vector import vec_cosine_distance
 
-                    q_vec_str = json.dumps(q_vec)
-                    vector_rows = self.db.execute(
-                        base_stmt.where(KBChunk.embedding.is_not(None))
-                        .order_by(vec_cosine_distance(KBChunk.embedding, literal(q_vec_str)))
-                        .limit(candidate_limit)
-                    ).all()
-                    rows.extend(vector_rows)
-            except Exception:
-                self.db.rollback()
-                rows.extend(self.db.execute(base_stmt.limit(candidate_limit)).all())
+        if dialect == "mysql":
+            from app.db.tidb_vector import vec_cosine_distance
+
+            if semantic_available and query_vectors:
+                for q_vec in query_vectors:
+                    try:
+                        q_vec_str = json.dumps(q_vec)
+                        vector_rows = self.db.execute(
+                            base_stmt.where(KBChunk.embedding.is_not(None))
+                            .order_by(vec_cosine_distance(KBChunk.embedding, literal(q_vec_str)))
+                            .limit(candidate_limit)
+                        ).all()
+                        rows.extend(vector_rows)
+                    except Exception:
+                        self.db.rollback()
+                        rows.extend(self.db.execute(base_stmt.limit(candidate_limit)).all())
+                        break
 
             if terms:
-                keyword_clauses = [KBChunk.text.ilike(f"%{term}%") for term in terms[:6]]
+                keyword_clauses = [KBChunk.text.ilike(f"%{term}%") for term in terms[:8]]
                 keyword_rows = self.db.execute(
                     base_stmt.where(or_(*keyword_clauses)).limit(candidate_limit)
                 ).all()
                 rows.extend(keyword_rows)
         else:
-            # SQLite fallback for local unit tests.
+            # SQLite fallback for local unit tests
             rows.extend(self.db.execute(base_stmt.limit(candidate_limit)).all())
             if terms:
-                keyword_clauses = [KBChunk.text.ilike(f"%{term}%") for term in terms[:6]]
+                keyword_clauses = [KBChunk.text.ilike(f"%{term}%") for term in terms[:8]]
                 keyword_rows = self.db.execute(
                     base_stmt.where(or_(*keyword_clauses)).limit(candidate_limit)
                 ).all()
                 rows.extend(keyword_rows)
 
+        return rows
+
+    def search(
+        self,
+        query: str,
+        *,
+        top_k: int = 20,
+        filters: dict | None = None,
+        mode: str = "oracle",
+    ) -> list[RetrievedChunk]:
+        """Premium retrieval pipeline:
+        1. GPT-4o-mini query expansion → 3 variants + 1 HyDE passage
+        2. Embed original + all variants + HyDE (up to 5 vectors)
+        3. Multi-query KNN fusion against TiDB — unions all candidate sets
+        4. Keyword search union
+        5. Python hybrid re-scoring on deduped candidates
+        6. GPT-4o-mini reranker on top 100 candidates → final top_k
+        """
+        filters = filters or {}
+        terms = self._query_terms(query)
+        semantic_available = bool(getattr(self.embedder, "client", None))
+        dialect = (self.db.bind.dialect.name if self.db.bind is not None else "").lower()
+
+        source_filter = {s.lower() for s in (filters.get("source_type") or [])}
+        # Wider candidate net — cost doesn't matter, quality does
+        candidate_limit = max(500, top_k * 50)
+
+        base_stmt = select(KBChunk, KBDocument).join(KBDocument, KBChunk.document_id == KBDocument.id)
+        if source_filter:
+            base_stmt = base_stmt.where(KBDocument.source_type.in_(sorted(source_filter)))
+
+        # ── Step 1: Query expansion (variants + HyDE) ──────────────────────────
+        expanded = self.rewriter.expand(query, mode)
+        all_queries = [query] + expanded["variants"]
+        hyde = expanded["hyde"]
+        if hyde and hyde != query:
+            all_queries.append(hyde)
+        # Deduplicate while preserving order (original query always first)
+        seen_q: set[str] = set()
+        unique_queries: list[str] = []
+        for q in all_queries:
+            if q not in seen_q:
+                unique_queries.append(q)
+                seen_q.add(q)
+
+        # ── Step 2: Embed all query variants ───────────────────────────────────
+        query_vectors: list[list[float]] = []
+        if semantic_available:
+            for q in unique_queries:
+                try:
+                    query_vectors.append(self.embedder.embed(q))
+                except Exception as exc:
+                    import logging
+                    logging.getLogger(__name__).warning("Embed failed for variant: %s", exc)
+        # Primary query vector for re-scoring
+        q_vec = query_vectors[0] if query_vectors else []
+
+        # ── Step 3+4: Multi-query KNN + keyword fetch ──────────────────────────
+        rows = self._fetch_candidates(
+            query_vectors, base_stmt, candidate_limit, terms, dialect, semantic_available
+        )
+
+        # ── Step 5: Deduplicate and hybrid re-score ────────────────────────────
         deduped: dict[str, tuple[KBChunk, KBDocument]] = {}
         for chunk, doc in rows:
             deduped[str(chunk.id)] = (chunk, doc)
@@ -234,14 +302,13 @@ class HybridRetriever:
         for chunk, doc in deduped.values():
             if not self._apply_filters(doc, filters):
                 continue
-            vec_score = (self._cosine(chunk.embedding, q_vec) + 1) / 2
+            vec_score = (self._cosine(chunk.embedding, q_vec) + 1) / 2 if q_vec else 0.5
             kw_score = self._keyword_score(chunk.text, terms)
             title_score = self._keyword_score(doc.title or "", terms)
             domain_boost = self._domain_term_boost(terms, doc.title or "", chunk.text)
             if semantic_available:
                 score = (0.50 * vec_score) + (0.30 * kw_score) + (0.10 * title_score) + self._source_bias(doc) + domain_boost
             else:
-                # No real semantic model: rely on lexical matching and suppress random hash-vector influence.
                 score = (0.05 * vec_score) + (0.68 * kw_score) + (0.17 * title_score) + self._source_bias(doc) + domain_boost
                 if kw_score < 0.18 and title_score < 0.25:
                     continue
@@ -251,15 +318,13 @@ class HybridRetriever:
             scored.append((score, chunk, doc))
 
         scored.sort(key=lambda item: item[0], reverse=True)
-        top = scored[:top_k]
 
-        hits: list[RetrievedChunk] = []
-        for score, chunk, doc in top:
+        # Build RetrievedChunk objects from top 100 candidates for reranking
+        rerank_pool_size = min(100, len(scored))
+        pre_rerank: list[RetrievedChunk] = []
+        for score, chunk, doc in scored[:rerank_pool_size]:
             metadata = dict(chunk.metadata_json or {})
-            ts = None
-            if "start_time_sec" in metadata:
-                ts = f"{metadata.get('start_time_sec', 0)}-{metadata.get('end_time_sec', 0)}"
-            hits.append(
+            pre_rerank.append(
                 RetrievedChunk(
                     chunk_id=chunk.id,
                     document_id=doc.id,
@@ -273,7 +338,9 @@ class HybridRetriever:
                     file_id=str((doc.tags or {}).get("drive_file_id") or doc.source_id),
                 )
             )
-        return hits
+
+        # ── Step 6: LLM reranker → final top_k ────────────────────────────────
+        return self.reranker.rerank(query, pre_rerank, top_k)
 
     @staticmethod
     def retrieval_payload(hits: list[RetrievedChunk], top_k: int) -> dict:
