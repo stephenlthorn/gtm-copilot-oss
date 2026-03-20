@@ -6,6 +6,131 @@ Built and maintained by Stephen Thorn.
 
 ---
 
+## How It Works
+
+### Data Sources → AI Outputs
+
+```mermaid
+flowchart LR
+    subgraph internal["Internal Data Sources"]
+        GD["📁 Google Drive\nDocs · Slides · PDFs"]
+        FS["🪶 Feishu / Lark\nWiki · Docs"]
+        CT["📞 Call Transcripts\nChorus / Generic API"]
+        SF["☁️ Salesforce\nAccounts · Deals"]
+    end
+
+    subgraph osint["Live OSINT (web_search_preview)"]
+        LI["💼 LinkedIn\nExecs · Headcount"]
+        CB["🏢 Crunchbase\nFunding · Investors"]
+        NW["📰 News & Events\nGoogle News"]
+        JP["🔍 Job Postings\nLinkedIn · Greenhouse"]
+        TS["⚙️ Tech Stack\nBuiltWith · StackShare · GitHub"]
+    end
+
+    subgraph free_osint["Free OSINT (no key)"]
+        ED["📋 SEC EDGAR\n10-K / 10-Q filings"]
+        HN["🟧 Hacker News\nDev sentiment · infra signals"]
+    end
+
+    subgraph optional["Optional Connectors"]
+        FC["🔥 Firecrawl\nDirect website scrape"]
+        ZI["🔎 ZoomInfo\nContact enrichment"]
+    end
+
+    subgraph kb["TiDB Knowledge Base\nVector + Full-text + Relational"]
+        VEC["Embeddings\n1536-dim vectors"]
+        FT["Full-text index\nBM25-style scoring"]
+        META["Metadata\naccounts · deals · calls"]
+    end
+
+    subgraph outputs["AI-Generated Outputs"]
+        subgraph rep_out["Sales Rep"]
+            AB["Account Brief\n7-section company analysis"]
+            DQ["Discovery Questions\nTailored to tech & pain"]
+            FS2["Full Solution\nPhases 1–3 combined"]
+            DR["Deal Risk Analysis\nMEDDPICC-aligned"]
+            FD["Follow-Up Draft\nPost-call email"]
+            TAL["Target Account List\nBy territory · revenue · vertical"]
+        end
+        subgraph se_out["Sales Engineer"]
+            PP["POC Plan\nTechnical eval roadmap"]
+            AF["Architecture Fit\nTiDB placement analysis"]
+            CC["Competitor Coach\nBattlecards & objection handling"]
+        end
+        subgraph mkt_out["Marketing"]
+            MI["Market Intelligence\nBuying signals · TAM"]
+            BC["Battle Card\nCompetitor positioning"]
+        end
+        subgraph chat_out["Oracle Chat"]
+            OC["RAG-grounded answers\nwith citations"]
+        end
+    end
+
+    GD & FS & CT & SF --> kb
+    LI & CB & NW & JP & TS --> AB & FS2
+    ED & HN --> AB & FS2
+    FC & ZI --> AB & FS2
+
+    kb --> AB & DQ & FS2 & DR & FD & TAL
+    kb --> PP & AF & CC
+    kb --> MI & BC
+    kb --> OC
+
+    style internal fill:#1d3557,stroke:#457b9d,color:#fff
+    style osint fill:#2d6a4f,stroke:#52b788,color:#fff
+    style free_osint fill:#5c4033,stroke:#a1887f,color:#fff
+    style optional fill:#4a4e69,stroke:#9a8c98,color:#fff
+    style kb fill:#0d1b2a,stroke:#415a77,color:#fff
+    style outputs fill:#1a1a2e,stroke:#533483,color:#fff
+```
+
+---
+
+### How GTM Copilot Generates an Answer
+
+```mermaid
+flowchart TB
+    Q(["User question\ne.g. 'What are the deal risks for Acme?'"])
+
+    Q --> MODE{Chat mode?}
+
+    MODE -->|"oracle (open Q&A)"| ORACLE_PATH["Skip retrieval\nUse web_search_preview + KB"]
+    MODE -->|"call_assistant / rep / se"| RAG_PATH["Full RAG pipeline"]
+
+    subgraph rag["RAG Pipeline"]
+        RAG_PATH --> REWRITE["Query Rewriter\nDedup terms · append mode keywords\ne.g. + 'transcript risks next steps'"]
+
+        REWRITE --> MULTI["Multi-Query HyDE\nGenerate 3–5 hypothetical\ndocument excerpts (GPT-4.1-mini)\nthen embed each"]
+
+        MULTI --> HYBRID["Hybrid Retrieval (TiDB)\n━━━━━━━━━━━━━━━━━━━━━━\nVector: VEC_COSINE_DISTANCE()\ntop 20 per query\n+\nFull-text: MATCH AGAINST()\nMerged via Reciprocal Rank Fusion"]
+
+        HYBRID --> SCORE["Scoring\n0.50 × vector\n0.30 × keyword\n0.10 × title match\n± source bias"]
+
+        SCORE --> RERANK["LLM Reranker (GPT-4o-mini)\nScore 0–10 each candidate\nKeep top_k (default 8)"]
+    end
+
+    subgraph feedback_ctx["Feedback Injection"]
+        RERANK --> FB["Retrieve past corrections\nfrom ai_feedback table\n(cosine similarity, rating=negative)"]
+    end
+
+    ORACLE_PATH --> COMPOSE
+    FB --> COMPOSE["Prompt Composition\n━━━━━━━━━━━━━━━━━━━━━\nSystem persona (Rep / SE / Oracle)\n+ Source profile instructions\n+ Retrieved evidence chunks\n+ Past user corrections\n+ User question"]
+
+    COMPOSE --> LLM["LLM Synthesis\nOpenAI Responses API\ngpt-4.1 / o3 / gpt-5.x\n± reasoning effort (low / medium / high)\n± web_search_preview tool"]
+
+    LLM --> ANS(["Structured answer\n+ Citations (chunk ID · title · quote)\n+ Follow-up questions\n+ Confidence signals"])
+
+    ANS --> AUDIT["Audit Log → TiDB\nactor · query · retrieval · output"]
+
+    style Q fill:#2d6a4f,stroke:#52b788,color:#fff
+    style ANS fill:#1d3557,stroke:#457b9d,color:#fff
+    style rag fill:#0d1b2a,stroke:#415a77,color:#fff
+    style feedback_ctx fill:#4a4e69,stroke:#9a8c98,color:#fff
+    style AUDIT fill:#3d3d3d,stroke:#666,color:#ccc
+```
+
+---
+
 ## Architecture
 
 ### System Overview
