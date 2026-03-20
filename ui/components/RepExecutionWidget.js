@@ -47,7 +47,18 @@ function CallSelector({ account, selectedIds, onChange }) {
   const [loading, setLoading] = useState(false);
   const [lastSync, setLastSync] = useState(null);
   const [search, setSearch] = useState('');
+  const [sortBy, setSortBy] = useState('date'); // 'date' | 'company'
+  const [sortDir, setSortDir] = useState('desc'); // 'asc' | 'desc'
   const timerRef = useRef(null);
+
+  const toggleSort = (field) => {
+    if (sortBy === field) {
+      setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'));
+    } else {
+      setSortBy(field);
+      setSortDir(field === 'date' ? 'desc' : 'asc');
+    }
+  };
 
   const fetchCalls = useCallback(async () => {
     setLoading(true);
@@ -71,14 +82,29 @@ function CallSelector({ account, selectedIds, onChange }) {
     return () => clearInterval(timerRef.current);
   }, [fetchCalls]);
 
-  // Client-side filter: account name (pre-filled) OR search box
+  // Filter
   const filterTerm = search.trim() || account?.trim() || '';
-  const calls = filterTerm
+  const filtered = filterTerm
     ? allCalls.filter((c) =>
         (c.account || '').toLowerCase().includes(filterTerm.toLowerCase()) ||
         (c.opportunity || '').toLowerCase().includes(filterTerm.toLowerCase())
       )
     : allCalls;
+
+  // Sort
+  const calls = [...filtered].sort((a, b) => {
+    let av, bv;
+    if (sortBy === 'date') {
+      av = a.date || '';
+      bv = b.date || '';
+    } else {
+      av = (a.account || '').toLowerCase();
+      bv = (b.account || '').toLowerCase();
+    }
+    if (av < bv) return sortDir === 'asc' ? -1 : 1;
+    if (av > bv) return sortDir === 'asc' ? 1 : -1;
+    return 0;
+  });
 
   const toggle = (id) => {
     onChange(
@@ -92,6 +118,16 @@ function CallSelector({ account, selectedIds, onChange }) {
     return <div style={{ fontSize: '0.78rem', color: 'var(--text-3)' }}>Loading calls…</div>;
   }
 
+  const SortBtn = ({ field, label }) => (
+    <button
+      className={`oracle-chat-ctrl${sortBy === field ? ' oracle-chat-ctrl--active' : ''}`}
+      onClick={() => toggleSort(field)}
+      style={{ fontSize: '0.68rem', whiteSpace: 'nowrap' }}
+    >
+      {label} {sortBy === field ? (sortDir === 'asc' ? '↑' : '↓') : '↕'}
+    </button>
+  );
+
   return (
     <div style={{ display: 'grid', gap: '0.45rem' }}>
       <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
@@ -102,13 +138,15 @@ function CallSelector({ account, selectedIds, onChange }) {
           value={search}
           onChange={(e) => setSearch(e.target.value)}
         />
+        <SortBtn field="date" label="Date" />
+        <SortBtn field="company" label="Company" />
         <button
           className="oracle-chat-ctrl"
           onClick={fetchCalls}
           disabled={loading}
           style={{ fontSize: '0.68rem', whiteSpace: 'nowrap' }}
         >
-          {loading ? '…' : '↻ Refresh'}
+          {loading ? '…' : '↻'}
         </button>
       </div>
 

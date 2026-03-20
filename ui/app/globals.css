@@ -1016,3 +1016,9 @@ pre {
   border-color: var(--accent);
   background: color-mix(in srgb, var(--accent) 8%, var(--surface));
 }
+
+.oracle-chat-ctrl--active {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 8%, var(--surface));
+}
