@@ -288,7 +288,7 @@ class ChatOrchestrator:
         except Exception:
             return []
 
-    def run(self, *, mode: str, user: str, message: str, top_k: int, filters: dict, context: dict, rag_enabled: bool = True, web_search_enabled: bool = True) -> tuple[dict, dict]:
+    def run(self, *, mode: str, user: str, message: str, top_k: int, filters: dict, context: dict, rag_enabled: bool = True, web_search_enabled: bool = True, section: str | None = None) -> tuple[dict, dict]:
         blocked = self._guardrail_external_messaging(message)
         if blocked:
             payload = {
@@ -333,7 +333,17 @@ class ChatOrchestrator:
         persona_name, persona_prompt = self._resolve_persona_config(kb_config)
 
         custom_profiles = getattr(kb_config, 'source_profiles_json', None) if kb_config else None
-        source_profile = get_source_profile(mode, custom_profiles if custom_profiles else None)
+        SECTION_TO_PROFILE = {
+            "pre_call": "pre_call",
+            "post_call": "post_call",
+            "follow_up": "post_call",
+            "se_poc_plan": "poc_technical",
+            "se_arch_fit": "poc_technical",
+            "se_competitor": "poc_technical",
+            "tal": "pre_call",
+        }
+        profile_mode = SECTION_TO_PROFILE.get(section or "", None) or mode
+        source_profile = get_source_profile(profile_mode, custom_profiles if custom_profiles else None)
         source_instructions = format_source_instructions(source_profile)
 
         user_pref: UserPreference | None = None

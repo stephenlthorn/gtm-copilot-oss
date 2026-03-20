@@ -67,9 +67,18 @@ def get_source_profile(mode: str, custom_profiles: dict | None = None) -> dict |
 def format_source_instructions(profile: dict | None) -> str:
     if not profile or not profile.get("sources"):
         return ""
-    lines = [f"When using web search, prioritize these sources for {profile['name']}:"]
+    lines = [
+        f"=== WEB SEARCH INSTRUCTIONS FOR {profile['name'].upper()} ===",
+        "Execute searches in this priority order. Use the exact search patterns provided.",
+        "For each HIGH priority source, you MUST attempt a search before answering.",
+        "",
+    ]
     for source in sorted(profile["sources"], key=lambda s: s.get("priority", 99)):
-        search = source.get("search", "")
-        priority_label = {1: "HIGH", 2: "MEDIUM", 3: "LOW"}.get(source.get("priority", 3), "LOW")
-        lines.append(f"  [{priority_label}] {source['name']}: {search}" + (f" — {source['why']}" if source.get('why') else ""))
+        if not source.get("search"):
+            continue
+        priority_label = {1: "HIGH ⚡ (required)", 2: "MEDIUM", 3: "LOW (if time permits)"}.get(source.get("priority", 3), "LOW")
+        lines.append(f"[{priority_label}] {source['name']}")
+        lines.append(f"  Search: {source['search']}")
+        if source.get("why"):
+            lines.append(f"  Why: {source['why']}")
     return "\n".join(lines)

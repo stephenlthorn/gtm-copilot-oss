@@ -13,9 +13,23 @@ from app.services.memory import MemoryService
 
 router = APIRouter()
 
+CONTEXT_BUDGETS = {
+    "gpt-5.4": 100000,
+    "gpt-5.4-mini": 100000,
+    "gpt-5.4-nano": 24000,
+    "gpt-5.3-codex": 100000,
+    "o4-mini": 160000,
+    "o3": 160000,
+    "o3-pro": 160000,
+    "o3-mini": 160000,
+    "gpt-5.1-codex": 100000,
+    "gpt-5-codex-mini": 24000,
+}
+DEFAULT_BUDGET = 100000
+
 
 @router.get("/history")
-def chat_history(request: Request, limit: int = 100) -> list[dict]:
+def chat_history(request: Request, limit: int = 100, model: str = "gpt-5.4") -> list[dict]:
     from app.models.entities import ChatMessage
 
     user_email = request.headers.get("X-User-Email", "")
@@ -33,6 +47,15 @@ def chat_history(request: Request, limit: int = 100) -> list[dict]:
             .scalars()
             .all()
         )
+        budget = CONTEXT_BUDGETS.get(model, DEFAULT_BUDGET)
+        result = []
+        used = 0
+        for msg in reversed(rows):  # newest first
+            tokens = len(msg.content) // 4
+            if used + tokens > budget:
+                break
+            result.insert(0, msg)
+            used += tokens
         return [
             {
                 "id": r.id,
@@ -40,7 +63,7 @@ def chat_history(request: Request, limit: int = 100) -> list[dict]:
                 "content": r.content,
                 "created_at": r.created_at.isoformat(),
             }
-            for r in rows
+            for r in result
         ]
     finally:
         db.close()
@@ -62,6 +85,7 @@ def chat(req: ChatRequest, request: Request) -> dict:
             context=req.context.model_dump(),
             rag_enabled=req.rag_enabled,
             web_search_enabled=req.web_search_enabled,
+            section=req.section,
         )
         # Persist chat messages
         try:

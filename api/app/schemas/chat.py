@@ -28,6 +28,7 @@ class ChatRequest(BaseModel):
     openai_token: str | None = None
     rag_enabled: bool = True
     web_search_enabled: bool = True
+    section: str | None = None
 
 
 class Citation(BaseModel):

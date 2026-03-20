@@ -5,6 +5,7 @@ import math
 import re
 from collections import Counter
 from dataclasses import asdict
+from datetime import datetime
 
 from sqlalchemy import literal, or_, select
 from sqlalchemy.orm import Session
@@ -178,6 +179,105 @@ class HybridRetriever:
         matched = sum(1 for term in terms if HybridRetriever._contains_term(haystack, term))
         return min(0.24, matched * 0.07)
 
+    @staticmethod
+    def _parse_call_date(message: str) -> str | None:
+        """Extract a YYYY-MM-DD date string from patterns like '3/19/2026' or '2026-03-19'."""
+        # ISO format: 2026-03-19
+        iso_match = re.search(r"\b(\d{4}-\d{2}-\d{2})\b", message)
+        if iso_match:
+            return iso_match.group(1)
+        # US format: 3/19/2026
+        us_match = re.search(r"\b(\d{1,2})/(\d{1,2})/(\d{4})\b", message)
+        if us_match:
+            m, d, y = us_match.group(1), us_match.group(2), us_match.group(3)
+            try:
+                return datetime(int(y), int(m), int(d)).strftime("%Y-%m-%d")
+            except ValueError:
+                pass
+        return None
+
+    def _get_call_focused_rows(self, account_filter_set: set, query_date: str | None) -> tuple[list[tuple], str | None]:
+        """Fetch chorus chunks for matching accounts and return (rows, primary_doc_id).
+
+        Returns all chunks from the primary (date-closest) doc plus the first 3 chunks
+        from every other doc. primary_doc_id is the str(doc.id) of the primary doc.
+        """
+        try:
+            acct_stmt = (
+                select(KBChunk, KBDocument)
+                .join(KBDocument, KBChunk.document_id == KBDocument.id)
+                .where(KBDocument.source_type.in_(["chorus"]))
+                .order_by(KBDocument.id, KBChunk.chunk_index)
+            )
+            acct_rows = self.db.execute(acct_stmt).all()
+
+            # Group by document, keeping only rows for matching accounts
+            docs: dict[str, list[tuple]] = {}
+            doc_objects: dict[str, KBDocument] = {}
+            for chunk, doc in acct_rows:
+                tags = doc.tags if isinstance(doc.tags, dict) else {}
+                if str(tags.get("account", "")).lower() not in account_filter_set:
+                    continue
+                doc_id = str(doc.id)
+                if doc_id not in docs:
+                    docs[doc_id] = []
+                    doc_objects[doc_id] = doc
+                docs[doc_id].append((chunk, doc))
+
+            if not docs:
+                return [], None
+
+            # Find primary doc: closest date to query_date, else most recent
+            primary_doc_id: str | None = None
+            if query_date:
+                try:
+                    target_dt = datetime.strptime(query_date, "%Y-%m-%d")
+                    best_delta: float | None = None
+                    for doc_id, doc in doc_objects.items():
+                        tags = doc.tags if isinstance(doc.tags, dict) else {}
+                        date_str = tags.get("date", "")
+                        if not date_str:
+                            continue
+                        try:
+                            doc_dt = datetime.strptime(str(date_str), "%Y-%m-%d")
+                            delta = abs((doc_dt - target_dt).total_seconds())
+                            if best_delta is None or delta < best_delta:
+                                best_delta = delta
+                                primary_doc_id = doc_id
+                        except ValueError:
+                            continue
+                except ValueError:
+                    pass
+
+            if primary_doc_id is None:
+                # Use most recent doc (highest id as proxy, or latest date tag)
+                best_dt: datetime | None = None
+                for doc_id, doc in doc_objects.items():
+                    tags = doc.tags if isinstance(doc.tags, dict) else {}
+                    date_str = tags.get("date", "")
+                    if date_str:
+                        try:
+                            doc_dt = datetime.strptime(str(date_str), "%Y-%m-%d")
+                            if best_dt is None or doc_dt > best_dt:
+                                best_dt = doc_dt
+                                primary_doc_id = doc_id
+                        except ValueError:
+                            continue
+                if primary_doc_id is None:
+                    # Fall back to largest doc id
+                    primary_doc_id = max(doc_objects.keys())
+
+            result_rows: list[tuple] = []
+            for doc_id, chunk_rows in docs.items():
+                if doc_id == primary_doc_id:
+                    result_rows.extend(chunk_rows)
+                else:
+                    result_rows.extend(chunk_rows[:3])
+
+            return result_rows, primary_doc_id
+        except Exception:
+            return [], None
+
     def search(self, query: str, *, top_k: int = 8, filters: dict | None = None) -> list[RetrievedChunk]:
         filters = filters or {}
         terms = self._query_terms(query)
@@ -244,24 +344,13 @@ class HybridRetriever:
                 ).all()
                 rows.extend(keyword_rows)
 
-        # If an account filter is set, directly fetch ALL chunks from matching documents
-        # to guarantee they appear in the candidate pool (vector search may miss them
-        # when the KB is large and query semantics don't align with raw transcript text).
+        # If an account filter is set, use smart call-focused retrieval
+        call_focused_primary_doc_id: str | None = None
         account_filter_set = {a.lower() for a in (filters.get("account") or [])}
         if account_filter_set:
-            try:
-                acct_stmt = (
-                    select(KBChunk, KBDocument)
-                    .join(KBDocument, KBChunk.document_id == KBDocument.id)
-                    .where(KBDocument.source_type.in_(["chorus"]))
-                )
-                acct_rows = self.db.execute(acct_stmt).all()
-                for chunk, doc in acct_rows:
-                    tags = doc.tags if isinstance(doc.tags, dict) else {}
-                    if str(tags.get("account", "")).lower() in account_filter_set:
-                        rows.append((chunk, doc))
-            except Exception:
-                pass
+            call_date = self._parse_call_date(query)
+            call_rows, call_focused_primary_doc_id = self._get_call_focused_rows(account_filter_set, call_date)
+            rows.extend(call_rows)
 
         deduped: dict[str, tuple[KBChunk, KBDocument]] = {}
         for chunk, doc in rows:
@@ -270,6 +359,13 @@ class HybridRetriever:
         scored: list[tuple[float, KBChunk, KBDocument]] = []
         for chunk, doc in deduped.values():
             if not self._apply_filters(doc, filters):
+                continue
+            # Force call-focused primary chunks to score near 1.0 in order
+            chunk_doc_id = str(doc.id)
+            if call_focused_primary_doc_id and chunk_doc_id == call_focused_primary_doc_id:
+                chunk_idx = getattr(chunk, 'chunk_index', 0) or 0
+                score = 1.0 - (chunk_idx * 0.0001)
+                scored.append((score, chunk, doc))
                 continue
             vec_score = (self._cosine(chunk.embedding, q_vec) + 1) / 2
             kw_score = self._keyword_score(chunk.text, terms)
@@ -288,7 +384,12 @@ class HybridRetriever:
             scored.append((score, chunk, doc))
 
         scored.sort(key=lambda item: item[0], reverse=True)
-        top = scored[:top_k]
+        # If call-focused primary doc is set, return all scored chunks (no top_k cap)
+        # so that all primary call chunks reach the LLM.
+        if call_focused_primary_doc_id:
+            top = scored
+        else:
+            top = scored[:top_k]
 
         hits: list[RetrievedChunk] = []
         for score, chunk, doc in top:

@@ -1,7 +1,8 @@
 'use client';
 import { useState, useEffect, useRef } from 'react';
+import FeedbackButtons from './FeedbackButtons';
 
-export default function PersistentChat({ draft, populateSignal, ragEnabled = true, webSearchEnabled = true, topK = 8 }) {
+export default function PersistentChat({ draft, populateSignal, ragEnabled = true, webSearchEnabled = true, topK = 8, model = 'gpt-5.4', section }) {
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
@@ -10,7 +11,7 @@ export default function PersistentChat({ draft, populateSignal, ragEnabled = tru
 
   // Load history on mount
   useEffect(() => {
-    fetch('/api/chat/history')
+    fetch('/api/chat/history?model=' + encodeURIComponent(model))
       .then(r => r.ok ? r.json() : [])
       .then(history => {
         setMessages(history.map(m => ({ id: m.id, role: m.role, content: m.content })));
@@ -43,11 +44,11 @@ export default function PersistentChat({ draft, populateSignal, ragEnabled = tru
       const res = await fetch('/api/oracle', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ mode: 'oracle', message: q, top_k: topK, rag_enabled: ragEnabled, web_search_enabled: webSearchEnabled }),
+        body: JSON.stringify({ mode: 'oracle', message: q, top_k: topK, rag_enabled: ragEnabled, web_search_enabled: webSearchEnabled, section: section || 'oracle' }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data?.error || 'Request failed');
-      const assistantMsg = { id: Date.now() + '-a', role: 'assistant', content: data.answer || '', citations: data.citations || [] };
+      const assistantMsg = { id: Date.now() + '-a', role: 'assistant', content: data.answer || '', citations: data.citations || [], queryText: q };
       setMessages(prev => [...prev, assistantMsg]);
     } catch (err) {
       setMessages(prev => [...prev, { id: Date.now() + '-e', role: 'error', content: String(err?.message || err) }]);
@@ -68,7 +69,7 @@ export default function PersistentChat({ draft, populateSignal, ragEnabled = tru
             Select a section, fill in the fields, then click Populate to draft a prompt — or ask anything below.
           </div>
         )}
-        {messages.map(msg => <ChatMessage key={msg.id} msg={msg} />)}
+        {messages.map(msg => <ChatMessage key={msg.id} msg={msg} mode={section || 'oracle'} />)}
         {loading && (
           <div className="rep-chat-msg rep-chat-msg--assistant">
             <div className="oracle-thinking-dots"><span /><span /><span /></div>
@@ -95,7 +96,7 @@ export default function PersistentChat({ draft, populateSignal, ragEnabled = tru
   );
 }
 
-function ChatMessage({ msg }) {
+function ChatMessage({ msg, mode }) {
   if (msg.role === 'user') {
     return (
       <div className="rep-chat-msg rep-chat-msg--user">
@@ -123,6 +124,7 @@ function ChatMessage({ msg }) {
           </ul>
         </details>
       )}
+      <FeedbackButtons message={msg.content} query={msg.queryText || ''} mode={mode} />
     </div>
   );
 }
