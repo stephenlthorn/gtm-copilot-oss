@@ -26,6 +26,8 @@ class ChatRequest(BaseModel):
     filters: ChatFilters = Field(default_factory=ChatFilters)
     context: ChatContext = Field(default_factory=ChatContext)
     openai_token: str | None = None
+    rag_enabled: bool = True
+    web_search_enabled: bool = True
 
 
 class Citation(BaseModel):

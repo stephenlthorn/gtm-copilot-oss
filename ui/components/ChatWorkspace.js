@@ -38,6 +38,8 @@ export default function ChatWorkspace() {
   const [selectedTemplateUser, setSelectedTemplateUser] = useState('default'); // 'default' or email
   const [chatDraft, setChatDraft] = useState(''); // what gets pasted into PersistentChat input
   const [populateSignal, setPopulateSignal] = useState(0); // increment to trigger populate
+  const [ragEnabled, setRagEnabled] = useState(true);
+  const [webSearchEnabled, setWebSearchEnabled] = useState(true);
 
   // Fetch templates on mount
   useEffect(() => {
@@ -142,7 +144,21 @@ export default function ChatWorkspace() {
           <span style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--text)' }}>GTM Copilot</span>
           <span style={{ fontSize: '0.7rem', color: 'var(--text-3)' }}>Revenue Intelligence</span>
         </div>
-        <div style={{ display: 'flex', gap: '0.35rem' }}>
+        <div style={{ display: 'flex', gap: '0.35rem', alignItems: 'center' }}>
+          <button
+            onClick={() => setRagEnabled(v => !v)}
+            title="Toggle knowledge base retrieval"
+            style={{ fontSize: '0.72rem', padding: '0.25rem 0.55rem', borderRadius: '4px', border: '1px solid var(--border)', cursor: 'pointer', background: ragEnabled ? 'var(--accent)' : 'transparent', color: ragEnabled ? '#fff' : 'var(--text-2)' }}
+          >
+            KB {ragEnabled ? 'On' : 'Off'}
+          </button>
+          <button
+            onClick={() => setWebSearchEnabled(v => !v)}
+            title="Toggle web search"
+            style={{ fontSize: '0.72rem', padding: '0.25rem 0.55rem', borderRadius: '4px', border: '1px solid var(--border)', cursor: 'pointer', background: webSearchEnabled ? 'var(--accent)' : 'transparent', color: webSearchEnabled ? '#fff' : 'var(--text-2)' }}
+          >
+            Web {webSearchEnabled ? 'On' : 'Off'}
+          </button>
           <Link href="/settings" style={{ fontSize: '0.78rem', color: 'var(--text-2)', padding: '0.3rem 0.6rem', borderRadius: '4px', textDecoration: 'none', border: '1px solid var(--border)' }}>⚙ Settings</Link>
           <button onClick={handleLogout} disabled={loggingOut} style={{ fontSize: '0.78rem', color: 'var(--text-2)', padding: '0.3rem 0.6rem', borderRadius: '4px', background: 'transparent', border: '1px solid var(--border)', cursor: 'pointer' }}>
             {loggingOut ? 'Signing out…' : '→ Sign out'}
@@ -188,7 +204,7 @@ export default function ChatWorkspace() {
       </div>
 
       {/* RIGHT */}
-      <PersistentChat draft={chatDraft} populateSignal={populateSignal} />
+      <PersistentChat draft={chatDraft} populateSignal={populateSignal} ragEnabled={ragEnabled} webSearchEnabled={webSearchEnabled} />
     </div>
     </div>
   );

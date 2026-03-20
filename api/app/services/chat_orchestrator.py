@@ -288,7 +288,7 @@ class ChatOrchestrator:
         except Exception:
             return []
 
-    def run(self, *, mode: str, user: str, message: str, top_k: int, filters: dict, context: dict) -> tuple[dict, dict]:
+    def run(self, *, mode: str, user: str, message: str, top_k: int, filters: dict, context: dict, rag_enabled: bool = True, web_search_enabled: bool = True) -> tuple[dict, dict]:
         blocked = self._guardrail_external_messaging(message)
         if blocked:
             payload = {
@@ -370,14 +370,19 @@ class ChatOrchestrator:
         elif mode == "call_assistant":
             mode_filters["source_type"] = allowed_sources or [SourceType.CHORUS.value]
 
+        # Disable web search if user toggled it off
+        if not web_search_enabled:
+            llm_tools = [t for t in llm_tools if t.get("type") != "web_search_preview"]
+
         # Skip retrieval + web search for short conversational messages (greetings, thanks, etc.)
         query_terms = self._query_terms(message)
         is_conversational = len(message.split()) <= 5 and len(query_terms) == 0
+        skip_rag = not rag_enabled or is_conversational
         if is_conversational:
             llm_tools = [t for t in llm_tools if t.get("type") != "web_search_preview"]
             source_instructions = None
 
-        if is_conversational:
+        if skip_rag:
             hits = []
         else:
             rewritten = self.rewriter.rewrite(message, mode)
@@ -385,7 +390,7 @@ class ChatOrchestrator:
 
         # Feedback RAG injection
         feedback_corrections: list[str] = []
-        if not is_conversational:
+        if not skip_rag:
             try:
                 from app.services.embedding import EmbeddingService
                 emb_svc = EmbeddingService()

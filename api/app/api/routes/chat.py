@@ -60,6 +60,8 @@ def chat(req: ChatRequest, request: Request) -> dict:
             top_k=req.top_k,
             filters=req.filters.model_dump(),
             context=req.context.model_dump(),
+            rag_enabled=req.rag_enabled,
+            web_search_enabled=req.web_search_enabled,
         )
         # Persist chat messages
         try:
