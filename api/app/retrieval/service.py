@@ -204,6 +204,7 @@ class HybridRetriever:
                     rows.extend(vector_rows)
             except Exception:
                 # Fallback if pgvector ordering fails in a specific environment.
+                self.db.rollback()
                 rows.extend(self.db.execute(base_stmt.limit(candidate_limit)).all())
 
             if terms:
@@ -226,6 +227,7 @@ class HybridRetriever:
                     ).all()
                     rows.extend(vector_rows)
             except Exception:
+                self.db.rollback()
                 rows.extend(self.db.execute(base_stmt.limit(candidate_limit)).all())
 
             if terms:

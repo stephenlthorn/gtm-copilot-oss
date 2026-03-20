@@ -13,11 +13,7 @@ from app.core.settings import get_settings
 logger = logging.getLogger(__name__)
 
 _CHORUS_BASE = "https://chorus.ai"
-_CONVERSATION_FIELDS = (
-    "recording.utterances,recording.duration,recording.start_time,"
-    "participants,name,owner,owner.email,account,deal,status,"
-    "action_items,summary,language,_created_at"
-)
+# No fields param — default response includes all fields including recording.utterances
 
 
 def _project_root() -> Path:
@@ -76,7 +72,17 @@ class ChorusConnector:
         return out
 
     def _fetch_calls_api(self, since: date | None = None) -> list[ChorusCallRaw]:
-        """Fetch all engagements from Chorus v3 API with pagination."""
+        """Fetch engagements from Chorus v3 API with pagination.
+
+        Defaults to last 90 days to avoid a full history crawl on initial sync.
+        Pass `since` explicitly to override.
+        """
+        from datetime import timedelta
+
+        # Default to last 90 days so the initial sync doesn't pull all history
+        if since is None:
+            since = (datetime.utcnow() - timedelta(days=90)).date()
+
         # Chorus uses the plain token — NOT "Bearer <token>"
         headers = {
             "Authorization": self.api_key,
@@ -90,7 +96,7 @@ class ChorusConnector:
             )
 
         out: list[ChorusCallRaw] = []
-        max_pages = 100
+        max_pages = 5  # 5 pages × 100 calls = 500 calls per sync run
 
         with httpx.Client(timeout=30.0) as client:
             for page in range(max_pages):
@@ -108,8 +114,12 @@ class ChorusConnector:
                     call_id = str(eng.get("engagement_id") or eng.get("id") or "")
                     if not call_id:
                         continue
-                    # Fetch full transcript for this call
-                    full_payload = self._fetch_conversation(client, headers, call_id, eng)
+                    # Only fetch full transcripts for recorded meetings — skip emails/content_viewed
+                    eng_type = eng.get("engagement_type") or ""
+                    if eng_type in ("meeting",):
+                        full_payload = self._fetch_conversation(client, headers, call_id, eng)
+                    else:
+                        full_payload = eng
                     out.append(ChorusCallRaw(chorus_call_id=call_id, payload=full_payload))
 
                 continuation_key = data.get("continuation_key")
@@ -133,7 +143,6 @@ class ChorusConnector:
             resp = client.get(
                 url,
                 headers={**headers, "Accept": "application/vnd.api+json"},
-                params={"fields": _CONVERSATION_FIELDS},
                 timeout=30.0,
             )
             if resp.status_code == 404:

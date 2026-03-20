@@ -22,47 +22,114 @@ class TranscriptIngestor:
 
     @staticmethod
     def _normalize(payload: dict) -> dict:
-        # Supports already-normalized test fixtures and light transformation from API payloads.
+        # Already-normalized test fixtures
         if "metadata" in payload and "turns" in payload:
             return payload
 
-        participants = payload.get("participants", [])
-        speaker_map = {}
-        for idx, p in enumerate(participants, start=1):
-            speaker_map[f"S{idx}"] = {
-                "name": p.get("name", f"Speaker {idx}"),
-                "role": p.get("role", "other"),
-                "email": p.get("email"),
-            }
+        # Chorus API live format: engagement from /v3/engagements +
+        # conversation attributes merged in from /api/v1/conversations/:id
+        conv = payload.get("_conversation") or {}
 
-        turns = payload.get("turns", [])
-        if turns and "speaker_id" not in turns[0]:
-            normalized_turns = []
-            for t in turns:
-                normalized_turns.append(
-                    {
-                        "speaker_id": t.get("speaker", "S1"),
-                        "start_time_sec": t.get("start_time_sec", 0),
-                        "end_time_sec": t.get("end_time_sec", t.get("start_time_sec", 0) + 10),
-                        "text": t.get("text", ""),
-                    }
-                )
-            turns = normalized_turns
+        # Date: date_time is Unix seconds from Chorus v3
+        raw_date = (
+            payload.get("date_time")
+            or conv.get("_created_at")
+            or payload.get("date")
+            or payload.get("metadata", {}).get("date")
+        )
+        date_str = _to_date_str(raw_date)
 
-        md = {
-            "date": payload.get("date") or payload.get("metadata", {}).get("date"),
-            "account": payload.get("account") or payload.get("metadata", {}).get("account") or "Unknown",
-            "opportunity": payload.get("opportunity") or payload.get("metadata", {}).get("opportunity"),
-            "stage": payload.get("stage") or payload.get("metadata", {}).get("stage"),
-            "rep_email": payload.get("rep_email") or payload.get("metadata", {}).get("rep_email") or "unknown@example.com",
-            "se_email": payload.get("se_email") or payload.get("metadata", {}).get("se_email"),
-        }
+        # Account
+        acct = conv.get("account") or {}
+        account = (
+            payload.get("account_name")
+            or (acct.get("name") if isinstance(acct, dict) else None)
+            or payload.get("account")
+            or "Unknown"
+        )
+
+        # Opportunity / stage
+        deal = conv.get("deal") or {}
+        opportunity = (
+            payload.get("opportunity_name")
+            or (deal.get("name") if isinstance(deal, dict) else None)
+        )
+        stage = deal.get("current_stage") if isinstance(deal, dict) else None
+
+        # Rep email
+        owner = conv.get("owner") or {}
+        rep_email = (
+            payload.get("user_email")
+            or (owner.get("email") if isinstance(owner, dict) else None)
+            or "unknown@example.com"
+        )
+
+        # Participants → speaker_map
+        participants = conv.get("participants") or payload.get("participants") or []
+        speaker_map: dict[str, dict] = {}
+        for p in participants:
+            name = p.get("name") or p.get("email") or "Unknown"
+            ptype = p.get("type") or "other"
+            role = "rep" if ptype == "rep" else ("cust" if ptype in ("cust", "customer") else "other")
+            speaker_map[name] = {"name": name, "role": role, "email": p.get("email")}
+
+        if not speaker_map:
+            speaker_map = {"Speaker": {"name": rep_email, "role": "rep", "email": rep_email}}
+
+        # Turns: parse from "SpeakerName: text\n..." transcript string built by _build_transcript()
+        transcript_text = payload.get("transcript") or ""
+        turns: list[dict] = []
+        for i, line in enumerate(transcript_text.split("\n")):
+            line = line.strip()
+            if not line or line.startswith("["):
+                continue
+            if ": " in line:
+                speaker_name, text = line.split(": ", 1)
+                speaker_id = speaker_name.strip()
+            else:
+                speaker_id = "Speaker"
+                text = line
+            if text.strip():
+                turns.append({
+                    "speaker_id": speaker_id,
+                    "start_time_sec": i * 5,
+                    "end_time_sec": i * 5 + 5,
+                    "text": text.strip(),
+                })
+
+        # Fallback: use meeting_summary as a single turn if no utterances
+        if not turns:
+            summary = payload.get("meeting_summary") or conv.get("summary") or ""
+            action_items = payload.get("action_items") or []
+            text_parts = []
+            if summary:
+                text_parts.append(f"Summary: {summary}")
+            if action_items:
+                text_parts.append("Action items: " + "; ".join(str(a) for a in action_items if a))
+            if text_parts:
+                turns = [{"speaker_id": "Speaker", "start_time_sec": 0, "end_time_sec": 10,
+                          "text": " ".join(text_parts)}]
+
+        call_id = (
+            payload.get("chorus_call_id")
+            or payload.get("engagement_id")
+            or payload.get("id")
+        )
 
         return {
-            "chorus_call_id": payload.get("chorus_call_id") or payload.get("id"),
-            "metadata": md,
+            "chorus_call_id": call_id,
+            "metadata": {
+                "date": date_str,
+                "account": account,
+                "opportunity": opportunity,
+                "stage": stage,
+                "rep_email": rep_email,
+                "se_email": None,
+                "subject": payload.get("subject"),
+            },
             "speaker_map": speaker_map,
             "turns": turns,
+            "recording_url": payload.get("url") or f"https://chorus.ai/meeting/{call_id}",
         }
 
     def _upsert_call(self, normalized: dict) -> ChorusCall:
@@ -160,9 +227,22 @@ class TranscriptIngestor:
     def sync(self, since: date | None = None) -> dict:
         raw_calls = self.connector.fetch_calls(since=since)
         processed = 0
+        skipped = 0
 
         for raw in raw_calls:
+            # Skip non-meeting engagements (emails, content_viewed, etc.)
+            eng_type = raw.payload.get("engagement_type") or ""
+            if eng_type and eng_type not in ("meeting", ""):
+                skipped += 1
+                continue
+
             normalized = self._normalize(raw.payload)
+
+            # Skip if no turns — nothing to index
+            if not normalized.get("turns"):
+                skipped += 1
+                continue
+
             call = self._upsert_call(normalized)
             doc = self._upsert_document(normalized, call)
             snippets = self._replace_chunks(doc, normalized)
@@ -170,4 +250,29 @@ class TranscriptIngestor:
             processed += 1
 
         self.db.commit()
-        return {"calls_seen": len(raw_calls), "processed": processed}
+        return {"calls_seen": len(raw_calls), "processed": processed, "skipped": skipped}
+
+
+def _to_date_str(raw: object) -> str:
+    """Convert various date formats (Unix seconds, ISO string) to YYYY-MM-DD."""
+    from datetime import datetime, timezone
+    if not raw:
+        return datetime.now(tz=timezone.utc).strftime("%Y-%m-%d")
+    if isinstance(raw, (int, float)):
+        ts = float(raw)
+        if ts > 1e10:
+            ts /= 1000
+        try:
+            return datetime.utcfromtimestamp(ts).strftime("%Y-%m-%d")
+        except (ValueError, OSError, OverflowError):
+            pass
+    raw_str = str(raw).strip()
+    if raw_str.replace(".", "", 1).isdigit():
+        try:
+            ts = float(raw_str)
+            if ts > 1e10:
+                ts /= 1000
+            return datetime.utcfromtimestamp(ts).strftime("%Y-%m-%d")
+        except (ValueError, OSError, OverflowError):
+            pass
+    return raw_str[:10]  # Take YYYY-MM-DD from ISO string

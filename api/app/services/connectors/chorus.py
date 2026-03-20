@@ -12,12 +12,7 @@ _DEFAULT_TIMEOUT = 30.0
 _CHORUS_BASE = "https://chorus.ai"
 
 # Fields to request from the conversations API for full transcript + metadata
-_CONVERSATION_FIELDS = (
-    "recording.utterances,recording.trackers,recording.duration,"
-    "recording.start_time,recording.clusters,"
-    "participants,name,owner,owner.email,account,deal,status,"
-    "action_items,summary,language,_created_at"
-)
+# No fields param needed — default response includes all fields including recording.utterances
 
 
 @dataclass(frozen=True)
@@ -107,7 +102,6 @@ class ChorusConnector:
         """Fetch the full conversation including utterance-level transcript."""
         resp = await self._client.get(
             f"/api/v1/conversations/{call_id}",
-            params={"fields": _CONVERSATION_FIELDS},
             headers={"Accept": "application/vnd.api+json"},
         )
         resp.raise_for_status()
