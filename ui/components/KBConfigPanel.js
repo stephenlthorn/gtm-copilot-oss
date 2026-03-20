@@ -167,7 +167,6 @@ export default function KBConfigPanel() {
             </div>
           </div>
         )}
-      </div>
 
         {/* Retrieval depth */}
         <div style={{ display: 'grid', gap: '0.4rem' }}>
