@@ -1,5 +1,5 @@
-import RepExecutionWidget from '../../../components/RepExecutionWidget';
+import { redirect } from 'next/navigation';
 
 export default function RepPage() {
-  return <RepExecutionWidget />;
+  redirect('/chat');
 }

@@ -51,7 +51,7 @@ export async function GET(request) {
     name: claims.name || email,
   };
 
-  const res = NextResponse.redirect(new URL('/rep', request.url));
+  const res = NextResponse.redirect(new URL('/chat', request.url));
   res.cookies.set('oracle_session', JSON.stringify(session), {
     httpOnly: true,
     sameSite: 'lax',

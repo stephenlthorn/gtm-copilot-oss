@@ -8,6 +8,7 @@ import KBConfigPanel from '../../../components/KBConfigPanel';
 import KnowledgeSourcesPanel from '../../../components/KnowledgeSourcesPanel';
 import CallsPanel from '../../../components/CallsPanel';
 import SourceProfilesPanel from '../../../components/SourceProfilesPanel';
+import TemplatesPanel from '../../../components/TemplatesPanel';
 
 const SectionLabel = ({ id, children, first = false }) => (
   <div
@@ -90,6 +91,7 @@ export default async function SettingsPage() {
           ['#knowledge', 'Knowledge & Integrations'],
           ['#model', 'Model & Retrieval'],
           ['#persona', 'AI Persona'],
+          ['#templates', 'Templates'],
           ['#data', 'Data & Sync'],
           ['#system', 'System'],
         ].map(([href, label]) => (
@@ -145,6 +147,17 @@ export default async function SettingsPage() {
         <PersonaPromptPanel initialPersona={personaName} initialPrompt={personaPrompt} />
         <GTMFeaturePanel initialPocKitUrl={sePocKitUrl} initialFeatureFlags={featureFlags} />
         <SourceProfilesPanel initialProfiles={sourceProfiles} />
+
+        {/* ── Templates ────────────────────────────── */}
+        <SectionLabel id="templates">Templates</SectionLabel>
+        <div className="panel">
+          <div className="panel-header">
+            <span className="panel-title">Prompt Templates</span>
+          </div>
+          <div className="panel-body">
+            <TemplatesPanel />
+          </div>
+        </div>
 
         {/* ── Data & Sync ──────────────────────────── */}
         <SectionLabel id="data">Data &amp; Sync</SectionLabel>

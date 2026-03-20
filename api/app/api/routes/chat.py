@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Request
+from sqlalchemy import asc, select
 from sqlalchemy.orm import Session
 
 from app.db.session import SessionLocal
@@ -11,6 +12,38 @@ from app.services.chat_orchestrator import ChatOrchestrator
 from app.services.memory import MemoryService
 
 router = APIRouter()
+
+
+@router.get("/history")
+def chat_history(request: Request, limit: int = 100) -> list[dict]:
+    from app.models.entities import ChatMessage
+
+    user_email = request.headers.get("X-User-Email", "")
+    if not user_email:
+        return []
+    db: Session = SessionLocal()
+    try:
+        rows = (
+            db.execute(
+                select(ChatMessage)
+                .where(ChatMessage.user_email == user_email)
+                .order_by(asc(ChatMessage.created_at))
+                .limit(limit)
+            )
+            .scalars()
+            .all()
+        )
+        return [
+            {
+                "id": r.id,
+                "role": r.role,
+                "content": r.content,
+                "created_at": r.created_at.isoformat(),
+            }
+            for r in rows
+        ]
+    finally:
+        db.close()
 
 
 @router.post("")
@@ -28,6 +61,33 @@ def chat(req: ChatRequest, request: Request) -> dict:
             filters=req.filters.model_dump(),
             context=req.context.model_dump(),
         )
+        # Persist chat messages
+        try:
+            from app.models.entities import ChatMessage
+            import uuid as _uuid
+            from datetime import datetime
+
+            db.add(
+                ChatMessage(
+                    id=str(_uuid.uuid4()),
+                    user_email=req.user,
+                    role="user",
+                    content=req.message,
+                    created_at=datetime.utcnow(),
+                )
+            )
+            db.add(
+                ChatMessage(
+                    id=str(_uuid.uuid4()),
+                    user_email=req.user,
+                    role="assistant",
+                    content=data.get("answer", ""),
+                    created_at=datetime.utcnow(),
+                )
+            )
+            db.commit()
+        except Exception:
+            db.rollback()
         write_audit_log(
             db,
             actor=req.user,
