@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter
 
-from app.api.routes import admin, calls, chat, kb, marketing, messaging, rep, se, slack
+from app.api.routes import admin, calls, chat, feedback, kb, marketing, messaging, rep, se, slack, user_prefs
 
 api_router = APIRouter()
 api_router.include_router(chat.router, prefix="/chat", tags=["chat"])
@@ -14,3 +14,5 @@ api_router.include_router(rep.router, prefix="/rep", tags=["rep"])
 api_router.include_router(se.router, prefix="/se", tags=["se"])
 api_router.include_router(marketing.router, prefix="/marketing", tags=["marketing"])
 api_router.include_router(slack.router, prefix="/slack", tags=["slack"])
+api_router.include_router(user_prefs.router, prefix="/user", tags=["user"])
+api_router.include_router(feedback.router, prefix="/feedback", tags=["feedback"])

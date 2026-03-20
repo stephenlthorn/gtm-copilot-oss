@@ -1,11 +1,12 @@
 from __future__ import annotations
 
+import json
 import math
 import re
 from collections import Counter
 from dataclasses import asdict
 
-from sqlalchemy import or_, select
+from sqlalchemy import literal, or_, select
 from sqlalchemy.orm import Session
 
 from app.models import KBChunk, KBDocument
@@ -211,8 +212,30 @@ class HybridRetriever:
                     base_stmt.where(or_(*keyword_clauses)).limit(candidate_limit)
                 ).all()
                 rows.extend(keyword_rows)
+        elif dialect == "mysql":
+            # TiDB vector search using VEC_COSINE_DISTANCE
+            try:
+                if semantic_available and q_vec:
+                    from app.db.tidb_vector import vec_cosine_distance
+
+                    q_vec_str = json.dumps(q_vec)
+                    vector_rows = self.db.execute(
+                        base_stmt.where(KBChunk.embedding.is_not(None))
+                        .order_by(vec_cosine_distance(KBChunk.embedding, literal(q_vec_str)))
+                        .limit(candidate_limit)
+                    ).all()
+                    rows.extend(vector_rows)
+            except Exception:
+                rows.extend(self.db.execute(base_stmt.limit(candidate_limit)).all())
+
+            if terms:
+                keyword_clauses = [KBChunk.text.ilike(f"%{term}%") for term in terms[:6]]
+                keyword_rows = self.db.execute(
+                    base_stmt.where(or_(*keyword_clauses)).limit(candidate_limit)
+                ).all()
+                rows.extend(keyword_rows)
         else:
-            # Non-Postgres path (sqlite/mysql): use bounded candidate sets plus lexical filters.
+            # Non-Postgres path (sqlite): use bounded candidate sets plus lexical filters.
             rows.extend(self.db.execute(base_stmt.limit(candidate_limit)).all())
             if terms:
                 keyword_clauses = [KBChunk.text.ilike(f"%{term}%") for term in terms[:6]]

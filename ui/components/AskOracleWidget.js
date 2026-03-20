@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import FeedbackButtons from './FeedbackButtons';
 
 export default function AskOracleWidget({ defaultQuestion = '' }) {
   const [question, setQuestion] = useState(defaultQuestion);
@@ -66,6 +67,7 @@ export default function AskOracleWidget({ defaultQuestion = '' }) {
                 </ul>
               </div>
             )}
+            <FeedbackButtons mode="oracle" queryText={question} originalResponse={answer} />
           </div>
         )}
       </div>

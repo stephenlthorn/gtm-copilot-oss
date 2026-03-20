@@ -348,19 +348,22 @@ class LLMService:
         base_prompt: str,
         persona_name: str | None,
         persona_prompt: str | None,
+        source_instructions: str | None = None,
     ) -> str:
         prompt = (persona_prompt or "").strip()
-        if not prompt:
-            return base_prompt
-        normalized = normalize_persona(persona_name)
-        label = get_persona_label(normalized)
-        return (
-            f"{base_prompt}\n\n"
-            "Persona guidance:\n"
-            f"- Target user persona: {label}\n"
-            "- Adapt tone and recommendations for this persona while preserving policy and grounding.\n"
-            f"- Persona prompt: {prompt}"
-        )
+        parts = [base_prompt]
+        if prompt:
+            normalized = normalize_persona(persona_name)
+            label = get_persona_label(normalized)
+            parts.append(
+                "Persona guidance:\n"
+                f"- Target user persona: {label}\n"
+                "- Adapt tone and recommendations for this persona while preserving policy and grounding.\n"
+                f"- Persona prompt: {prompt}"
+            )
+        if source_instructions:
+            parts.append(source_instructions)
+        return "\n\n".join(parts)
 
     def _resolve_codex_responses_url(self) -> str:
         configured = (self.settings.openai_base_url or "").strip()
@@ -532,6 +535,7 @@ class LLMService:
         user_prompt: str,
         model: str | None,
         tools: list[dict] | None,
+        reasoning_effort: str | None = None,
     ) -> tuple[str | None, int]:
         account_id = credential.account_id or self._extract_account_id_from_jwt(credential.access_token)
         if not account_id:
@@ -551,6 +555,9 @@ class LLMService:
             "text": {"verbosity": "medium"},
             "include": ["reasoning.encrypted_content"],
         }
+
+        if reasoning_effort and reasoning_effort in ("low", "medium", "high"):
+            payload["reasoning"] = {"effort": reasoning_effort}
 
         headers = {
             "Authorization": f"Bearer {credential.access_token}",
@@ -638,6 +645,7 @@ class LLMService:
         user_prompt: str,
         model: str | None,
         tools: list[dict] | None,
+        reasoning_effort: str | None = None,
     ) -> str | None:
         if not self.codex_credentials:
             return None
@@ -663,6 +671,7 @@ class LLMService:
                         user_prompt=user_prompt,
                         model=model,
                         tools=tools,
+                        reasoning_effort=reasoning_effort,
                     )
                 except Exception as exc:
                     self.last_error = f"Codex request failed: {type(exc).__name__}: {exc}"
@@ -688,6 +697,7 @@ class LLMService:
         user_prompt: str,
         model: str | None = None,
         tools: list[dict] | None = None,
+        reasoning_effort: str | None = None,
     ) -> dict[str, Any] | None:
         safe_user_prompt = self._sanitize_for_provider(user_prompt)
         kwargs: dict[str, Any] = {
@@ -700,6 +710,8 @@ class LLMService:
         }
         if tools:
             kwargs["tools"] = tools
+        if reasoning_effort and reasoning_effort in ("low", "medium", "high"):
+            kwargs["reasoning"] = {"effort": reasoning_effort}
 
         for client in self.clients:
             try:
@@ -722,6 +734,7 @@ class LLMService:
             user_prompt=safe_user_prompt,
             model=model,
             tools=tools,
+            reasoning_effort=reasoning_effort,
         )
         if codex_text:
             return self._extract_json_object(codex_text)
@@ -733,6 +746,7 @@ class LLMService:
         user_prompt: str,
         model: str | None = None,
         tools: list[dict] | None = None,
+        reasoning_effort: str | None = None,
     ) -> str | None:
         safe_user_prompt = self._sanitize_for_provider(user_prompt)
         kwargs: dict[str, Any] = {
@@ -744,6 +758,8 @@ class LLMService:
         }
         if tools:
             kwargs["tools"] = tools
+        if reasoning_effort and reasoning_effort in ("low", "medium", "high"):
+            kwargs["reasoning"] = {"effort": reasoning_effort}
 
         for client in self.clients:
             try:
@@ -769,6 +785,7 @@ class LLMService:
             user_prompt=safe_user_prompt,
             model=model,
             tools=tools,
+            reasoning_effort=reasoning_effort,
         )
 
     def _local_oracle_synthesis(self, message: str, hits: list[RetrievedChunk]) -> str:
@@ -850,11 +867,13 @@ class LLMService:
         allow_ungrounded: bool = False,
         persona_name: str | None = None,
         persona_prompt: str | None = None,
+        reasoning_effort: str | None = None,
+        source_instructions: str | None = None,
     ) -> dict[str, Any]:
-        system_prompt = self._compose_persona_system_prompt(SYSTEM_ORACLE, persona_name, persona_prompt)
+        system_prompt = self._compose_persona_system_prompt(SYSTEM_ORACLE, persona_name, persona_prompt, source_instructions=source_instructions)
         if allow_ungrounded:
             prompt = f"User question:\n{message}\n\nProvide a concise, high-quality answer."
-            answer = self._responses_text(system_prompt, prompt, model=model, tools=tools)
+            answer = self._responses_text(system_prompt, prompt, model=model, tools=tools, reasoning_effort=reasoning_effort)
             if answer:
                 return {"answer": answer, "follow_up_questions": self._fallback_followups("oracle")}
             err = self.last_error or "No provider credentials configured."
@@ -897,7 +916,7 @@ class LLMService:
             f"{context}\n\n"
             "Return JSON with keys: answer (string), follow_up_questions (array of 3-7 strings)."
         )
-        llm = self._responses_json(system_prompt, prompt, model=model, tools=tools)
+        llm = self._responses_json(system_prompt, prompt, model=model, tools=tools, reasoning_effort=reasoning_effort)
         if llm and isinstance(llm.get("answer"), str):
             followups = llm.get("follow_up_questions") or self._fallback_followups("oracle")
             return {"answer": llm["answer"], "follow_up_questions": followups[:7]}
@@ -926,8 +945,10 @@ class LLMService:
         tools: list[dict] | None = None,
         persona_name: str | None = None,
         persona_prompt: str | None = None,
+        reasoning_effort: str | None = None,
+        source_instructions: str | None = None,
     ) -> dict[str, Any]:
-        system_prompt = self._compose_persona_system_prompt(SYSTEM_CALL_COACH, persona_name, persona_prompt)
+        system_prompt = self._compose_persona_system_prompt(SYSTEM_CALL_COACH, persona_name, persona_prompt, source_instructions=source_instructions)
         if not hits:
             return {
                 "what_happened": ["Insufficient transcript evidence retrieved."],
@@ -943,7 +964,7 @@ class LLMService:
             f"{context}\n\n"
             "Return JSON with keys: what_happened, risks, next_steps, questions_to_ask_next_call (all arrays of concise strings)."
         )
-        llm = self._responses_json(system_prompt, prompt, model=model, tools=tools)
+        llm = self._responses_json(system_prompt, prompt, model=model, tools=tools, reasoning_effort=reasoning_effort)
         if llm and all(k in llm for k in ["what_happened", "risks", "next_steps", "questions_to_ask_next_call"]):
             return {
                 "what_happened": list(llm.get("what_happened", []))[:6],

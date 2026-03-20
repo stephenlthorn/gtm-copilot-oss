@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import FeedbackButtons from './FeedbackButtons';
 
 const TEMPLATE_CURRENT_CUSTOMERS = 'account,region,industry,current_platform,use_case,arr';
 const TEMPLATE_PIPELINE = 'account,region,stage,industry,workload,est_arr,close_quarter,competing_vendor';
@@ -212,6 +213,7 @@ export default function MarketResearchWidget() {
                 </ul>
               </div>
             )}
+            <FeedbackButtons mode="oracle" queryText={goal} originalResponse={result} />
           </div>
         )}
       </div>

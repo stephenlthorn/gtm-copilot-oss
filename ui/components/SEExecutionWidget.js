@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import FeedbackButtons from './FeedbackButtons';
 
 export default function SEExecutionWidget() {
   const [account, setAccount] = useState('');
@@ -186,6 +187,11 @@ export default function SEExecutionWidget() {
                 </ul>
               </div>
             )}
+            <FeedbackButtons
+              mode="se"
+              queryText={account}
+              originalResponse={fullSolution || pocPlan || readiness || architecture || coach}
+            />
           </div>
         )}
       </div>

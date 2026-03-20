@@ -10,13 +10,14 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.constants import DEFAULT_EMBEDDING_DIMENSIONS
 from app.db.base import Base
+from app.db.tidb_vector import TiDBVector
 
 UUID_TYPE = Uuid(as_uuid=True)
 JSON_TYPE = JSON
 VECTOR_TYPE = (
     Vector(DEFAULT_EMBEDDING_DIMENSIONS)
+    .with_variant(TiDBVector(DEFAULT_EMBEDDING_DIMENSIONS), "mysql")
     .with_variant(JSON, "sqlite")
-    .with_variant(JSON, "mysql")
     .with_variant(JSON, "mariadb")
 )
 
@@ -183,6 +184,9 @@ class KBConfig(Base):
     chorus_enabled: Mapped[bool] = mapped_column(default=False, nullable=False)
     retrieval_top_k: Mapped[int] = mapped_column(Integer, default=8, nullable=False)
     llm_model: Mapped[str] = mapped_column(String(100), default="gpt-5.3-codex", nullable=False, server_default="gpt-5.3-codex")
+    reasoning_effort: Mapped[str] = mapped_column(
+        String(16), default="medium", nullable=False, server_default="medium"
+    )
     web_search_enabled: Mapped[bool] = mapped_column(default=False, nullable=False, server_default="false")
     code_interpreter_enabled: Mapped[bool] = mapped_column(default=False, nullable=False, server_default="false")
     persona_name: Mapped[str] = mapped_column(
@@ -194,6 +198,12 @@ class KBConfig(Base):
     persona_prompt: Mapped[str | None] = mapped_column(Text)
     se_poc_kit_url: Mapped[str | None] = mapped_column(Text)
     feature_flags_json: Mapped[dict] = mapped_column(
+        JSON_TYPE,
+        default=dict,
+        nullable=False,
+        server_default="{}",
+    )
+    source_profiles_json: Mapped[dict] = mapped_column(
         JSON_TYPE,
         default=dict,
         nullable=False,
@@ -357,3 +367,14 @@ class GTMTrendInsight(Base):
     )
     created_by: Mapped[str] = mapped_column(String(255), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
+class UserPreference(Base):
+    __tablename__ = "user_preferences"
+
+    user_email: Mapped[str] = mapped_column(String(255), primary_key=True)
+    llm_model: Mapped[str | None] = mapped_column(String(64))
+    reasoning_effort: Mapped[str | None] = mapped_column(String(16))
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
+    )
