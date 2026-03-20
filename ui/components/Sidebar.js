@@ -5,14 +5,10 @@ import Image from 'next/image';
 import { usePathname } from 'next/navigation';
 import { useState } from 'react';
 
-const PERSONAS = [
+const NAV = [
   { href: '/rep',    label: 'Sales Rep',      icon: '◎' },
   { href: '/se',     label: 'Sales Engineer', icon: '⬡' },
   { href: '/oracle', label: 'Ask Oracle',     icon: '◈' },
-];
-
-const UTILITY = [
-  { href: '/settings', label: 'Settings', icon: '⚙' },
 ];
 
 export default function Sidebar({ email, hasSession = false }) {
@@ -36,20 +32,7 @@ export default function Sidebar({ email, hasSession = false }) {
       </div>
 
       <nav className="sidebar-nav">
-        <div className="sidebar-section-label">Persona</div>
-        {PERSONAS.map(({ href, label, icon }) => (
-          <Link
-            key={href}
-            href={href}
-            className={`nav-link${pathname === href || pathname.startsWith(href + '/') ? ' active' : ''}`}
-          >
-            <span className="nav-link-icon">{icon}</span>
-            {label}
-          </Link>
-        ))}
-
-        <div className="sidebar-section-label" style={{ marginTop: '0.5rem' }}>Account</div>
-        {UTILITY.map(({ href, label, icon }) => (
+        {NAV.map(({ href, label, icon }) => (
           <Link
             key={href}
             href={href}
@@ -66,6 +49,14 @@ export default function Sidebar({ email, hasSession = false }) {
           <div className="user-dot" />
           <div className="user-email">{email}</div>
         </div>
+        <Link
+          href="/settings"
+          className={`nav-link${pathname === '/settings' ? ' active' : ''}`}
+          style={{ width: '100%' }}
+        >
+          <span className="nav-link-icon">⚙</span>
+          Settings
+        </Link>
         {hasSession ? (
           <button
             className="nav-link btn-ghost"

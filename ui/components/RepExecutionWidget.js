@@ -6,8 +6,8 @@ import { useEffect, useRef, useState, useCallback } from 'react';
 
 function Field({ label, children }) {
   return (
-    <div style={{ display: 'grid', gap: '0.28rem' }}>
-      <label style={{ fontSize: '0.68rem', color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{label}</label>
+    <div style={{ display: 'grid', gap: '0.35rem' }}>
+      <label style={{ fontSize: '0.75rem', color: 'var(--text-2)', fontWeight: 500 }}>{label}</label>
       {children}
     </div>
   );
@@ -394,50 +394,42 @@ export default function RepExecutionWidget() {
         <div className="rep-inputs-scroll">
 
           <PhaseBlock number="1" title="Research Company">
-            <div style={{ display: 'grid', gap: '0.5rem' }}>
-              <Field label="Account Name *">
-                <input className="input" value={account} onChange={e => setAccount(e.target.value)} placeholder="e.g. Acme Corp" />
-              </Field>
-              <Field label="Website">
-                <input className="input" value={website} onChange={e => setWebsite(e.target.value)} placeholder="acmecorp.com" />
-              </Field>
-            </div>
+            <Field label="Account Name">
+              <input className="input" value={account} onChange={e => setAccount(e.target.value)} placeholder="e.g. Acme Corp" />
+            </Field>
+            <Field label="Website">
+              <input className="input" value={website} onChange={e => setWebsite(e.target.value)} placeholder="acmecorp.com" />
+            </Field>
           </PhaseBlock>
 
           <PhaseBlock number="2" title="Research Prospect">
-            <div style={{ display: 'grid', gap: '0.5rem' }}>
-              <Field label="Name">
-                <input className="input" value={prospectName} onChange={e => setProspectName(e.target.value)} placeholder="Jane Smith" />
-              </Field>
-              <Field label="LinkedIn URL">
-                <input className="input" value={prospectLinkedin} onChange={e => setProspectLinkedin(e.target.value)} placeholder="linkedin.com/in/…" />
-              </Field>
-            </div>
+            <Field label="Prospect Name">
+              <input className="input" value={prospectName} onChange={e => setProspectName(e.target.value)} placeholder="Jane Smith" />
+            </Field>
+            <Field label="LinkedIn URL">
+              <input className="input" value={prospectLinkedin} onChange={e => setProspectLinkedin(e.target.value)} placeholder="linkedin.com/in/…" />
+            </Field>
           </PhaseBlock>
 
           <PhaseBlock number="3" title="Market Research / TAL">
-            <div style={{ display: 'grid', gap: '0.5rem' }}>
-              <Field label="Regions / Territory">
-                <input className="input" value={regions} onChange={e => setRegions(e.target.value)} placeholder="US West, APAC" />
-              </Field>
-              <Field label="Industry">
-                <input className="input" value={industry} onChange={e => setIndustry(e.target.value)} placeholder="FinTech, SaaS…" />
-              </Field>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem' }}>
-                <Field label="Revenue Min ($M)">
-                  <input className="input" type="number" value={revenueMin} onChange={e => setRevenueMin(e.target.value)} placeholder="50" />
-                </Field>
-                <Field label="Revenue Max ($M)">
-                  <input className="input" type="number" value={revenueMax} onChange={e => setRevenueMax(e.target.value)} placeholder="500" />
-                </Field>
-              </div>
-              <Field label="Additional Context">
-                <textarea className="input" rows={2} value={talContext} onChange={e => setTalContext(e.target.value)} placeholder="Companies using MySQL at scale…" />
-              </Field>
-              <Field label="Top N">
-                <input className="input" type="number" min={5} max={100} value={talCount} onChange={e => setTalCount(e.target.value)} />
-              </Field>
-            </div>
+            <Field label="Regions / Territory">
+              <input className="input" value={regions} onChange={e => setRegions(e.target.value)} placeholder="US West, APAC" />
+            </Field>
+            <Field label="Industry Vertical">
+              <input className="input" value={industry} onChange={e => setIndustry(e.target.value)} placeholder="FinTech, SaaS…" />
+            </Field>
+            <Field label="Revenue Min ($M)">
+              <input className="input" type="number" value={revenueMin} onChange={e => setRevenueMin(e.target.value)} placeholder="50" />
+            </Field>
+            <Field label="Revenue Max ($M)">
+              <input className="input" type="number" value={revenueMax} onChange={e => setRevenueMax(e.target.value)} placeholder="500" />
+            </Field>
+            <Field label="Additional Context">
+              <textarea className="input" rows={2} value={talContext} onChange={e => setTalContext(e.target.value)} placeholder="Companies using MySQL at scale…" style={{ minHeight: '56px' }} />
+            </Field>
+            <Field label="Top N Accounts">
+              <input className="input" type="number" min={5} max={100} value={talCount} onChange={e => setTalCount(e.target.value)} />
+            </Field>
           </PhaseBlock>
 
           {/* Generate buttons */}
@@ -453,30 +445,28 @@ export default function RepExecutionWidget() {
 
           {/* Call context */}
           <PhaseBlock number="📞" title="Call Context">
-            <div style={{ display: 'grid', gap: '0.6rem' }}>
-              <CallSelector account={account} selectedIds={selectedCallIds} onChange={setSelectedCallIds} />
-              {hasCallSelected && (
-                <div style={{ display: 'grid', gap: '0.5rem', borderTop: '1px solid var(--border)', paddingTop: '0.6rem' }}>
-                  <Field label="To">
-                    <input className="input" value={emailTo} onChange={e => setEmailTo(e.target.value)} placeholder="rep@company.com" />
-                  </Field>
-                  <Field label="CC">
-                    <input className="input" value={emailCc} onChange={e => setEmailCc(e.target.value)} placeholder="se@company.com" />
-                  </Field>
-                  <Field label="Tone">
-                    <select className="input" value={emailTone} onChange={e => setEmailTone(e.target.value)}>
-                      <option value="crisp">Crisp</option>
-                      <option value="executive">Executive</option>
-                      <option value="technical">Technical</option>
-                    </select>
-                  </Field>
-                </div>
-              )}
-              <div className="rep-action-group" style={{ paddingTop: 0 }}>
-                <button className="btn btn-primary" onClick={() => run('risk')} disabled={busy || !hasCallSelected}>Deal Risk</button>
-                <button className="btn" onClick={() => run('draft')} disabled={busy || !hasCallSelected}>Follow-Up Draft</button>
-                {!hasCallSelected && <span style={{ fontSize: '0.7rem', color: 'var(--text-3)' }}>Select a call first</span>}
-              </div>
+            <CallSelector account={account} selectedIds={selectedCallIds} onChange={setSelectedCallIds} />
+            {hasCallSelected && (
+              <>
+                <Field label="To">
+                  <input className="input" value={emailTo} onChange={e => setEmailTo(e.target.value)} placeholder="rep@company.com" />
+                </Field>
+                <Field label="CC">
+                  <input className="input" value={emailCc} onChange={e => setEmailCc(e.target.value)} placeholder="se@company.com" />
+                </Field>
+                <Field label="Email Tone">
+                  <select className="input" value={emailTone} onChange={e => setEmailTone(e.target.value)}>
+                    <option value="crisp">Crisp</option>
+                    <option value="executive">Executive</option>
+                    <option value="technical">Technical</option>
+                  </select>
+                </Field>
+              </>
+            )}
+            <div className="rep-action-group" style={{ paddingTop: 0 }}>
+              <button className="btn btn-primary" onClick={() => run('risk')} disabled={busy || !hasCallSelected}>Deal Risk</button>
+              <button className="btn" onClick={() => run('draft')} disabled={busy || !hasCallSelected}>Follow-Up Draft</button>
+              {!hasCallSelected && <span style={{ fontSize: '0.72rem', color: 'var(--text-3)' }}>Select a call to enable</span>}
             </div>
           </PhaseBlock>
 
