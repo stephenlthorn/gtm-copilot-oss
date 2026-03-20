@@ -370,18 +370,29 @@ class ChatOrchestrator:
         elif mode == "call_assistant":
             mode_filters["source_type"] = allowed_sources or [SourceType.CHORUS.value]
 
-        rewritten = self.rewriter.rewrite(message, mode)
-        hits = self.retriever.search(rewritten, top_k=resolved_top_k, filters=mode_filters)
+        # Skip retrieval + web search for short conversational messages (greetings, thanks, etc.)
+        query_terms = self._query_terms(message)
+        is_conversational = len(message.split()) <= 5 and len(query_terms) == 0
+        if is_conversational:
+            llm_tools = [t for t in llm_tools if t.get("type") != "web_search_preview"]
+            source_instructions = None
+
+        if is_conversational:
+            hits = []
+        else:
+            rewritten = self.rewriter.rewrite(message, mode)
+            hits = self.retriever.search(rewritten, top_k=resolved_top_k, filters=mode_filters)
 
         # Feedback RAG injection
         feedback_corrections: list[str] = []
-        try:
-            from app.services.embedding import EmbeddingService
-            emb_svc = EmbeddingService()
-            q_embedding = emb_svc.embed(message)
-            feedback_corrections = self._retrieve_feedback_corrections(q_embedding, mode)
-        except Exception:
-            pass
+        if not is_conversational:
+            try:
+                from app.services.embedding import EmbeddingService
+                emb_svc = EmbeddingService()
+                q_embedding = emb_svc.embed(message)
+                feedback_corrections = self._retrieve_feedback_corrections(q_embedding, mode)
+            except Exception:
+                pass
 
         if feedback_corrections:
             corrections_text = "\n".join(f"- {c}" for c in feedback_corrections)
