@@ -38,7 +38,9 @@ class ChorusSyncService:
             select(ChorusCall).order_by(ChorusCall.date.desc()).limit(1)
         ).scalar_one_or_none()
 
-        since = datetime.combine(last_call.date, datetime.min.time()) if last_call else None
+        since: datetime | None = None
+        if last_call and last_call.date:
+            since = datetime.combine(last_call.date, datetime.min.time())
         calls = await self.connector.list_calls(since=since)
 
         stored = 0
@@ -108,39 +110,93 @@ class ChorusSyncService:
         self, data: ChorusCallData, call: ChorusCall
     ) -> str | None:
         try:
-            transcript = data.transcript or await self.connector.get_transcript(data.call_id)
+            # If the engagement listing didn't include transcript, fetch full conversation
+            if data.transcript:
+                full_data = data
+            else:
+                full_data = await self.connector.get_full_call(data.call_id)
         except Exception:
             logger.warning("Could not fetch transcript for call %s", data.call_id)
             return None
 
+        transcript = full_data.transcript
         if not transcript:
             return None
+
+        subject = full_data.subject or data.subject
+        title = f"Call Transcript: {call.account}"
+        if subject:
+            title += f" — {subject}"
+        title += f" ({call.date.isoformat()})"
 
         doc = KBDocument(
             source_type=SourceType.CHORUS,
             source_id=data.call_id,
-            title=f"Call Transcript: {call.account} {call.date.isoformat()}",
-            url=call.recording_url,
+            title=title,
+            url=full_data.recording_url or call.recording_url,
             mime_type="text/plain",
-            owner=call.rep_email,
+            owner=full_data.rep_email or call.rep_email,
             permissions_hash=sha256_text(f"{call.rep_email}:{call.se_email or ''}"),
             tags={
                 "account": call.account,
                 "date": call.date.isoformat(),
                 "source_type": "call_transcript",
+                "language": full_data.language or "en",
+                "opportunity": full_data.opportunity or "",
+                "stage": full_data.stage or "",
             },
         )
         self.db.add(doc)
         self.db.flush()
 
-        self._index_transcript(doc, transcript, data)
+        self._index_transcript(doc, transcript, full_data)
         return transcript
 
     def _index_transcript(
         self, doc: KBDocument, transcript: str, data: ChorusCallData
     ) -> None:
-        turns = [{"speaker_id": "S1", "start_time_sec": 0, "end_time_sec": 10, "text": transcript}]
-        speaker_map = {"S1": {"name": data.rep_email or "Speaker", "role": "rep"}}
+        # Build speaker map from participants: rep vs cust
+        speaker_map: dict[str, dict] = {}
+        rep_emails = {p.get("email", "").lower() for p in data.participants if p.get("type") == "rep"}
+
+        for p in data.participants:
+            name = p.get("name") or p.get("email") or "Unknown"
+            email = (p.get("email") or "").lower()
+            role = "rep" if p.get("type") == "rep" or email in rep_emails else "cust"
+            speaker_map[name] = {"name": name, "role": role}
+
+        if not speaker_map:
+            speaker_map = {"Speaker": {"name": data.rep_email or "Speaker", "role": "rep"}}
+
+        # Parse transcript lines into turns with speaker attribution
+        turns: list[dict] = []
+        for i, line in enumerate(transcript.split("\n")):
+            line = line.strip()
+            if not line or line.startswith("["):
+                continue
+            if ": " in line:
+                speaker_name, text = line.split(": ", 1)
+                speaker_id = speaker_name.strip()
+                if speaker_id not in speaker_map:
+                    speaker_map[speaker_id] = {
+                        "name": speaker_id,
+                        "role": "rep" if data.rep_email and speaker_id.lower() in (data.rep_email or "").lower() else "unknown",
+                    }
+            else:
+                speaker_id = "Speaker"
+                text = line
+
+            turns.append({
+                "speaker_id": speaker_id,
+                "start_time_sec": i * 5,
+                "end_time_sec": i * 5 + 5,
+                "text": text,
+            })
+
+        if not turns:
+            # Fallback: single chunk
+            turns = [{"speaker_id": "Speaker", "start_time_sec": 0, "end_time_sec": 10, "text": transcript}]
+
         chunks = chunk_transcript_turns(turns, speaker_map)
         embeddings = self.embedder.batch_embed([c.text for c in chunks]) if chunks else []
 
