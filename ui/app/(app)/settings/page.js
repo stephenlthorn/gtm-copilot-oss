@@ -50,16 +50,18 @@ export default async function SettingsPage() {
     if (cfg?.source_profiles_json && typeof cfg.source_profiles_json === 'object') sourceProfiles = cfg.source_profiles_json;
   } catch { /* use defaults */ }
 
-  const [docsRaw, auditsRaw, callsRaw] = await Promise.all([
-    apiGet('/kb/documents?limit=300').catch(() => []),
+  const [docsCountRaw, docsRaw, auditsRaw, callsRaw] = await Promise.all([
+    apiGet('/kb/documents/count').catch(() => ({ count: 0 })),
+    apiGet('/kb/documents?limit=50').catch(() => []),
     apiGet('/admin/audit?limit=30').catch(() => []),
     apiGet('/calls?limit=300').catch(() => []),
   ]);
 
+  const docsCount = docsCountRaw?.count ?? 0;
   const docs = docsRaw || [];
   const audits = auditsRaw || [];
   const calls = callsRaw || [];
-  const liveMode = docs.length > 0 || audits.length > 0 || calls.length > 0;
+  const liveMode = docsCount > 0 || audits.length > 0 || calls.length > 0;
 
   return (
     <>
@@ -151,7 +153,7 @@ export default async function SettingsPage() {
 
         <div className="kpi-row">
           {[
-            { label: 'Docs Indexed', value: docs.length, sub: docs[0]?.title || '—' },
+            { label: 'Docs Indexed', value: docsCount.toLocaleString(), sub: docs[0]?.title || '—' },
             { label: 'Calls Indexed', value: calls.length, sub: calls[0]?.account || '—' },
             { label: 'Audit Events', value: audits.length, sub: 'Last 30 days' },
           ].map((k) => (

@@ -3,12 +3,16 @@
 import { useState, useEffect } from 'react';
 
 const MODELS = [
-  { id: 'gpt-5.4',           label: '5.4',        reasoning: true  },
-  { id: 'gpt-5.3-codex',     label: '5.3 Codex',  reasoning: true  },
-  { id: 'o3',                label: 'o3',          reasoning: true  },
-  { id: 'o4-mini',           label: 'o4-mini',     reasoning: true  },
-  { id: 'gpt-5.1-codex',     label: '5.1 Codex',  reasoning: true  },
-  { id: 'gpt-5-codex-mini',  label: 'Mini',        reasoning: false },
+  { id: 'gpt-5.4',           label: '5.4',         reasoning: true  },
+  { id: 'gpt-5.4-mini',      label: '5.4 Mini',    reasoning: true  },
+  { id: 'gpt-5.4-nano',      label: '5.4 Nano',    reasoning: false },
+  { id: 'gpt-5.3-codex',     label: '5.3 Codex',   reasoning: true  },
+  { id: 'o4-mini',           label: 'o4-mini',      reasoning: true  },
+  { id: 'o3',                label: 'o3',           reasoning: true  },
+  { id: 'o3-pro',            label: 'o3 Pro',       reasoning: true  },
+  { id: 'o3-mini',           label: 'o3 Mini',      reasoning: true  },
+  { id: 'gpt-5.1-codex',     label: '5.1 Codex',   reasoning: true  },
+  { id: 'gpt-5-codex-mini',  label: 'Mini',         reasoning: false },
 ];
 
 const THINKING_LEVELS = ['low', 'medium', 'high'];

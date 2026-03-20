@@ -59,6 +59,23 @@ def _fulltext_score(text: str, title: str, source_id: str, query: str) -> float:
     return score
 
 
+@router.get("/documents/count")
+def count_documents(
+    source_type: str | None = Query(default=None),
+    db: Session = Depends(db_session),
+) -> dict:
+    from sqlalchemy import func as sqlfunc
+    stmt = select(sqlfunc.count()).select_from(KBDocument)
+    if source_type:
+        try:
+            source = SourceType(source_type)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=f"invalid source_type: {source_type}") from exc
+        stmt = stmt.where(KBDocument.source_type == source)
+    total = db.execute(stmt).scalar_one()
+    return {"count": total}
+
+
 @router.get("/documents")
 def list_documents(
     source_type: str | None = Query(default=None),
