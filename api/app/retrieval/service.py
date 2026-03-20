@@ -244,6 +244,25 @@ class HybridRetriever:
                 ).all()
                 rows.extend(keyword_rows)
 
+        # If an account filter is set, directly fetch ALL chunks from matching documents
+        # to guarantee they appear in the candidate pool (vector search may miss them
+        # when the KB is large and query semantics don't align with raw transcript text).
+        account_filter_set = {a.lower() for a in (filters.get("account") or [])}
+        if account_filter_set:
+            try:
+                acct_stmt = (
+                    select(KBChunk, KBDocument)
+                    .join(KBDocument, KBChunk.document_id == KBDocument.id)
+                    .where(KBDocument.source_type.in_(["chorus"]))
+                )
+                acct_rows = self.db.execute(acct_stmt).all()
+                for chunk, doc in acct_rows:
+                    tags = doc.tags if isinstance(doc.tags, dict) else {}
+                    if str(tags.get("account", "")).lower() in account_filter_set:
+                        rows.append((chunk, doc))
+            except Exception:
+                pass
+
         deduped: dict[str, tuple[KBChunk, KBDocument]] = {}
         for chunk, doc in rows:
             deduped[str(chunk.id)] = (chunk, doc)

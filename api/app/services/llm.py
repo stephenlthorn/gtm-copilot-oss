@@ -890,23 +890,29 @@ class LLMService:
             }
 
         if not hits:
+            # If web search is available, let the LLM proceed — it can search the web.
+            has_web_search = any(t.get("type") == "web_search_preview" for t in (tools or []))
+            if has_web_search:
+                prompt = f"User question:\n{message}\n\nNo internal documents were found. Use web search to answer."
+                answer = self._responses_text(system_prompt, prompt, model=model, tools=tools, reasoning_effort=reasoning_effort)
+                if answer:
+                    return {"answer": answer, "citations": [], "follow_up_questions": self._fallback_followups("oracle")}
             return {
                 "answer": (
-                    "I don't have enough context to answer this question. "
-                    "Make sure Google Drive and Feishu are synced in Admin settings. "
-                    "You can also try rephrasing your question."
+                    "No relevant content found in the knowledge base for this query. "
+                    "Make sure your call transcripts are synced and try specifying the account name."
                 ),
                 "citations": [],
                 "follow_up_questions": [
-                    "Is Google Drive synced? (Admin -> Sync Google Drive)",
-                    "Is Feishu configured with a folder token?",
+                    "Try: 'Summarize the Airbnb call from March 20'",
+                    "Is the Chorus sync configured and running?",
                 ],
             }
 
         context = "\n\n".join(
             [
-                f"[{h.source_id}:{h.chunk_id}] {h.text[:1200]}"
-                for h in hits[:8]
+                f"[{h.source_id}:{h.chunk_id}] {h.text[:2000]}"
+                for h in hits[:20]
             ]
         )
         prompt = (
