@@ -72,6 +72,11 @@ class Settings(BaseSettings):
     slack_signing_secret: str | None = None
     slack_default_channel: str | None = None
 
+    # OSINT / research connectors
+    firecrawl_api_key: str | None = None
+    builtwith_api_key: str | None = None
+    zoominfo_api_key: str | None = None
+
     tidb_ssl_ca: str | None = None
     database_backend: str = "auto"
 
