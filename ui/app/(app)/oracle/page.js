@@ -1,7 +1,5 @@
-'use client';
-
-import OracleChat from '../../../components/OracleChat';
+import { redirect } from 'next/navigation';
 
 export default function OraclePage() {
-  return <OracleChat fullScreen />;
+  redirect('/rep');
 }

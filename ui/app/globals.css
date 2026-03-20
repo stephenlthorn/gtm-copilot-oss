@@ -38,7 +38,7 @@ a:hover { text-decoration: underline; }
 /* ── Shell layout ── */
 .shell {
   display: grid;
-  grid-template-columns: 200px 1fr;
+  grid-template-columns: 1fr;
   min-height: 100vh;
 }
 
@@ -947,6 +947,7 @@ pre {
   flex: 1;
   min-height: 0;
   overflow: hidden;
+  height: 100vh;
 }
 
 /* ── Left inputs panel ── */

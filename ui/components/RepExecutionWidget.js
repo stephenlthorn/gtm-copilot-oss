@@ -223,6 +223,67 @@ function FullSolutionMsg({ data }) {
   );
 }
 
+function PocPlanMsg({ data }) {
+  return (
+    <div className="chat-result">
+      <div className="chat-result-label" style={{ marginBottom: '0.3rem' }}>
+        {data.status} · Readiness {data.readiness_score}/100
+      </div>
+      {data.readiness_summary && <p style={{ marginBottom: '0.4rem' }}>{data.readiness_summary}</p>}
+      {data.poc_kit_url && (
+        <div style={{ fontSize: '0.75rem' }}>
+          POC kit: <a href={data.poc_kit_url} target="_blank" rel="noreferrer">{data.poc_kit_url}</a>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ReadinessMsg({ data }) {
+  return (
+    <div className="chat-result">
+      {data.readiness_summary && <p>{data.readiness_summary}</p>}
+    </div>
+  );
+}
+
+function ArchitectureMsg({ data }) {
+  return (
+    <div className="chat-result">
+      {data.fit_summary && <p>{data.fit_summary}</p>}
+    </div>
+  );
+}
+
+function CoachMsg({ data }) {
+  return (
+    <div className="chat-result">
+      {data.positioning?.length > 0 && (
+        <ul className="chat-result-list">
+          {data.positioning.slice(0, 5).map((x, i) => <li key={i}>{x}</li>)}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+function SEFullMsg({ data }) {
+  return (
+    <div className="chat-result">
+      {data.phase_2_validation_matrix?.length > 0 && (
+        <>
+          <div className="chat-result-label" style={{ marginBottom: '0.3rem' }}>Validation Matrix</div>
+          <ul className="chat-result-list">
+            {data.phase_2_validation_matrix.map((item, i) => (
+              <li key={i}>{item.check}: {item.target} ({item.owner})</li>
+            ))}
+          </ul>
+        </>
+      )}
+    </div>
+  );
+}
+
 const ACTION_LABELS = {
   brief: 'Account Brief',
   questions: 'Discovery Questions',
@@ -230,6 +291,11 @@ const ACTION_LABELS = {
   draft: 'Follow-Up Draft',
   tal: 'Target Account List',
   full: 'Full Solution (Phases 1–3)',
+  'se-poc-plan': 'POC Plan',
+  'se-poc-readiness': 'POC Readiness',
+  'se-architecture-fit': 'Architecture Fit',
+  'se-competitor-coach': 'Competitor Coach',
+  'se-full': 'SE Full Solution',
 };
 
 function ChatMessage({ msg }) {
@@ -258,6 +324,11 @@ function ChatMessage({ msg }) {
     draft: DraftMsg,
     tal: TalMsg,
     full: FullSolutionMsg,
+    'se-poc-plan': PocPlanMsg,
+    'se-poc-readiness': ReadinessMsg,
+    'se-architecture-fit': ArchitectureMsg,
+    'se-competitor-coach': CoachMsg,
+    'se-full': SEFullMsg,
   }[msg.action];
 
   return (
@@ -284,6 +355,9 @@ export default function RepExecutionWidget() {
   const [revenueMax, setRevenueMax] = useState('');
   const [talContext, setTalContext] = useState('');
   const [talCount, setTalCount] = useState(25);
+  // SE inputs
+  const [targetOffering, setTargetOffering] = useState('Managed Distributed SQL');
+  const [competitor, setCompetitor] = useState('');
   // Call context
   const [selectedCallIds, setSelectedCallIds] = useState([]);
   const [emailTo, setEmailTo] = useState('');
@@ -318,6 +392,7 @@ export default function RepExecutionWidget() {
         chorus_call_id: selectedCallIds[0] || null,
       };
 
+      const seBase = { account: account.trim(), chorus_call_id: selectedCallIds[0] || null };
       const routes = {
         brief: ['/api/rep/account-brief', base],
         questions: ['/api/rep/discovery-questions', { ...base, count: 6 }],
@@ -339,6 +414,11 @@ export default function RepExecutionWidget() {
           context: talContext.trim() || null,
           top_n: Number(talCount) || 25,
         }],
+        'se-poc-plan': ['/api/se/poc-plan', { ...seBase, target_offering: targetOffering }],
+        'se-poc-readiness': ['/api/se/poc-readiness', seBase],
+        'se-architecture-fit': ['/api/se/architecture-fit', seBase],
+        'se-competitor-coach': ['/api/se/competitor-coach', { ...seBase, competitor: competitor || 'Unknown' }],
+        'se-full': ['/api/se/full-solution', { ...seBase, target_offering: targetOffering, competitor: competitor || 'Unknown' }],
       };
 
       const [path, payload] = routes[action];
@@ -432,9 +512,9 @@ export default function RepExecutionWidget() {
             </Field>
           </PhaseBlock>
 
-          {/* Generate buttons */}
+          {/* Rep generate buttons */}
           <div className="rep-action-group">
-            <div className="rep-action-label">Generate</div>
+            <div className="rep-action-label">Sales Rep</div>
             <button className="btn btn-primary" onClick={() => run('full')} disabled={busy}>
               {loadingAction === 'full' ? 'Generating…' : '⚡ Full Solution (1–3)'}
             </button>
@@ -442,6 +522,29 @@ export default function RepExecutionWidget() {
             <button className="btn" onClick={() => run('questions')} disabled={busy}>Discovery Questions</button>
             <button className="btn" onClick={() => run('tal')} disabled={busy}>Target Account List</button>
           </div>
+
+          {/* SE section */}
+          <PhaseBlock number="⬡" title="Sales Engineer">
+            <Field label="Target Offering">
+              <select className="input" value={targetOffering} onChange={e => setTargetOffering(e.target.value)}>
+                <option>Managed Distributed SQL</option>
+                <option>Self-Managed Distributed SQL</option>
+                <option>Enterprise Cluster Edition</option>
+              </select>
+            </Field>
+            <Field label="Competitor">
+              <input className="input" value={competitor} onChange={e => setCompetitor(e.target.value)} placeholder="e.g. CockroachDB, Aurora" />
+            </Field>
+            <div className="rep-action-group" style={{ paddingTop: 0 }}>
+              <button className="btn btn-primary" onClick={() => run('se-full')} disabled={busy}>
+                {loadingAction === 'se-full' ? 'Generating…' : '⚡ SE Full Solution'}
+              </button>
+              <button className="btn" onClick={() => run('se-poc-plan')} disabled={busy}>POC Plan</button>
+              <button className="btn" onClick={() => run('se-poc-readiness')} disabled={busy}>Readiness</button>
+              <button className="btn" onClick={() => run('se-architecture-fit')} disabled={busy}>Architecture Fit</button>
+              <button className="btn" onClick={() => run('se-competitor-coach')} disabled={busy}>Competitor Coach</button>
+            </div>
+          </PhaseBlock>
 
           {/* Call context */}
           <PhaseBlock number="📞" title="Call Context">
