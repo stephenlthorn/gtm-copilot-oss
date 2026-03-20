@@ -86,7 +86,6 @@ export default function PersistentChat({ draft, populateSignal, ragEnabled = tru
           onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); }}}
           placeholder="Type a message or use Populate to draft from a template… (Enter to send, Shift+Enter for newline)"
           disabled={loading}
-          style={{ minHeight: '90px' }}
         />
         <button className="btn btn-primary rep-chat-send" onClick={send} disabled={loading || !input.trim()}>
           {loading ? '…' : '→'}

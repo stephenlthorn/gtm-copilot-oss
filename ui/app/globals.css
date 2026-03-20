@@ -1176,15 +1176,16 @@ pre {
 
 .rep-chat-input {
   flex: 1;
-  resize: none;
+  resize: vertical;
+  min-height: 80px;
   font-family: var(--font);
   font-size: 0.82rem;
   background: var(--bg);
   color: var(--text);
   border: 1px solid var(--border);
   border-radius: 5px;
-  padding: 0.45rem 0.65rem;
-  line-height: 1.45;
+  padding: 0.55rem 0.75rem;
+  line-height: 1.55;
   outline: none;
 }
 .rep-chat-input:focus { border-color: var(--accent); }
