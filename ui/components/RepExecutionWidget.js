@@ -43,37 +43,42 @@ function ResultSection({ title, children }) {
 const SYNC_INTERVAL_MS = 60 * 60 * 1000; // 1 hour
 
 function CallSelector({ account, selectedIds, onChange }) {
-  const [calls, setCalls] = useState([]);
+  const [allCalls, setAllCalls] = useState([]);
   const [loading, setLoading] = useState(false);
   const [lastSync, setLastSync] = useState(null);
+  const [search, setSearch] = useState('');
   const timerRef = useRef(null);
 
-  const fetchCalls = useCallback(async (acct) => {
-    if (!acct?.trim()) { setCalls([]); return; }
+  const fetchCalls = useCallback(async () => {
     setLoading(true);
     try {
-      const params = new URLSearchParams({ account: acct.trim(), limit: '50' });
-      const res = await fetch(`/api/calls?${params}`);
+      const res = await fetch('/api/calls?limit=200');
       if (!res.ok) throw new Error('Failed to load calls');
       const data = await res.json();
-      setCalls(Array.isArray(data) ? data : []);
+      setAllCalls(Array.isArray(data) ? data : []);
       setLastSync(new Date());
     } catch {
-      setCalls([]);
+      setAllCalls([]);
     } finally {
       setLoading(false);
     }
   }, []);
 
-  // Fetch on account change
+  // Load all calls on mount; auto-sync hourly
   useEffect(() => {
-    clearInterval(timerRef.current);
-    fetchCalls(account);
-    if (account?.trim()) {
-      timerRef.current = setInterval(() => fetchCalls(account), SYNC_INTERVAL_MS);
-    }
+    fetchCalls();
+    timerRef.current = setInterval(fetchCalls, SYNC_INTERVAL_MS);
     return () => clearInterval(timerRef.current);
-  }, [account, fetchCalls]);
+  }, [fetchCalls]);
+
+  // Client-side filter: account name (pre-filled) OR search box
+  const filterTerm = search.trim() || account?.trim() || '';
+  const calls = filterTerm
+    ? allCalls.filter((c) =>
+        (c.account || '').toLowerCase().includes(filterTerm.toLowerCase()) ||
+        (c.opportunity || '').toLowerCase().includes(filterTerm.toLowerCase())
+      )
+    : allCalls;
 
   const toggle = (id) => {
     onChange(
@@ -83,34 +88,40 @@ function CallSelector({ account, selectedIds, onChange }) {
     );
   };
 
-  if (!account?.trim()) {
-    return <div style={{ fontSize: '0.78rem', color: 'var(--text-3)' }}>Enter account name above to load calls.</div>;
-  }
-
-  if (loading && calls.length === 0) {
+  if (loading && allCalls.length === 0) {
     return <div style={{ fontSize: '0.78rem', color: 'var(--text-3)' }}>Loading calls…</div>;
   }
 
-  if (calls.length === 0) {
-    return <div style={{ fontSize: '0.78rem', color: 'var(--text-3)' }}>No calls found for "{account}".</div>;
-  }
-
   return (
-    <div>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.4rem' }}>
-        <span style={{ fontSize: '0.72rem', color: 'var(--text-3)' }}>
-          {calls.length} call{calls.length !== 1 ? 's' : ''} · auto-syncs hourly
-          {lastSync && ` · last synced ${lastSync.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`}
-        </span>
+    <div style={{ display: 'grid', gap: '0.45rem' }}>
+      <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+        <input
+          className="input"
+          style={{ flex: 1, fontSize: '0.8rem' }}
+          placeholder={account?.trim() ? `Filtering by "${account}" — type to override` : 'Search by account or opportunity…'}
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+        />
         <button
           className="oracle-chat-ctrl"
-          onClick={() => fetchCalls(account)}
+          onClick={fetchCalls}
           disabled={loading}
-          style={{ fontSize: '0.68rem' }}
+          style={{ fontSize: '0.68rem', whiteSpace: 'nowrap' }}
         >
           {loading ? '…' : '↻ Refresh'}
         </button>
       </div>
+
+      <div style={{ fontSize: '0.72rem', color: 'var(--text-3)' }}>
+        {calls.length} of {allCalls.length} call{allCalls.length !== 1 ? 's' : ''}
+        {lastSync && ` · synced ${lastSync.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`}
+        {selectedIds.length > 0 && ` · ${selectedIds.length} selected`}
+      </div>
+
+      {calls.length === 0 && !loading && (
+        <div style={{ fontSize: '0.78rem', color: 'var(--text-3)' }}>No calls match "{filterTerm}".</div>
+      )}
+
       <div className="call-list">
         {calls.map((c) => {
           const id = c.chorus_call_id;
@@ -121,10 +132,10 @@ function CallSelector({ account, selectedIds, onChange }) {
                 type="checkbox"
                 checked={checked}
                 onChange={() => toggle(id)}
-                style={{ marginRight: '0.5rem' }}
+                style={{ marginRight: '0.5rem', flexShrink: 0 }}
               />
               <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontSize: '0.8rem', fontWeight: checked ? 600 : 400, color: 'var(--text-1)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                <div style={{ fontSize: '0.82rem', fontWeight: checked ? 600 : 400, color: 'var(--text-1)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                   {c.account || 'Unknown account'}
                   {c.opportunity ? ` — ${c.opportunity}` : ''}
                 </div>
