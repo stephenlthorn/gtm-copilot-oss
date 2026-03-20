@@ -1,71 +1,231 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useRef, useState, useCallback } from 'react';
 import FeedbackButtons from './FeedbackButtons';
 
-function Section({ title, children }) {
+// ── Small helpers ────────────────────────────────────────────────────────────
+
+function PhaseModule({ number, title, subtitle, children }) {
   return (
-    <div style={{ borderTop: '1px solid var(--border)', paddingTop: '0.7rem', marginTop: '0.2rem' }}>
-      <div className="citation-label" style={{ marginBottom: '0.45rem' }}>{title}</div>
+    <div className="rep-phase">
+      <div className="rep-phase-header">
+        <div className="rep-phase-num">{number}</div>
+        <div>
+          <div className="rep-phase-title">{title}</div>
+          {subtitle && <div className="rep-phase-sub">{subtitle}</div>}
+        </div>
+      </div>
+      <div className="rep-phase-body">{children}</div>
+    </div>
+  );
+}
+
+function Field({ label, children }) {
+  return (
+    <div style={{ display: 'grid', gap: '0.3rem' }}>
+      <label style={{ fontSize: '0.72rem', color: 'var(--text-3)' }}>{label}</label>
       {children}
     </div>
   );
 }
 
-export default function RepExecutionWidget() {
-  const [account, setAccount] = useState('');
-  const [chorusCallId, setChorusCallId] = useState('');
-  const [count, setCount] = useState(6);
-  const [tone, setTone] = useState('crisp');
-  const [to, setTo] = useState('rep.one@example.com');
-  const [cc, setCc] = useState('se.one@example.com');
-  const [mode, setMode] = useState('draft');
+function ResultSection({ title, children }) {
+  return (
+    <div style={{ borderTop: '1px solid var(--border)', paddingTop: '0.65rem' }}>
+      <div className="citation-label" style={{ marginBottom: '0.4rem' }}>{title}</div>
+      {children}
+    </div>
+  );
+}
 
+// ── Call selector with hourly auto-sync ───────────────────────────────────────
+
+const SYNC_INTERVAL_MS = 60 * 60 * 1000; // 1 hour
+
+function CallSelector({ account, selectedIds, onChange }) {
+  const [calls, setCalls] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [lastSync, setLastSync] = useState(null);
+  const timerRef = useRef(null);
+
+  const fetchCalls = useCallback(async (acct) => {
+    if (!acct?.trim()) { setCalls([]); return; }
+    setLoading(true);
+    try {
+      const params = new URLSearchParams({ account: acct.trim(), limit: '50' });
+      const res = await fetch(`/api/calls?${params}`);
+      if (!res.ok) throw new Error('Failed to load calls');
+      const data = await res.json();
+      setCalls(Array.isArray(data) ? data : []);
+      setLastSync(new Date());
+    } catch {
+      setCalls([]);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  // Fetch on account change
+  useEffect(() => {
+    clearInterval(timerRef.current);
+    fetchCalls(account);
+    if (account?.trim()) {
+      timerRef.current = setInterval(() => fetchCalls(account), SYNC_INTERVAL_MS);
+    }
+    return () => clearInterval(timerRef.current);
+  }, [account, fetchCalls]);
+
+  const toggle = (id) => {
+    onChange(
+      selectedIds.includes(id)
+        ? selectedIds.filter((x) => x !== id)
+        : [...selectedIds, id]
+    );
+  };
+
+  if (!account?.trim()) {
+    return <div style={{ fontSize: '0.78rem', color: 'var(--text-3)' }}>Enter account name above to load calls.</div>;
+  }
+
+  if (loading && calls.length === 0) {
+    return <div style={{ fontSize: '0.78rem', color: 'var(--text-3)' }}>Loading calls…</div>;
+  }
+
+  if (calls.length === 0) {
+    return <div style={{ fontSize: '0.78rem', color: 'var(--text-3)' }}>No calls found for "{account}".</div>;
+  }
+
+  return (
+    <div>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.4rem' }}>
+        <span style={{ fontSize: '0.72rem', color: 'var(--text-3)' }}>
+          {calls.length} call{calls.length !== 1 ? 's' : ''} · auto-syncs hourly
+          {lastSync && ` · last synced ${lastSync.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`}
+        </span>
+        <button
+          className="oracle-chat-ctrl"
+          onClick={() => fetchCalls(account)}
+          disabled={loading}
+          style={{ fontSize: '0.68rem' }}
+        >
+          {loading ? '…' : '↻ Refresh'}
+        </button>
+      </div>
+      <div className="call-list">
+        {calls.map((c) => {
+          const id = c.chorus_call_id;
+          const checked = selectedIds.includes(id);
+          return (
+            <label key={id} className={`call-item${checked ? ' call-item--selected' : ''}`}>
+              <input
+                type="checkbox"
+                checked={checked}
+                onChange={() => toggle(id)}
+                style={{ marginRight: '0.5rem' }}
+              />
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: '0.8rem', fontWeight: checked ? 600 : 400, color: 'var(--text-1)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                  {c.account || 'Unknown account'}
+                  {c.opportunity ? ` — ${c.opportunity}` : ''}
+                </div>
+                <div style={{ fontSize: '0.72rem', color: 'var(--text-3)' }}>
+                  {c.date ? new Date(c.date).toLocaleDateString() : 'No date'}
+                  {c.stage ? ` · ${c.stage}` : ''}
+                  {c.rep_email ? ` · ${c.rep_email}` : ''}
+                </div>
+              </div>
+            </label>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+// ── Main widget ───────────────────────────────────────────────────────────────
+
+export default function RepExecutionWidget() {
+  // Phase 1 — Research Company
+  const [account, setAccount] = useState('');
+  const [website, setWebsite] = useState('');
+
+  // Phase 2 — Research Prospect
+  const [prospectName, setProspectName] = useState('');
+  const [prospectLinkedin, setProspectLinkedin] = useState('');
+
+  // Phase 3 — Market Research / TAL
+  const [regions, setRegions] = useState('');
+  const [industry, setIndustry] = useState('');
+  const [revenueMin, setRevenueMin] = useState('');
+  const [revenueMax, setRevenueMax] = useState('');
+  const [talContext, setTalContext] = useState('');
+  const [talCount, setTalCount] = useState(25);
+
+  // Call context
+  const [selectedCallIds, setSelectedCallIds] = useState([]);
+  const [emailTo, setEmailTo] = useState('');
+  const [emailCc, setEmailCc] = useState('');
+  const [emailTone, setEmailTone] = useState('crisp');
+
+  // Results
   const [brief, setBrief] = useState(null);
   const [questions, setQuestions] = useState(null);
   const [risk, setRisk] = useState(null);
   const [draft, setDraft] = useState(null);
+  const [talResult, setTalResult] = useState(null);
   const [fullSolution, setFullSolution] = useState(null);
 
   const [loadingAction, setLoadingAction] = useState('');
   const [error, setError] = useState('');
 
-  const basePayload = useMemo(
-    () => ({ account: account.trim(), chorus_call_id: chorusCallId || null }),
-    [account, chorusCallId]
-  );
-
   const run = async (action) => {
-    if (!basePayload.account) {
-      setError('Enter an account name.');
-      return;
-    }
+    if (!account.trim()) { setError('Enter an account name in Phase 1.'); return; }
     setError('');
     setLoadingAction(action);
     try {
-      let path = '';
-      let payload = { ...basePayload };
+      const base = {
+        account: account.trim(),
+        website: website.trim() || null,
+        prospect_name: prospectName.trim() || null,
+        prospect_linkedin: prospectLinkedin.trim() || null,
+        chorus_call_ids: selectedCallIds.length > 0 ? selectedCallIds : null,
+        chorus_call_id: selectedCallIds[0] || null,
+      };
+
+      let path, payload;
 
       if (action === 'brief') {
         path = '/api/rep/account-brief';
+        payload = base;
       } else if (action === 'questions') {
         path = '/api/rep/discovery-questions';
-        payload.count = Number(count) || 6;
-      } else if (action === 'risk') {
-        path = '/api/rep/deal-risk';
-      } else if (action === 'draft') {
-        path = '/api/rep/follow-up-draft';
-        payload.to = to.split(',').map((s) => s.trim()).filter(Boolean);
-        payload.cc = cc.split(',').map((s) => s.trim()).filter(Boolean);
-        payload.mode = mode;
-        payload.tone = tone;
+        payload = { ...base, count: 6 };
       } else if (action === 'full') {
         path = '/api/rep/full-solution';
-        payload.count = Number(count) || 6;
-        payload.to = to.split(',').map((s) => s.trim()).filter(Boolean);
-        payload.cc = cc.split(',').map((s) => s.trim()).filter(Boolean);
-        payload.mode = mode;
-        payload.tone = tone;
+        payload = { ...base, count: 6, tone: emailTone };
+      } else if (action === 'risk') {
+        path = '/api/rep/deal-risk';
+        payload = base;
+      } else if (action === 'draft') {
+        path = '/api/rep/follow-up-draft';
+        payload = {
+          ...base,
+          to: emailTo.split(',').map((s) => s.trim()).filter(Boolean),
+          cc: emailCc.split(',').map((s) => s.trim()).filter(Boolean),
+          tone: emailTone,
+          mode: 'draft',
+        };
+      } else if (action === 'tal') {
+        path = '/api/rep/market-research';
+        payload = {
+          account: account.trim(),
+          regions: regions.split(',').map((s) => s.trim()).filter(Boolean),
+          industry: industry.trim() || null,
+          revenue_min: revenueMin ? Number(revenueMin) : null,
+          revenue_max: revenueMax ? Number(revenueMax) : null,
+          context: talContext.trim() || null,
+          top_n: Number(talCount) || 25,
+        };
       }
 
       const res = await fetch(path, {
@@ -74,20 +234,17 @@ export default function RepExecutionWidget() {
         body: JSON.stringify(payload),
       });
       const data = await res.json();
-      if (!res.ok) {
-        throw new Error(data?.detail || data?.error || 'Request failed');
-      }
+      if (!res.ok) throw new Error(data?.detail || data?.error || 'Request failed');
 
       if (action === 'brief') setBrief(data);
       if (action === 'questions') setQuestions(data);
       if (action === 'risk') setRisk(data);
       if (action === 'draft') setDraft(data);
+      if (action === 'tal') setTalResult(data);
       if (action === 'full') {
         setFullSolution(data);
-        setBrief(data.account_brief || null);
-        setQuestions(data.discovery_questions || null);
-        setRisk(data.deal_risk || null);
-        setDraft(data.follow_up_draft || null);
+        if (data.account_brief) setBrief(data.account_brief);
+        if (data.discovery_questions) setQuestions(data.discovery_questions);
       }
     } catch (err) {
       setError(String(err?.message || err));
@@ -96,149 +253,233 @@ export default function RepExecutionWidget() {
     }
   };
 
+  const busy = Boolean(loadingAction);
+
   return (
-    <div className="panel">
-      <div className="panel-header">
-        <span className="panel-title">Rep Automation</span>
-        <span className="tag">Phase 1-3</span>
-      </div>
-      <div className="panel-body" style={{ display: 'grid', gap: '0.75rem' }}>
-        <div className="two-col" style={{ gap: '0.75rem' }}>
-          <div style={{ display: 'grid', gap: '0.35rem' }}>
-            <label style={{ color: 'var(--text-3)', fontSize: '0.72rem' }}>Account</label>
-            <input
-              className="input"
-              value={account}
-              onChange={(e) => setAccount(e.target.value)}
-              placeholder="Enter account name"
-            />
-          </div>
-          <div style={{ display: 'grid', gap: '0.35rem' }}>
-            <label style={{ color: 'var(--text-3)', fontSize: '0.72rem' }}>Call ID (optional)</label>
-            <input
-              className="input"
-              value={chorusCallId}
-              onChange={(e) => setChorusCallId(e.target.value)}
-              placeholder="Leave blank to use latest call for this account"
-            />
-          </div>
-        </div>
+    <div style={{ display: 'grid', gap: '1.25rem' }}>
 
+      {/* ── Phase 1 ── */}
+      <PhaseModule number="1" title="Research Company" subtitle="Account name and website for OSINT + knowledge base lookup">
+        <div className="two-col" style={{ gap: '0.65rem' }}>
+          <Field label="Account Name *">
+            <input className="input" value={account} onChange={(e) => setAccount(e.target.value)} placeholder="e.g. Acme Corp" />
+          </Field>
+          <Field label="Website (optional)">
+            <input className="input" value={website} onChange={(e) => setWebsite(e.target.value)} placeholder="e.g. acmecorp.com" />
+          </Field>
+        </div>
+      </PhaseModule>
+
+      {/* ── Phase 2 ── */}
+      <PhaseModule number="2" title="Research Prospect" subtitle="Key contact details for personalized discovery questions">
+        <div className="two-col" style={{ gap: '0.65rem' }}>
+          <Field label="Prospect Name">
+            <input className="input" value={prospectName} onChange={(e) => setProspectName(e.target.value)} placeholder="e.g. Jane Smith" />
+          </Field>
+          <Field label="LinkedIn URL (optional)">
+            <input className="input" value={prospectLinkedin} onChange={(e) => setProspectLinkedin(e.target.value)} placeholder="linkedin.com/in/..." />
+          </Field>
+        </div>
+      </PhaseModule>
+
+      {/* ── Phase 3 ── */}
+      <PhaseModule number="3" title="Market Research / Target Account List" subtitle="Territory and filters for TAL generation">
+        <div className="two-col" style={{ gap: '0.65rem' }}>
+          <Field label="Regions / Territory">
+            <input className="input" value={regions} onChange={(e) => setRegions(e.target.value)} placeholder="e.g. US West, APAC" />
+          </Field>
+          <Field label="Industry Vertical">
+            <input className="input" value={industry} onChange={(e) => setIndustry(e.target.value)} placeholder="e.g. FinTech, SaaS" />
+          </Field>
+          <Field label="Revenue Min ($M)">
+            <input className="input" type="number" value={revenueMin} onChange={(e) => setRevenueMin(e.target.value)} placeholder="e.g. 50" />
+          </Field>
+          <Field label="Revenue Max ($M)">
+            <input className="input" type="number" value={revenueMax} onChange={(e) => setRevenueMax(e.target.value)} placeholder="e.g. 500" />
+          </Field>
+        </div>
+        <div style={{ marginTop: '0.65rem', display: 'grid', gap: '0.65rem' }}>
+          <Field label="Additional Context">
+            <textarea className="input" rows={2} value={talContext} onChange={(e) => setTalContext(e.target.value)} placeholder="e.g. Companies using MySQL at scale, evaluating cloud DB migration" />
+          </Field>
+          <Field label="Top N accounts">
+            <input className="input" type="number" min={5} max={100} style={{ maxWidth: '100px' }} value={talCount} onChange={(e) => setTalCount(e.target.value)} />
+          </Field>
+        </div>
+      </PhaseModule>
+
+      {/* ── Action buttons ── */}
+      <div className="rep-actions">
+        <div className="rep-actions-label">Generate</div>
         <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
-          <button className="btn btn-primary" onClick={() => run('full')} disabled={Boolean(loadingAction)}>
-            {loadingAction === 'full' ? 'Generating…' : 'Generate Full Solution (Phases 1-3)'}
+          <button className="btn btn-primary" onClick={() => run('full')} disabled={busy}>
+            {loadingAction === 'full' ? 'Generating…' : 'Generate Full Solution (1–3)'}
           </button>
-          <button className="btn" onClick={() => run('brief')} disabled={Boolean(loadingAction)}>
-            {loadingAction === 'brief' ? 'Generating…' : 'Generate Account Brief'}
+          <button className="btn" onClick={() => run('brief')} disabled={busy}>
+            {loadingAction === 'brief' ? 'Generating…' : 'Account Brief'}
           </button>
-          <button className="btn" onClick={() => run('questions')} disabled={Boolean(loadingAction)}>
-            {loadingAction === 'questions' ? 'Generating…' : 'Generate Discovery Questions'}
+          <button className="btn" onClick={() => run('questions')} disabled={busy}>
+            {loadingAction === 'questions' ? 'Generating…' : 'Discovery Questions'}
           </button>
-          <button className="btn" onClick={() => run('risk')} disabled={Boolean(loadingAction)}>
-            {loadingAction === 'risk' ? 'Generating…' : 'Generate Deal Risk'}
-          </button>
-          <button className="btn btn-primary" onClick={() => run('draft')} disabled={Boolean(loadingAction)}>
-            {loadingAction === 'draft' ? 'Generating…' : 'Generate Follow-Up Draft'}
+          <button className="btn" onClick={() => run('tal')} disabled={busy}>
+            {loadingAction === 'tal' ? 'Generating…' : 'Target Account List'}
           </button>
         </div>
+      </div>
 
-        <div className="two-col" style={{ gap: '0.75rem' }}>
-          <div style={{ display: 'grid', gap: '0.35rem' }}>
-            <label style={{ color: 'var(--text-3)', fontSize: '0.72rem' }}>Question Count</label>
-            <input className="input" type="number" min={3} max={12} value={count} onChange={(e) => setCount(e.target.value)} />
-          </div>
-          <div style={{ display: 'grid', gap: '0.35rem' }}>
-            <label style={{ color: 'var(--text-3)', fontSize: '0.72rem' }}>Draft Tone</label>
-            <select className="input" value={tone} onChange={(e) => setTone(e.target.value)}>
-              <option value="crisp">Crisp</option>
-              <option value="executive">Executive</option>
-              <option value="technical">Technical</option>
-            </select>
+      {/* ── Call context ── */}
+      <div className="rep-phase">
+        <div className="rep-phase-header">
+          <div className="rep-phase-num" style={{ background: 'var(--bg)', border: '1px solid var(--border)', color: 'var(--text-2)' }}>📞</div>
+          <div>
+            <div className="rep-phase-title">Call Context</div>
+            <div className="rep-phase-sub">Select one or more Chorus calls — syncs automatically every hour</div>
           </div>
         </div>
+        <div className="rep-phase-body" style={{ display: 'grid', gap: '0.75rem' }}>
+          <CallSelector account={account} selectedIds={selectedCallIds} onChange={setSelectedCallIds} />
 
-        <div className="two-col" style={{ gap: '0.75rem' }}>
-          <div style={{ display: 'grid', gap: '0.35rem' }}>
-            <label style={{ color: 'var(--text-3)', fontSize: '0.72rem' }}>To (comma-separated)</label>
-            <input className="input" value={to} onChange={(e) => setTo(e.target.value)} />
+          {/* Email fields — shown when at least one call selected */}
+          {selectedCallIds.length > 0 && (
+            <div style={{ borderTop: '1px solid var(--border)', paddingTop: '0.65rem', display: 'grid', gap: '0.65rem' }}>
+              <div className="two-col" style={{ gap: '0.65rem' }}>
+                <Field label="To (comma-separated emails)">
+                  <input className="input" value={emailTo} onChange={(e) => setEmailTo(e.target.value)} placeholder="rep@company.com" />
+                </Field>
+                <Field label="CC (optional)">
+                  <input className="input" value={emailCc} onChange={(e) => setEmailCc(e.target.value)} placeholder="se@company.com" />
+                </Field>
+              </div>
+              <Field label="Email Tone">
+                <select className="input" style={{ maxWidth: '160px' }} value={emailTone} onChange={(e) => setEmailTone(e.target.value)}>
+                  <option value="crisp">Crisp</option>
+                  <option value="executive">Executive</option>
+                  <option value="technical">Technical</option>
+                </select>
+              </Field>
+            </div>
+          )}
+
+          <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+            <button className="btn btn-primary" onClick={() => run('risk')} disabled={busy || selectedCallIds.length === 0}>
+              {loadingAction === 'risk' ? 'Analyzing…' : 'Generate Deal Risk'}
+            </button>
+            <button className="btn" onClick={() => run('draft')} disabled={busy || selectedCallIds.length === 0}>
+              {loadingAction === 'draft' ? 'Drafting…' : 'Generate Follow-Up Draft'}
+            </button>
           </div>
-          <div style={{ display: 'grid', gap: '0.35rem' }}>
-            <label style={{ color: 'var(--text-3)', fontSize: '0.72rem' }}>CC (comma-separated)</label>
-            <input className="input" value={cc} onChange={(e) => setCc(e.target.value)} />
-          </div>
+          {selectedCallIds.length === 0 && (
+            <div style={{ fontSize: '0.75rem', color: 'var(--text-3)' }}>Select at least one call to enable post-call actions.</div>
+          )}
         </div>
+      </div>
 
-        <div style={{ display: 'grid', gap: '0.35rem', maxWidth: '220px' }}>
-          <label style={{ color: 'var(--text-3)', fontSize: '0.72rem' }}>Draft Mode</label>
-          <select className="input" value={mode} onChange={(e) => setMode(e.target.value)}>
-            <option value="draft">Draft</option>
-            <option value="send">Send</option>
-          </select>
-        </div>
+      {error && <div className="error-text">{error}</div>}
 
-        {error ? <div className="error-text">{error}</div> : null}
+      {/* ── Results ── */}
+      {(fullSolution || brief || questions || risk || draft || talResult) && (
+        <div className="answer-box" style={{ display: 'grid', gap: '0.65rem' }}>
 
-        {(fullSolution || brief || questions || risk || draft) && (
-          <div className="answer-box" style={{ display: 'grid', gap: '0.6rem' }}>
-            {fullSolution && (
-              <Section title="Full Solution Summary">
+          {fullSolution && (
+            <ResultSection title="Full Solution">
+              {fullSolution.phase_2_execution_focus?.length > 0 && (
                 <ul className="citation-list">
-                  {(fullSolution.phase_2_execution_focus || []).map((item) => <li key={item}>{item}</li>)}
+                  {fullSolution.phase_2_execution_focus.map((item) => <li key={item}>{item}</li>)}
                 </ul>
-                <div className="citation-label" style={{ marginTop: '0.6rem', marginBottom: '0.35rem' }}>
-                  Phase 3 Automation
-                </div>
-                <ul className="citation-list">
-                  {(fullSolution.phase_3_automation_next_steps || []).map((item) => <li key={item}>{item}</li>)}
-                </ul>
-              </Section>
-            )}
+              )}
+              {fullSolution.phase_3_automation_next_steps?.length > 0 && (
+                <>
+                  <div className="citation-label" style={{ margin: '0.5rem 0 0.3rem' }}>Next Steps</div>
+                  <ul className="citation-list">
+                    {fullSolution.phase_3_automation_next_steps.map((item) => <li key={item}>{item}</li>)}
+                  </ul>
+                </>
+              )}
+            </ResultSection>
+          )}
 
-            {brief && (
-              <Section title="Account Brief">
-                <div className="answer-text">{brief.summary}</div>
-                <ul className="citation-list" style={{ marginTop: '0.45rem' }}>
-                  {(brief.next_meeting_agenda || []).map((item) => <li key={item}>{item}</li>)}
+          {brief && (
+            <ResultSection title="Account Brief">
+              <p className="answer-text">{brief.summary}</p>
+              {brief.next_meeting_agenda?.length > 0 && (
+                <ul className="citation-list" style={{ marginTop: '0.4rem' }}>
+                  {brief.next_meeting_agenda.map((item) => <li key={item}>{item}</li>)}
                 </ul>
-              </Section>
-            )}
+              )}
+            </ResultSection>
+          )}
 
-            {questions && (
-              <Section title="Discovery Questions">
-                <ul className="citation-list">
-                  {(questions.questions || []).map((item) => <li key={item}>{item}</li>)}
-                </ul>
-              </Section>
-            )}
+          {questions && (
+            <ResultSection title="Discovery Questions">
+              <ul className="citation-list">
+                {(questions.questions || []).map((q) => <li key={q}>{q}</li>)}
+              </ul>
+            </ResultSection>
+          )}
 
-            {risk && (
-              <Section title={`Deal Risk (${risk.risk_level || 'n/a'})`}>
+          {risk && (
+            <ResultSection title={`Deal Risk${risk.risk_level ? ` — ${risk.risk_level}` : ''}`}>
+              {risk.risks?.length > 0 && (
                 <ul className="citation-list">
-                  {(risk.risks || []).map((item, idx) => (
-                    <li key={`${item.signal}-${idx}`}>{item.signal} — {item.mitigation}</li>
+                  {risk.risks.map((r, i) => (
+                    <li key={i}><strong>{r.signal}</strong>{r.mitigation ? ` — ${r.mitigation}` : ''}</li>
                   ))}
                 </ul>
-              </Section>
-            )}
+              )}
+              {risk.agreed_next_steps?.length > 0 && (
+                <>
+                  <div className="citation-label" style={{ margin: '0.5rem 0 0.3rem' }}>Agreed Next Steps</div>
+                  <ul className="citation-list">
+                    {risk.agreed_next_steps.map((s, i) => <li key={i}>{s}</li>)}
+                  </ul>
+                </>
+              )}
+              {risk.open_items?.length > 0 && (
+                <>
+                  <div className="citation-label" style={{ margin: '0.5rem 0 0.3rem' }}>Open Items</div>
+                  <ul className="citation-list">
+                    {risk.open_items.map((s, i) => <li key={i}>{s}</li>)}
+                  </ul>
+                </>
+              )}
+            </ResultSection>
+          )}
 
-            {draft && (
-              <Section title={`Follow-Up Draft (${draft.mode})`}>
-                <div className="answer-text" style={{ fontWeight: 600, marginBottom: '0.35rem' }}>{draft.subject}</div>
-                {draft.reason_blocked ? (
-                  <div className="error-text" style={{ marginTop: 0 }}>{draft.reason_blocked}</div>
-                ) : (
-                  <pre style={{ marginTop: '0.25rem' }}>{draft.body}</pre>
-                )}
-              </Section>
-            )}
-            <FeedbackButtons
-              mode="rep"
-              queryText={account}
-              originalResponse={fullSolution || brief || questions || risk || draft}
-            />
-          </div>
-        )}
-      </div>
+          {draft && (
+            <ResultSection title={`Follow-Up Draft${draft.mode ? ` (${draft.mode})` : ''}`}>
+              {draft.subject && <div style={{ fontWeight: 600, marginBottom: '0.3rem', fontSize: '0.85rem' }}>{draft.subject}</div>}
+              {draft.reason_blocked ? (
+                <div className="error-text" style={{ marginTop: 0 }}>{draft.reason_blocked}</div>
+              ) : (
+                <pre style={{ marginTop: '0.2rem' }}>{draft.body}</pre>
+              )}
+            </ResultSection>
+          )}
+
+          {talResult && (
+            <ResultSection title="Target Account List">
+              {talResult.accounts?.length > 0 ? (
+                <ul className="citation-list">
+                  {talResult.accounts.map((a, i) => (
+                    <li key={i}>
+                      <strong>{a.name || a.company}</strong>
+                      {a.reason ? ` — ${a.reason}` : ''}
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <pre style={{ fontSize: '0.78rem' }}>{JSON.stringify(talResult, null, 2)}</pre>
+              )}
+            </ResultSection>
+          )}
+
+          <FeedbackButtons
+            mode="rep"
+            queryText={account}
+            originalResponse={JSON.stringify(fullSolution || brief || questions || risk || draft || talResult)}
+          />
+        </div>
+      )}
     </div>
   );
 }
