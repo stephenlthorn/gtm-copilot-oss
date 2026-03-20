@@ -21,6 +21,10 @@ from app.models import (
     OutboundMessage,
     SourceType,
 )
+from app.core.settings import get_settings
+from app.models.entities import Account
+from app.services.connectors.firecrawl import FirecrawlConnector
+from app.services.research.account_brief_researcher import AccountBriefResearcher
 from app.prompts.personas import get_default_persona_prompt, normalize_persona
 from app.retrieval.service import HybridRetriever
 from app.retrieval.types import RetrievedChunk
@@ -56,6 +60,12 @@ class GTMModuleService:
     def _resolve_model(self) -> str | None:
         config: KBConfig | None = self.db.get(KBConfig, 1)
         return config.llm_model if config else None
+
+    def _resolve_tools(self) -> list[dict] | None:
+        config: KBConfig | None = self.db.get(KBConfig, 1)
+        if config and config.web_search_enabled:
+            return [{"type": "web_search_preview"}]
+        return None
 
     def module_enabled(self, key: str) -> bool:
         config: KBConfig | None = self.db.get(KBConfig, 1)
@@ -235,17 +245,44 @@ class GTMModuleService:
         except Exception:
             self.db.rollback()
 
-    def rep_account_brief(
+    async def rep_account_brief(
         self,
         *,
         user: str,
         account: str,
         chorus_call_id: str | None = None,
+        website: str | None = None,
+        linkedin_url: str | None = None,
     ) -> tuple[dict[str, Any], dict[str, Any]]:
         ask = "Build an execution-ready account brief for the rep."
         hits = self._collect_hits(account=account, ask=ask, user_email=user, chorus_call_id=chorus_call_id)
         model = self._resolve_model()
+        tools = self._resolve_tools()
         persona_name, persona_prompt = self._resolve_persona("sales_representative")
+
+        # Look up Account record for website / industry / employee_count
+        account_record = self.db.execute(
+            select(Account).where(Account.name == account).limit(1)
+        ).scalar_one_or_none()
+        effective_website = website or (account_record.website if account_record else None)
+        account_industry = account_record.industry if account_record else None
+        account_employee_count = account_record.employee_count if account_record else None
+
+        # Run concurrent Firecrawl research if key is configured
+        settings = get_settings()
+        research_context = None
+        if settings.firecrawl_api_key:
+            try:
+                connector = FirecrawlConnector(api_key=settings.firecrawl_api_key)
+                researcher = AccountBriefResearcher(connector)
+                research_context = await researcher.research(
+                    account_name=account,
+                    website=effective_website,
+                    linkedin_url=linkedin_url,
+                )
+            except Exception:
+                pass
+
         llm_payload = self.llm.answer_rep_account_brief(
             account=account,
             ask=ask,
@@ -253,6 +290,11 @@ class GTMModuleService:
             model=model,
             persona_name=persona_name,
             persona_prompt=persona_prompt,
+            tools=tools,
+            research_context=research_context,
+            linkedin_url=linkedin_url,
+            account_industry=account_industry,
+            account_employee_count=account_employee_count,
         )
 
         if llm_payload is None:
@@ -260,32 +302,44 @@ class GTMModuleService:
             summary = artifact.summary if artifact else (
                 f"{account} is active and requires an updated discovery and validation plan before the next meeting."
             )
-            business_context = [
-                f"Current motion: {(call.stage if call else 'discovery').title() if (call and call.stage) else 'Discovery'}.",
-                "Confirm decision process, timeline, and technical success criteria.",
-            ]
-            decision_criteria = [
-                "Performance vs incumbent on representative query set.",
-                "Operational simplicity and migration risk.",
-                "Commercial fit and procurement timeline alignment.",
-            ]
-            recommended_assets = [
-                "Platform architecture one-pager for the current workload",
-                "Competitor comparison sheet aligned to decision criteria",
-                "POC checklist with milestone owners",
-            ]
-            next_meeting_agenda = [
-                "Confirm top latency and throughput SLOs.",
-                "Finalize technical validation scope and data set.",
-                "Agree owner/date for each open blocker.",
-            ]
             payload = {
                 "account": account,
                 "summary": summary,
-                "business_context": business_context,
-                "decision_criteria": decision_criteria,
-                "recommended_assets": recommended_assets,
-                "next_meeting_agenda": next_meeting_agenda,
+                "prospect_information": {"name": "", "title": "", "time_at_company": "", "previous_role": ""},
+                "company_context": {
+                    "employee_count": account_employee_count,
+                    "revenue": "",
+                    "industry": account_industry or "",
+                    "product_service": "",
+                    "competitors": [],
+                },
+                "architecture_hypothesis": {"databases": [], "apps_microservices": "", "cloud_infrastructure": ""},
+                "pain_hypothesis": [{"pain": "Scaling bottlenecks with existing database", "evidence": "Hypothesis — no transcript data available"}],
+                "tidb_value_propositions": [{"pain": "Scaling bottlenecks", "value_prop": "TiDB's HTAP architecture handles mixed transactional and analytical workloads without ETL pipelines"}],
+                "meeting_goal": "Confirm technical validation scope and align on next steps.",
+                "meeting_flow": {
+                    "agenda": ["Introductions (5 min)", "Discovery: current architecture (15 min)", "TiDB value prop demo (20 min)", "Next steps (10 min)"],
+                    "time_allocation": {"Discovery": "15 min", "Demo": "20 min", "Next steps": "10 min"},
+                },
+                "business_context": [
+                    f"Current motion: {(call.stage if call else 'discovery').title() if (call and call.stage) else 'Discovery'}.",
+                    "Confirm decision process, timeline, and technical success criteria.",
+                ],
+                "decision_criteria": [
+                    "Performance vs incumbent on representative query set.",
+                    "Operational simplicity and migration risk.",
+                    "Commercial fit and procurement timeline alignment.",
+                ],
+                "recommended_assets": [
+                    "Platform architecture one-pager for the current workload",
+                    "Competitor comparison sheet aligned to decision criteria",
+                    "POC checklist with milestone owners",
+                ],
+                "next_meeting_agenda": [
+                    "Confirm top latency and throughput SLOs.",
+                    "Finalize technical validation scope and data set.",
+                    "Agree owner/date for each open blocker.",
+                ],
                 "citations": self._citations(hits),
             }
         else:
@@ -330,6 +384,7 @@ class GTMModuleService:
         ask = "Generate sharp next-call discovery questions with intent."
         hits = self._collect_hits(account=account, ask=ask, user_email=user, chorus_call_id=chorus_call_id)
         model = self._resolve_model()
+        tools = self._resolve_tools()
         persona_name, persona_prompt = self._resolve_persona("sales_representative")
         llm_payload = self.llm.answer_rep_discovery_questions(
             account=account,
@@ -339,6 +394,7 @@ class GTMModuleService:
             model=model,
             persona_name=persona_name,
             persona_prompt=persona_prompt,
+            tools=tools,
         )
 
         if llm_payload is None:
@@ -438,6 +494,7 @@ class GTMModuleService:
 
         hits = self._collect_hits(account=account, ask=ask, user_email=user, chorus_call_id=chorus_call_id)
         model = self._resolve_model()
+        tools = self._resolve_tools()
         persona_name, persona_prompt = self._resolve_persona("sales_representative")
         llm_payload = self.llm.answer_rep_follow_up_draft(
             account=account,
@@ -449,6 +506,7 @@ class GTMModuleService:
             model=model,
             persona_name=persona_name,
             persona_prompt=persona_prompt,
+            tools=tools,
         )
 
         if llm_payload is None:
@@ -526,6 +584,7 @@ class GTMModuleService:
         hits = self._collect_hits(account=account, ask=ask, user_email=user, chorus_call_id=chorus_call_id)
 
         model = self._resolve_model()
+        tools = self._resolve_tools()
         persona_name, persona_prompt = self._resolve_persona("sales_representative")
         llm_payload = self.llm.answer_rep_deal_risk(
             account=account,
@@ -534,6 +593,7 @@ class GTMModuleService:
             model=model,
             persona_name=persona_name,
             persona_prompt=persona_prompt,
+            tools=tools,
         )
 
         if llm_payload is None:
@@ -953,7 +1013,7 @@ class GTMModuleService:
         )
         return payload, retrieval
 
-    def rep_full_solution(
+    async def rep_full_solution(
         self,
         *,
         user: str,
@@ -965,7 +1025,7 @@ class GTMModuleService:
         cc: list[str],
         tone: str,
     ) -> tuple[dict[str, Any], dict[str, Any]]:
-        brief, _ = self.rep_account_brief(user=user, account=account, chorus_call_id=chorus_call_id)
+        brief, _ = await self.rep_account_brief(user=user, account=account, chorus_call_id=chorus_call_id)
         questions, _ = self.rep_discovery_questions(
             user=user,
             account=account,

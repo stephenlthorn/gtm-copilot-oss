@@ -15,9 +15,13 @@ depends_on = None
 
 
 def upgrade() -> None:
+    bind = op.get_bind()
+    is_pg = bind.dialect.name == "postgresql"
+    bool_false = sa.text("false") if is_pg else sa.text("0")
+
     op.add_column("kb_config", sa.Column("llm_model", sa.String(100), nullable=False, server_default="gpt-5.3-codex"))
-    op.add_column("kb_config", sa.Column("web_search_enabled", sa.Boolean(), nullable=False, server_default="false"))
-    op.add_column("kb_config", sa.Column("code_interpreter_enabled", sa.Boolean(), nullable=False, server_default="false"))
+    op.add_column("kb_config", sa.Column("web_search_enabled", sa.Boolean(), nullable=False, server_default=bool_false))
+    op.add_column("kb_config", sa.Column("code_interpreter_enabled", sa.Boolean(), nullable=False, server_default=bool_false))
 
 
 def downgrade() -> None:

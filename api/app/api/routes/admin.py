@@ -6,6 +6,7 @@ import re
 import httpx
 from dateutil.parser import isoparse
 from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request
+from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -606,3 +607,384 @@ def sync_feishu(request: Request, db: Session = Depends(db_session)) -> dict:
         status=AuditStatus.OK,
     )
     return {"status": status_value, "message": message, **result}
+
+
+
+def _get_tidb_from_system_config(db: Session) -> dict:
+    """Read TiDB overrides stored in system_config table (org_id=1)."""
+    from app.models.entities import SystemConfig
+    keys = ["tidb.host", "tidb.port", "tidb.user", "tidb.password", "tidb.database", "tidb.ssl_ca"]
+    rows = db.query(SystemConfig).filter(
+        SystemConfig.org_id == 1,
+        SystemConfig.config_key.in_(keys),
+    ).all()
+    out: dict = {}
+    for row in rows:
+        short = row.config_key.split(".", 1)[1]  # strip "tidb."
+        if row.config_key == "tidb.password":
+            # decrypt
+            try:
+                from cryptography.fernet import Fernet
+                import base64, hashlib, os
+                raw = os.environ.get("ENCRYPTION_KEY", "")
+                if raw:
+                    try:
+                        decoded = base64.urlsafe_b64decode(raw.encode())
+                        key = raw.encode() if len(decoded) == 32 else base64.urlsafe_b64encode(hashlib.sha256(raw.encode()).digest())
+                    except Exception:
+                        key = base64.urlsafe_b64encode(hashlib.sha256(raw.encode()).digest())
+                else:
+                    key = base64.urlsafe_b64encode(hashlib.sha256(b"gtm-copilot|dev-only").digest())
+                fernet = Fernet(key)
+                out[short] = fernet.decrypt(row.config_value_encrypted).decode() if row.config_value_encrypted else ""
+            except Exception:
+                out[short] = ""
+        else:
+            out[short] = row.config_value_plain or ""
+    return out
+
+
+@router.get("/db-config")
+def get_db_config(db: Session = Depends(db_session)) -> dict:
+    """Return current database provider and TiDB connection settings (password masked)."""
+    s = get_settings()
+    overrides = _get_tidb_from_system_config(db)
+
+    host = overrides.get("host") or s.tidb_host or ""
+    port = overrides.get("port") or str(s.tidb_port)
+    user = overrides.get("user") or s.tidb_user or ""
+    password_set = bool(overrides.get("password") or s.tidb_password)
+    database = overrides.get("database") or s.tidb_database
+    ssl_ca = overrides.get("ssl_ca") or s.tidb_ssl_ca or ""
+
+    # Build preview URL from the actual (potentially overridden) host
+    if host:
+        preview = f"{host}:{port}/{database}"
+    else:
+        raw_url = s.effective_database_url
+        preview = raw_url.split("@")[-1] if "@" in raw_url else raw_url
+
+    return {
+        "database_provider": s.database_provider,
+        "tidb_host": host,
+        "tidb_port": port,
+        "tidb_user": user,
+        "tidb_password": "***" if password_set else "",
+        "tidb_database": database,
+        "tidb_ssl_ca": ssl_ca,
+        "database_url_preview": preview,
+        "has_db_overrides": bool(overrides),
+    }
+
+
+class TiDBConfigBody(BaseModel):
+    host: str = ""
+    port: str = ""
+    user: str = ""
+    password: str = ""
+    database: str = ""
+    ssl_ca: str = ""
+
+
+@router.put("/tidb-config")
+def save_tidb_config(
+    body: TiDBConfigBody,
+    db: Session = Depends(db_session),
+) -> dict:
+    """Save TiDB Cloud connection credentials to system_config."""
+    from app.models.entities import SystemConfig
+    from cryptography.fernet import Fernet
+    import base64, hashlib, os
+
+    raw = os.environ.get("ENCRYPTION_KEY", "")
+    if raw:
+        try:
+            decoded = base64.urlsafe_b64decode(raw.encode())
+            key = raw.encode() if len(decoded) == 32 else base64.urlsafe_b64encode(hashlib.sha256(raw.encode()).digest())
+        except Exception:
+            key = base64.urlsafe_b64encode(hashlib.sha256(raw.encode()).digest())
+    else:
+        key = base64.urlsafe_b64encode(hashlib.sha256(b"gtm-copilot|dev-only").digest())
+    fernet = Fernet(key)
+
+    fields = {
+        "tidb.host": (body.host, False),
+        "tidb.port": (body.port, False),
+        "tidb.user": (body.user, False),
+        "tidb.database": (body.database, False),
+        "tidb.ssl_ca": (body.ssl_ca, False),
+    }
+    if body.password and body.password != "***":
+        fields["tidb.password"] = (body.password, True)
+
+    for config_key, (value, is_secret) in fields.items():
+        row = db.query(SystemConfig).filter_by(config_key=config_key, org_id=1).first()
+        if row is None:
+            row = SystemConfig(config_key=config_key, org_id=1)
+            db.add(row)
+        if is_secret:
+            row.config_value_encrypted = fernet.encrypt(value.encode())
+            row.config_value_plain = None
+        else:
+            row.config_value_plain = value
+            row.config_value_encrypted = None
+
+    db.commit()
+    return {"ok": True, "message": "TiDB credentials saved. Restart containers to apply."}
+
+
+@router.post("/restart-api")
+def restart_api() -> dict:
+    """Restart the API container via Docker socket (self-restart)."""
+    import subprocess, threading, os
+
+    container_name = os.environ.get("HOSTNAME", "")  # Docker sets HOSTNAME to container ID
+
+    def _restart():
+        import time
+        time.sleep(1)
+        # Try docker restart via socket; falls back to os._exit to trigger a container restart
+        try:
+            result = subprocess.run(
+                ["docker", "restart", container_name],
+                timeout=10, capture_output=True,
+            )
+            if result.returncode != 0:
+                os._exit(0)
+        except Exception:
+            os._exit(0)
+
+    threading.Thread(target=_restart, daemon=True).start()
+    return {"ok": True, "message": "API container restarting…"}
+
+
+@router.get("/chorus/preview")
+async def chorus_preview(
+    since: str | None = Query(default=None, description="ISO date, e.g. 2025-01-01"),
+    until: str | None = Query(default=None, description="ISO date, e.g. 2025-03-31"),
+    request: Request = None,
+    db: Session = Depends(db_session),
+) -> list[dict]:
+    """Fetch calls from Chorus API (live preview, not indexed)."""
+    from datetime import datetime
+    from app.core.settings import get_settings as _gs
+    from app.services.connectors.chorus import ChorusConnector
+    from app.models.entities import User
+
+    settings = _gs()
+    api_key = settings.call_api_key or settings.chorus_api_key
+    base_url = settings.call_base_url or settings.chorus_base_url or "https://chorus.ai/v3"
+
+    if not api_key:
+        users = db.query(User).filter(User.org_id == 1).all()
+        for u in users:
+            accts = u.connected_accounts or {}
+            chorus = accts.get("chorus", {})
+            if isinstance(chorus, dict) and chorus.get("access_token"):
+                api_key = chorus["access_token"]
+                base_url = chorus.get("base_url") or base_url
+                break
+
+    if not api_key:
+        raise HTTPException(status_code=400, detail="Chorus API key not configured. Add it in Settings → Connected Accounts.")
+
+    if not base_url:
+        raise HTTPException(status_code=400, detail="Chorus base URL not configured.")
+
+    since_dt = datetime.fromisoformat(since) if since else None
+
+    connector = ChorusConnector(api_key=api_key, base_url=base_url)
+    try:
+        calls = await connector.list_calls(since=since_dt)
+    except Exception as exc:
+        import traceback as _tb
+        _log2 = __import__('logging').getLogger(__name__)
+        _log2.error("Chorus list_calls exception: %s: %s\n%s", type(exc).__name__, exc, _tb.format_exc())
+        await connector.close()
+        raise HTTPException(status_code=502, detail=f"Chorus API error: {type(exc).__name__}: {exc}")
+    finally:
+        await connector.close()
+
+    import logging as _logging
+    _log = _logging.getLogger(__name__)
+    _log.info("Chorus preview: %d raw calls returned before until filter", len(calls))
+    if calls:
+        _log.info("Chorus first call date: %r (type: %s)", calls[0].date, type(calls[0].date).__name__)
+
+    from datetime import timedelta
+    until_dt = (datetime.fromisoformat(until) + timedelta(days=1)) if until else None
+    result = []
+    for c in calls:
+        if until_dt and c.date.replace(tzinfo=None) >= until_dt:
+            continue
+        result.append({
+            "call_id": c.call_id,
+            "date": c.date.isoformat(),
+            "account": c.account,
+            "opportunity": c.opportunity,
+            "stage": c.stage,
+            "rep_email": c.rep_email,
+            "se_email": c.se_email,
+            "has_transcript": bool(c.transcript),
+        })
+
+    return result
+
+
+@router.post("/chorus/sync-all")
+async def chorus_sync_all(
+    since: str | None = Query(default=None, description="YYYY-MM-DD"),
+    db: Session = Depends(db_session),
+) -> dict:
+    """Fetch all Chorus calls (optionally from a date) and sync them into TiDB."""
+    from app.core.settings import get_settings as _gs
+    from app.services.connectors.chorus import ChorusConnector
+    from app.services.connectors.chorus_sync import ChorusSyncService
+    from app.models.entities import User
+    from datetime import datetime
+
+    settings = _gs()
+    api_key = settings.call_api_key or settings.chorus_api_key
+    base_url = settings.call_base_url or settings.chorus_base_url or "https://chorus.ai/v3"
+
+    if not api_key:
+        users = db.query(User).filter(User.org_id == 1).all()
+        for u in users:
+            accts = u.connected_accounts or {}
+            chorus = accts.get("chorus", {})
+            if isinstance(chorus, dict) and chorus.get("access_token"):
+                api_key = chorus["access_token"]
+                if chorus.get("base_url"):
+                    base_url = chorus["base_url"]
+                break
+
+    if not api_key:
+        raise HTTPException(status_code=400, detail="Chorus API key not configured.")
+
+    since_dt = datetime.fromisoformat(since) if since else None
+    connector = ChorusConnector(api_key=api_key, base_url=base_url)
+    try:
+        calls = await connector.list_calls(since=since_dt)
+        svc = ChorusSyncService(connector=connector, db=db)
+        stored = 0
+        indexed = 0
+        errors: list[str] = []
+        for call_data in calls:
+            from sqlalchemy import select as _sel
+            from app.models import ChorusCall as _CC, KBDocument as _KBD, SourceType as _ST
+            existing = db.execute(_sel(_CC).where(_CC.chorus_call_id == call_data.call_id)).scalar_one_or_none()
+            try:
+                if existing:
+                    row = existing
+                else:
+                    row = svc._store_call(call_data)
+                    stored += 1
+                kb_doc = db.execute(
+                    _sel(_KBD).where(_KBD.source_type == _ST.CHORUS, _KBD.source_id == call_data.call_id)
+                ).scalar_one_or_none()
+                if not kb_doc:
+                    transcript = await svc._fetch_and_store_transcript(call_data, row)
+                    if transcript:
+                        indexed += 1
+                    svc._create_artifact(call_data, transcript)
+                db.flush()
+            except Exception as exc:
+                errors.append(f"{call_data.call_id}: {exc}")
+        db.commit()
+        return {"calls_fetched": len(calls), "calls_stored": stored, "transcripts_indexed": indexed, "errors": errors}
+    finally:
+        await connector.close()
+
+
+class ChorusSyncSelectedRequest(BaseModel):
+    call_ids: list[str]
+
+
+@router.post("/chorus/sync-selected")
+async def chorus_sync_selected(
+    req: ChorusSyncSelectedRequest,
+    db: Session = Depends(db_session),
+) -> dict:
+    """Sync a specific list of Chorus call IDs into the DB."""
+    from app.core.settings import get_settings as _gs
+    from app.services.connectors.chorus import ChorusConnector
+    from app.services.connectors.chorus_sync import ChorusSyncService
+    from app.models.entities import User
+
+    settings = _gs()
+    api_key = settings.call_api_key or settings.chorus_api_key
+    base_url = settings.call_base_url or settings.chorus_base_url or "https://chorus.ai/v3"
+
+    if not api_key:
+        users = db.query(User).filter(User.org_id == 1).all()
+        for u in users:
+            accts = u.connected_accounts or {}
+            chorus = accts.get("chorus", {})
+            if isinstance(chorus, dict) and chorus.get("access_token"):
+                api_key = chorus["access_token"]
+                break
+
+    if not api_key:
+        raise HTTPException(status_code=400, detail="Chorus API key not configured.")
+
+    connector = ChorusConnector(api_key=api_key, base_url=base_url)
+    try:
+        svc = ChorusSyncService(connector=connector, db=db)
+        result = await svc.sync_selected_calls(req.call_ids)
+        return {
+            "synced": result.calls_stored,
+            "transcripts_indexed": result.transcripts_indexed,
+            "errors": result.errors,
+        }
+    finally:
+        await connector.close()
+
+
+@router.get("/chorus/probe/{call_id}")
+async def chorus_probe_transcript(call_id: str, db: Session = Depends(db_session)) -> dict:
+    """Try every known Chorus transcript endpoint pattern and report which ones return data."""
+    from app.models.entities import User
+    import httpx as _httpx
+
+    settings = get_settings()
+    api_key = settings.call_api_key or settings.chorus_api_key
+    base_url = settings.call_base_url or settings.chorus_base_url or "https://chorus.ai/v3"
+
+    if not api_key:
+        users = db.query(User).filter(User.org_id == 1).all()
+        for u in users:
+            accts = u.connected_accounts or {}
+            chorus = accts.get("chorus", {})
+            if isinstance(chorus, dict) and chorus.get("access_token"):
+                api_key = chorus["access_token"]
+                base_url = chorus.get("base_url") or base_url
+                break
+
+    if not api_key:
+        raise HTTPException(status_code=400, detail="Chorus API key not configured.")
+
+    base = base_url.rstrip("/")
+    headers = {"Authorization": f"Bearer {api_key}", "Accept": "application/json"}
+    candidates = [
+        f"{base}/engagements/{call_id}",
+        f"{base}/engagements/{call_id}/transcript",
+        f"{base}/engagements/{call_id}/transcription",
+        f"{base}/calls/{call_id}/transcript",
+        f"{base}/calls/{call_id}",
+        f"{base}/transcripts/{call_id}",
+        f"{base}/transcriptions/{call_id}",
+        f"{base}/transcriptions?engagement_id={call_id}",
+        f"{base}/engagements/{call_id}/summary",
+    ]
+
+    results = []
+    async with _httpx.AsyncClient(timeout=15.0) as client:
+        for url in candidates:
+            try:
+                r = await client.get(url, headers=headers)
+                body = r.text[:800]
+                results.append({"url": url, "status": r.status_code, "body_preview": body})
+            except Exception as exc:
+                results.append({"url": url, "status": "error", "body_preview": str(exc)})
+
+    return {"call_id": call_id, "base_url": base, "probes": results}

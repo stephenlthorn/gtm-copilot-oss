@@ -14,15 +14,61 @@ class RepAccountBriefRequest(BaseModel):
     user: str = "oracle@example.com"
     account: str
     chorus_call_id: str | None = None
+    website: str | None = None
+    linkedin_url: str | None = None
+
+
+class ProspectInfo(BaseModel):
+    name: str = ""
+    title: str = ""
+    time_at_company: str = ""
+    previous_role: str = ""
+
+
+class CompanyContext(BaseModel):
+    employee_count: int | None = None
+    revenue: str = ""
+    industry: str = ""
+    product_service: str = ""
+    competitors: list[str] = Field(default_factory=list)
+
+
+class ArchitectureHypothesis(BaseModel):
+    databases: list[str] = Field(default_factory=list)
+    apps_microservices: str = ""
+    cloud_infrastructure: str = ""
+
+
+class PainItem(BaseModel):
+    pain: str
+    evidence: str
+
+
+class ValuePropItem(BaseModel):
+    pain: str
+    value_prop: str
+
+
+class MeetingFlow(BaseModel):
+    agenda: list[str] = Field(default_factory=list)
+    time_allocation: dict[str, str] = Field(default_factory=dict)
 
 
 class RepAccountBriefResponse(BaseModel):
     account: str
     summary: str
-    business_context: list[str]
-    decision_criteria: list[str]
-    recommended_assets: list[str]
-    next_meeting_agenda: list[str]
+    prospect_information: ProspectInfo = Field(default_factory=ProspectInfo)
+    company_context: CompanyContext = Field(default_factory=CompanyContext)
+    architecture_hypothesis: ArchitectureHypothesis = Field(default_factory=ArchitectureHypothesis)
+    pain_hypothesis: list[PainItem] = Field(default_factory=list)
+    tidb_value_propositions: list[ValuePropItem] = Field(default_factory=list)
+    meeting_goal: str = ""
+    meeting_flow: MeetingFlow = Field(default_factory=MeetingFlow)
+    # legacy fields kept for backwards compat
+    business_context: list[str] = Field(default_factory=list)
+    decision_criteria: list[str] = Field(default_factory=list)
+    recommended_assets: list[str] = Field(default_factory=list)
+    next_meeting_agenda: list[str] = Field(default_factory=list)
     citations: list[Citation] = Field(default_factory=list)
 
 

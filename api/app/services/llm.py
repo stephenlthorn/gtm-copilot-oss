@@ -14,6 +14,7 @@ import subprocess
 from typing import Any
 from urllib.parse import urlparse
 
+import anthropic
 import httpx
 from openai import OpenAI
 
@@ -56,6 +57,8 @@ class LLMService:
         self.clients: list[OpenAI] = []
         self._openai_client_keys: set[str] = set()
         self.codex_credentials: list[CodexCredential] = []
+        self.anthropic_client: anthropic.Anthropic | None = None
+        self.anthropic_model: str = "MiniMax-M2.5"
         self.last_error: str | None = None
         self._register_clients(api_key)
         if not self.clients and self.settings.security_fail_closed_on_missing_llm_key:
@@ -76,6 +79,14 @@ class LLMService:
 
         if self.settings.openai_api_key:
             self._register_openai_client(self.settings.openai_api_key)
+
+        if self.settings.minimax_api_key:
+            self._register_anthropic_client(
+                api_key=self.settings.minimax_api_key,
+                base_url=self.settings.minimax_base_url,
+                model=self.settings.minimax_model,
+                extra_headers={"x-minimax-group-id": self.settings.minimax_group_id} if self.settings.minimax_group_id else {},
+            )
 
         if not self.disable_codex_auth:
             payload, api_key, auth_credential = self._load_codex_auth_state()
@@ -105,6 +116,45 @@ class LLMService:
             kwargs["base_url"] = self.settings.openai_base_url
         self.clients.append(OpenAI(**kwargs))
         self._openai_client_keys.add(normalized)
+
+    def _register_anthropic_client(
+        self,
+        api_key: str,
+        base_url: str,
+        model: str,
+        extra_headers: dict[str, str] | None = None,
+    ) -> None:
+        self.anthropic_client = anthropic.Anthropic(
+            api_key=api_key,
+            base_url=base_url,
+            default_headers=extra_headers or {},
+        )
+        self.anthropic_model = model
+
+    def _call_anthropic(
+        self,
+        system_prompt: str,
+        user_prompt: str,
+        model: str | None = None,
+    ) -> str | None:
+        if not self.anthropic_client:
+            return None
+        try:
+            msg = self.anthropic_client.messages.create(
+                model=model or self.anthropic_model,
+                max_tokens=4096,
+                system=system_prompt,
+                messages=[{"role": "user", "content": user_prompt}],
+            )
+            # M2.5 returns ThinkingBlocks + TextBlocks; find the first text block
+            return next(
+                (block.text for block in msg.content if hasattr(block, "text") and block.text),
+                None,
+            )
+        except Exception as exc:
+            self.logger.warning("Anthropic call failed: %s: %s", type(exc).__name__, exc)
+            self.last_error = f"{type(exc).__name__}: {exc}"
+            return None
 
     def _add_codex_credential(self, credential: CodexCredential) -> None:
         if not credential.access_token:
@@ -729,6 +779,10 @@ class LLMService:
                 self.last_error = f"{type(exc).__name__}: {exc}"
                 continue
 
+        anthropic_text = self._call_anthropic(system_prompt, safe_user_prompt, model=model)
+        if anthropic_text:
+            return self._extract_json_object(anthropic_text)
+
         codex_text = self._call_codex_responses_text(
             system_prompt=system_prompt,
             user_prompt=safe_user_prompt,
@@ -779,6 +833,10 @@ class LLMService:
                 self.logger.warning("LLM text call failed (%s: %s) — trying next path", type(exc).__name__, exc)
                 self.last_error = f"{type(exc).__name__}: {exc}"
                 continue
+
+        anthropic_text = self._call_anthropic(system_prompt, safe_user_prompt, model=model)
+        if anthropic_text:
+            return anthropic_text
 
         return self._call_codex_responses_text(
             system_prompt=system_prompt,
@@ -1118,25 +1176,119 @@ class LLMService:
         model: str | None = None,
         persona_name: str | None = "sales_representative",
         persona_prompt: str | None = None,
+        tools: list[dict] | None = None,
+        research_context: Any | None = None,
+        linkedin_url: str | None = None,
+        account_industry: str | None = None,
+        account_employee_count: int | None = None,
     ) -> dict[str, Any] | None:
-        system_prompt = self._compose_persona_system_prompt(SYSTEM_REP_EXECUTION, persona_name, persona_prompt)
-        context = "\n\n".join([f"[{h.source_id}:{h.chunk_id}] {h.text[:1200]}" for h in hits[:8]])
-        prompt = (
-            f"Account: {account}\n"
-            f"Request: {ask}\n"
-            f"Evidence:\n{context}\n\n"
-            "Return strict JSON with keys:\n"
-            "- summary (string)\n"
-            "- business_context (array of strings)\n"
-            "- decision_criteria (array of strings)\n"
-            "- recommended_assets (array of strings)\n"
-            "- next_meeting_agenda (array of strings)\n"
+        system_prompt = (
+            "You are a world-class pre-call research analyst for enterprise B2B sales at TiDB.\n"
+            "Generate a comprehensive 7-section account brief to prepare a sales rep for their next meeting.\n\n"
+            "Sections:\n"
+            "1. prospect_information – Name, role/title, time at company, relevant previous role\n"
+            "2. company_context – Employee count, revenue, industry, product/service, key competitors\n"
+            "3. architecture_hypothesis – Databases, apps/microservices, cloud/infrastructure\n"
+            "4. pain_hypothesis – At least 2 pains with evidence from call transcripts or web research\n"
+            "5. tidb_value_propositions – Map each pain to a specific TiDB value prop\n"
+            "6. meeting_goal – Desired outcome of the next meeting\n"
+            "7. meeting_flow – Agenda and time allocation\n\n"
+            "Respond ONLY with valid JSON:\n"
+            '{\n'
+            '  "summary": "2-3 sentence executive summary",\n'
+            '  "prospect_information": {"name": "", "title": "", "time_at_company": "", "previous_role": ""},\n'
+            '  "company_context": {"employee_count": null, "revenue": "", "industry": "", "product_service": "", "competitors": []},\n'
+            '  "architecture_hypothesis": {"databases": [], "apps_microservices": "", "cloud_infrastructure": ""},\n'
+            '  "pain_hypothesis": [{"pain": "", "evidence": ""}],\n'
+            '  "tidb_value_propositions": [{"pain": "", "value_prop": ""}],\n'
+            '  "meeting_goal": "",\n'
+            '  "meeting_flow": {"agenda": [], "time_allocation": {}},\n'
+            '  "business_context": [],\n'
+            '  "decision_criteria": [],\n'
+            '  "recommended_assets": [],\n'
+            '  "next_meeting_agenda": []\n'
+            "}\n\n"
+            "Use all available evidence. Where source data is sparse, draw on your knowledge of "
+            "this company and industry. If you have web access, use it to fill gaps."
         )
-        llm = self._responses_json(system_prompt, prompt, model=model)
+        if persona_prompt:
+            system_prompt += f"\n\nAdditional instructions:\n{persona_prompt}"
+
+        context = "\n\n".join([f"[{h.source_id}:{h.chunk_id}] {h.text[:1200]}" for h in hits[:8]])
+        parts = [
+            f"Account: {account}",
+            f"Industry: {account_industry or 'Unknown'}",
+            f"Employee Count: {account_employee_count or 'Unknown'}",
+            f"Request: {ask}",
+        ]
+
+        if research_context is not None:
+            _source_labels = {
+                "company_homepage": "Company Homepage",
+                "company_about": "Company About Page",
+                "crunchbase": "Crunchbase",
+                "stackshare": "StackShare (Tech Stack)",
+                "job_signals": "Job Postings (Tech Stack Signals)",
+                "prospect_profile": "Prospect LinkedIn Profile",
+            }
+            for field_name, label in _source_labels.items():
+                content = getattr(research_context, field_name, "")
+                if content:
+                    parts.append(f"\n--- {label} ---\n{content}")
+            if not research_context.prospect_profile and linkedin_url:
+                parts.append(f"\nProspect LinkedIn URL (profile scrape unavailable): {linkedin_url}")
+        elif linkedin_url:
+            parts.append(f"\nProspect LinkedIn URL: {linkedin_url}")
+
+        if context:
+            parts.append(f"\n--- Call Transcript Evidence ---\n{context}")
+        prompt = "\n".join(parts)
+
+        llm = self._responses_json(system_prompt, prompt, model=model, tools=tools)
         if not isinstance(llm, dict) or not isinstance(llm.get("summary"), str):
             return None
+
+        def _parse_list_of_dicts(raw: Any, keys: list[str]) -> list[dict]:
+            if not isinstance(raw, list):
+                return []
+            result = []
+            for item in raw:
+                if isinstance(item, dict):
+                    result.append({k: str(item.get(k, "")) for k in keys})
+            return result
+
+        prospect = llm.get("prospect_information") or {}
+        company = llm.get("company_context") or {}
+        arch = llm.get("architecture_hypothesis") or {}
+        flow = llm.get("meeting_flow") or {}
+
         return {
             "summary": llm["summary"].strip(),
+            "prospect_information": {
+                "name": str(prospect.get("name", "")),
+                "title": str(prospect.get("title", "")),
+                "time_at_company": str(prospect.get("time_at_company", "")),
+                "previous_role": str(prospect.get("previous_role", "")),
+            },
+            "company_context": {
+                "employee_count": company.get("employee_count"),
+                "revenue": str(company.get("revenue", "")),
+                "industry": str(company.get("industry", "")),
+                "product_service": str(company.get("product_service", "")),
+                "competitors": [str(c) for c in (company.get("competitors") or [])],
+            },
+            "architecture_hypothesis": {
+                "databases": [str(d) for d in (arch.get("databases") or [])],
+                "apps_microservices": str(arch.get("apps_microservices", "")),
+                "cloud_infrastructure": str(arch.get("cloud_infrastructure", "")),
+            },
+            "pain_hypothesis": _parse_list_of_dicts(llm.get("pain_hypothesis"), ["pain", "evidence"]),
+            "tidb_value_propositions": _parse_list_of_dicts(llm.get("tidb_value_propositions"), ["pain", "value_prop"]),
+            "meeting_goal": str(llm.get("meeting_goal", "")),
+            "meeting_flow": {
+                "agenda": [str(a) for a in (flow.get("agenda") or [])],
+                "time_allocation": {str(k): str(v) for k, v in (flow.get("time_allocation") or {}).items()},
+            },
             "business_context": self._normalize_string_list(llm.get("business_context"), limit=6),
             "decision_criteria": self._normalize_string_list(llm.get("decision_criteria"), limit=6),
             "recommended_assets": self._normalize_string_list(llm.get("recommended_assets"), limit=6),
@@ -1153,6 +1305,7 @@ class LLMService:
         model: str | None = None,
         persona_name: str | None = "sales_representative",
         persona_prompt: str | None = None,
+        tools: list[dict] | None = None,
     ) -> dict[str, Any] | None:
         system_prompt = self._compose_persona_system_prompt(SYSTEM_REP_EXECUTION, persona_name, persona_prompt)
         context = "\n\n".join([f"[{h.source_id}:{h.chunk_id}] {h.text[:1200]}" for h in hits[:8]])
@@ -1165,7 +1318,7 @@ class LLMService:
             "- questions (array of strings)\n"
             "- intent (array of strings with rationale for each question)\n"
         )
-        llm = self._responses_json(system_prompt, prompt, model=model)
+        llm = self._responses_json(system_prompt, prompt, model=model, tools=tools)
         if not isinstance(llm, dict):
             return None
         questions = self._normalize_string_list(llm.get("questions"), limit=count)
@@ -1188,6 +1341,7 @@ class LLMService:
         model: str | None = None,
         persona_name: str | None = "sales_representative",
         persona_prompt: str | None = None,
+        tools: list[dict] | None = None,
     ) -> dict[str, Any] | None:
         system_prompt = self._compose_persona_system_prompt(SYSTEM_REP_EXECUTION, persona_name, persona_prompt)
         context = "\n\n".join([f"[{h.source_id}:{h.chunk_id}] {h.text[:1200]}" for h in hits[:8]])
@@ -1203,7 +1357,7 @@ class LLMService:
             "- body (string)\n"
             "- key_points (array of strings)\n"
         )
-        llm = self._responses_json(system_prompt, prompt, model=model)
+        llm = self._responses_json(system_prompt, prompt, model=model, tools=tools)
         if not isinstance(llm, dict):
             return None
         subject = llm.get("subject")
@@ -1227,6 +1381,7 @@ class LLMService:
         model: str | None = None,
         persona_name: str | None = "sales_representative",
         persona_prompt: str | None = None,
+        tools: list[dict] | None = None,
     ) -> dict[str, Any] | None:
         system_prompt = self._compose_persona_system_prompt(SYSTEM_REP_EXECUTION, persona_name, persona_prompt)
         context = "\n\n".join([f"[{h.source_id}:{h.chunk_id}] {h.text[:1200]}" for h in hits[:8]])
@@ -1239,7 +1394,7 @@ class LLMService:
             "- risks (array of objects: severity, signal, impact, mitigation)\n"
             "- action_plan (array of strings)\n"
         )
-        llm = self._responses_json(system_prompt, prompt, model=model)
+        llm = self._responses_json(system_prompt, prompt, model=model, tools=tools)
         if not isinstance(llm, dict):
             return None
         risks = self._normalize_risk_items(llm.get("risks"), limit=8)

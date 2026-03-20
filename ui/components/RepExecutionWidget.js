@@ -15,6 +15,8 @@ function Section({ title, children }) {
 export default function RepExecutionWidget() {
   const [account, setAccount] = useState('');
   const [chorusCallId, setChorusCallId] = useState('');
+  const [website, setWebsite] = useState('');
+  const [linkedinUrl, setLinkedinUrl] = useState('');
   const [count, setCount] = useState(6);
   const [tone, setTone] = useState('crisp');
   const [to, setTo] = useState('rep.one@example.com');
@@ -31,8 +33,13 @@ export default function RepExecutionWidget() {
   const [error, setError] = useState('');
 
   const basePayload = useMemo(
-    () => ({ account: account.trim(), chorus_call_id: chorusCallId || null }),
-    [account, chorusCallId]
+    () => ({
+      account: account.trim(),
+      chorus_call_id: chorusCallId || null,
+      website: website.trim() || null,
+      linkedin_url: linkedinUrl.trim() || null,
+    }),
+    [account, chorusCallId, website, linkedinUrl]
   );
 
   const run = async (action) => {
@@ -123,6 +130,26 @@ export default function RepExecutionWidget() {
             />
           </div>
         </div>
+        <div className="two-col" style={{ gap: '0.75rem' }}>
+          <div style={{ display: 'grid', gap: '0.35rem' }}>
+            <label style={{ color: 'var(--text-3)', fontSize: '0.72rem' }}>Company Website (optional)</label>
+            <input
+              className="input"
+              value={website}
+              onChange={(e) => setWebsite(e.target.value)}
+              placeholder="e.g. https://example.com"
+            />
+          </div>
+          <div style={{ display: 'grid', gap: '0.35rem' }}>
+            <label style={{ color: 'var(--text-3)', fontSize: '0.72rem' }}>Prospect LinkedIn URL (optional)</label>
+            <input
+              className="input"
+              value={linkedinUrl}
+              onChange={(e) => setLinkedinUrl(e.target.value)}
+              placeholder="e.g. https://linkedin.com/in/john-doe"
+            />
+          </div>
+        </div>
 
         <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
           <button className="btn btn-primary" onClick={() => run('full')} disabled={Boolean(loadingAction)}>
@@ -196,10 +223,98 @@ export default function RepExecutionWidget() {
 
             {brief && (
               <Section title="Account Brief">
-                <div className="answer-text">{brief.summary}</div>
-                <ul className="citation-list" style={{ marginTop: '0.45rem' }}>
-                  {(brief.next_meeting_agenda || []).map((item) => <li key={item}>{item}</li>)}
-                </ul>
+                <div className="answer-text" style={{ marginBottom: '0.75rem' }}>{brief.summary}</div>
+
+                {brief.prospect_information?.name && (
+                  <div style={{ marginBottom: '0.6rem' }}>
+                    <div className="citation-label" style={{ marginBottom: '0.25rem' }}>1. Prospect Information</div>
+                    <ul className="citation-list">
+                      {brief.prospect_information.name && <li><strong>Name:</strong> {brief.prospect_information.name}</li>}
+                      {brief.prospect_information.title && <li><strong>Title:</strong> {brief.prospect_information.title}</li>}
+                      {brief.prospect_information.time_at_company && <li><strong>Tenure:</strong> {brief.prospect_information.time_at_company}</li>}
+                      {brief.prospect_information.previous_role && <li><strong>Previous Role:</strong> {brief.prospect_information.previous_role}</li>}
+                    </ul>
+                  </div>
+                )}
+
+                {(brief.company_context?.industry || brief.company_context?.product_service) && (
+                  <div style={{ marginBottom: '0.6rem' }}>
+                    <div className="citation-label" style={{ marginBottom: '0.25rem' }}>2. Company Context</div>
+                    <ul className="citation-list">
+                      {brief.company_context.industry && <li><strong>Industry:</strong> {brief.company_context.industry}</li>}
+                      {brief.company_context.employee_count && <li><strong>Employees:</strong> {brief.company_context.employee_count.toLocaleString()}</li>}
+                      {brief.company_context.revenue && <li><strong>Revenue:</strong> {brief.company_context.revenue}</li>}
+                      {brief.company_context.product_service && <li><strong>Product/Service:</strong> {brief.company_context.product_service}</li>}
+                      {(brief.company_context.competitors || []).length > 0 && (
+                        <li><strong>Competitors:</strong> {brief.company_context.competitors.join(', ')}</li>
+                      )}
+                    </ul>
+                  </div>
+                )}
+
+                {(brief.architecture_hypothesis?.databases?.length > 0 || brief.architecture_hypothesis?.cloud_infrastructure) && (
+                  <div style={{ marginBottom: '0.6rem' }}>
+                    <div className="citation-label" style={{ marginBottom: '0.25rem' }}>3. Architecture Hypothesis</div>
+                    <ul className="citation-list">
+                      {(brief.architecture_hypothesis.databases || []).length > 0 && (
+                        <li><strong>Databases:</strong> {brief.architecture_hypothesis.databases.join(', ')}</li>
+                      )}
+                      {brief.architecture_hypothesis.apps_microservices && (
+                        <li><strong>Apps/Services:</strong> {brief.architecture_hypothesis.apps_microservices}</li>
+                      )}
+                      {brief.architecture_hypothesis.cloud_infrastructure && (
+                        <li><strong>Cloud/Infra:</strong> {brief.architecture_hypothesis.cloud_infrastructure}</li>
+                      )}
+                    </ul>
+                  </div>
+                )}
+
+                {(brief.pain_hypothesis || []).length > 0 && (
+                  <div style={{ marginBottom: '0.6rem' }}>
+                    <div className="citation-label" style={{ marginBottom: '0.25rem' }}>4. Pain Hypothesis</div>
+                    <ul className="citation-list">
+                      {brief.pain_hypothesis.map((p, i) => (
+                        <li key={i}><strong>{p.pain}</strong> — {p.evidence}</li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+
+                {(brief.tidb_value_propositions || []).length > 0 && (
+                  <div style={{ marginBottom: '0.6rem' }}>
+                    <div className="citation-label" style={{ marginBottom: '0.25rem' }}>5. TiDB Value Propositions</div>
+                    <ul className="citation-list">
+                      {brief.tidb_value_propositions.map((v, i) => (
+                        <li key={i}><strong>{v.pain}:</strong> {v.value_prop}</li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+
+                {brief.meeting_goal && (
+                  <div style={{ marginBottom: '0.6rem' }}>
+                    <div className="citation-label" style={{ marginBottom: '0.25rem' }}>6. Meeting Goal</div>
+                    <div className="answer-text">{brief.meeting_goal}</div>
+                  </div>
+                )}
+
+                {(brief.meeting_flow?.agenda || []).length > 0 && (
+                  <div style={{ marginBottom: '0.6rem' }}>
+                    <div className="citation-label" style={{ marginBottom: '0.25rem' }}>7. Meeting Flow</div>
+                    <ul className="citation-list">
+                      {brief.meeting_flow.agenda.map((item, i) => <li key={i}>{item}</li>)}
+                    </ul>
+                  </div>
+                )}
+
+                {(brief.next_meeting_agenda || []).length > 0 && (
+                  <div>
+                    <div className="citation-label" style={{ marginBottom: '0.25rem' }}>Next Steps</div>
+                    <ul className="citation-list">
+                      {brief.next_meeting_agenda.map((item) => <li key={item}>{item}</li>)}
+                    </ul>
+                  </div>
+                )}
               </Section>
             )}
 
