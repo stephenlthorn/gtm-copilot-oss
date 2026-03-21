@@ -24,9 +24,23 @@ from app.prompts.templates import (
     SYSTEM_MARKETING_EXECUTION,
     SYSTEM_MARKET_RESEARCH,
     SYSTEM_ORACLE,
+    SYSTEM_POST_CALL_ANALYSIS,
+    SYSTEM_PRE_CALL_INTEL,
     SYSTEM_REP_EXECUTION,
+    SYSTEM_SE_ANALYSIS,
     SYSTEM_SE_EXECUTION,
 )
+
+# Map section key → specialized system prompt
+SECTION_SYSTEM_PROMPTS: dict[str, str] = {
+    "pre_call": SYSTEM_PRE_CALL_INTEL,
+    "tal": SYSTEM_PRE_CALL_INTEL,
+    "post_call": SYSTEM_POST_CALL_ANALYSIS,
+    "follow_up": SYSTEM_POST_CALL_ANALYSIS,
+    "se_poc_plan": SYSTEM_SE_ANALYSIS,
+    "se_arch_fit": SYSTEM_SE_ANALYSIS,
+    "se_competitor": SYSTEM_SE_ANALYSIS,
+}
 from app.retrieval.types import RetrievedChunk
 from app.utils.redaction import redact_sensitive_text
 
@@ -869,8 +883,10 @@ class LLMService:
         persona_prompt: str | None = None,
         reasoning_effort: str | None = None,
         source_instructions: str | None = None,
+        section: str | None = None,
     ) -> dict[str, Any]:
-        system_prompt = self._compose_persona_system_prompt(SYSTEM_ORACLE, persona_name, persona_prompt, source_instructions=source_instructions)
+        base_prompt = SECTION_SYSTEM_PROMPTS.get(section or "", SYSTEM_ORACLE)
+        system_prompt = self._compose_persona_system_prompt(base_prompt, persona_name, persona_prompt, source_instructions=source_instructions)
         if allow_ungrounded:
             prompt = f"User question:\n{message}\n\nProvide a concise, high-quality answer."
             answer = self._responses_text(system_prompt, prompt, model=model, tools=tools, reasoning_effort=reasoning_effort)
@@ -893,8 +909,7 @@ class LLMService:
             # If web search is available, let the LLM proceed — it can search the web.
             has_web_search = any(t.get("type") == "web_search_preview" for t in (tools or []))
             if has_web_search:
-                prompt = f"User question:\n{message}\n\nNo internal documents were found. Use web search to answer."
-                answer = self._responses_text(system_prompt, prompt, model=model, tools=tools, reasoning_effort=reasoning_effort)
+                answer = self._responses_text(system_prompt, message, model=model, tools=tools, reasoning_effort=reasoning_effort)
                 if answer:
                     return {"answer": answer, "citations": [], "follow_up_questions": self._fallback_followups("oracle")}
             return {

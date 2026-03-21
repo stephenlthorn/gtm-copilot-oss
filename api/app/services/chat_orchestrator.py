@@ -452,6 +452,7 @@ class ChatOrchestrator:
             persona_prompt=persona_prompt,
             reasoning_effort=resolved_reasoning,
             source_instructions=source_instructions or None,
+            section=section,
         )
         data["citations"] = citations
         return data, self.retriever.retrieval_payload(hits, resolved_top_k)

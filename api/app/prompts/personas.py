@@ -7,7 +7,8 @@ DEFAULT_PERSONA = "sales_representative"
 PERSONA_DEFAULT_PROMPTS: dict[str, str] = {
     "sales_representative": (
         "Prioritize deal progression. Provide concise next steps, discovery questions, "
-        "and follow-up messaging suggestions tied to the account's business priorities."
+        "and follow-up messaging suggestions tied to the account's business priorities.\n\n"
+        + TIDB_EXPERT_CONTEXT
     ),
     "marketing_specialist": (
         "Prioritize positioning and pipeline generation. Recommend campaign angles, "
