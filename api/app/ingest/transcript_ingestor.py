@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from datetime import date
 
 from sqlalchemy import delete, select
@@ -11,6 +12,8 @@ from app.services.artifact_generator import ArtifactGenerator
 from app.services.embedding import EmbeddingService
 from app.utils.chunking import chunk_transcript_turns
 from app.utils.hashing import sha256_text
+
+logger = logging.getLogger(__name__)
 
 
 class TranscriptIngestor:
@@ -66,29 +69,43 @@ class TranscriptIngestor:
         }
 
     def _upsert_call(self, normalized: dict) -> ChorusCall:
+        from sqlalchemy import inspect as _inspect
+        from sqlalchemy.dialects.mysql import insert as _mysql_insert
+
         md = normalized.get("metadata", {})
         call_id = normalized["chorus_call_id"]
-        existing = self.db.execute(select(ChorusCall).where(ChorusCall.chorus_call_id == call_id)).scalar_one_or_none()
         participants = list((normalized.get("speaker_map") or {}).values())
+        values = {
+            "chorus_call_id": call_id,
+            "date": date.fromisoformat(md.get("date")),
+            "account": md.get("account", "Unknown"),
+            "opportunity": md.get("opportunity"),
+            "stage": md.get("stage"),
+            "rep_email": md.get("rep_email", "unknown@example.com"),
+            "se_email": md.get("se_email"),
+            "participants": participants,
+            "recording_url": normalized.get("recording_url"),
+            "transcript_url": normalized.get("transcript_url"),
+        }
 
-        if existing:
-            row = existing
+        dialect = self.db.bind.dialect.name if self.db.bind else ""
+        if dialect == "mysql":
+            # Atomic upsert — safe for concurrent threads, no lock contention
+            stmt = _mysql_insert(ChorusCall).values(**values)
+            stmt = stmt.on_duplicate_key_update(**{k: stmt.inserted[k] for k in values if k != "chorus_call_id"})
+            self.db.execute(stmt)
+            self.db.flush()
         else:
-            row = ChorusCall(chorus_call_id=call_id)
-            self.db.add(row)
+            existing = self.db.execute(select(ChorusCall).where(ChorusCall.chorus_call_id == call_id)).scalar_one_or_none()
+            if existing:
+                for k, v in values.items():
+                    setattr(existing, k, v)
+            else:
+                row = ChorusCall(**values)
+                self.db.add(row)
+            self.db.flush()
 
-        row.date = date.fromisoformat(md.get("date"))
-        row.account = md.get("account", "Unknown")
-        row.opportunity = md.get("opportunity")
-        row.stage = md.get("stage")
-        row.rep_email = md.get("rep_email", "unknown@example.com")
-        row.se_email = md.get("se_email")
-        row.participants = participants
-        row.recording_url = normalized.get("recording_url")
-        row.transcript_url = normalized.get("transcript_url")
-
-        self.db.flush()
-        return row
+        return self.db.execute(select(ChorusCall).where(ChorusCall.chorus_call_id == call_id)).scalar_one()
 
     def _upsert_document(self, normalized: dict, call: ChorusCall) -> KBDocument:
         call_id = normalized["chorus_call_id"]
@@ -158,16 +175,48 @@ class TranscriptIngestor:
         )
 
     def sync(self, since: date | None = None) -> dict:
-        raw_calls = self.connector.fetch_calls(since=since)
+        from app.db.session import SessionLocal
+
         processed = 0
+        total_seen = 0
 
-        for raw in raw_calls:
-            normalized = self._normalize(raw.payload)
-            call = self._upsert_call(normalized)
-            doc = self._upsert_document(normalized, call)
-            snippets = self._replace_chunks(doc, normalized)
-            self._replace_artifact(normalized["chorus_call_id"], normalized, snippets)
-            processed += 1
+        # Warm up TiDB Serverless before the first write (auto-pause wakeup can take 30-60s)
+        warmup_db = SessionLocal()
+        try:
+            from sqlalchemy import text as _text
+            warmup_db.execute(_text("SELECT 1"))
+            warmup_db.execute(_text("SET SESSION innodb_lock_wait_timeout = 50000"))
+        except Exception:
+            pass
+        finally:
+            warmup_db.close()
 
-        self.db.commit()
-        return {"calls_seen": len(raw_calls), "processed": processed}
+        for page in self.connector.fetch_calls_pages(since=since):
+            total_seen += len(page)
+            # Fresh DB session per page — avoids idle connection timeout during Chorus fetch
+            page_db = SessionLocal()
+            try:
+                # Extend lock wait timeout for this session
+                from sqlalchemy import text as _text
+                try:
+                    page_db.execute(_text("SET SESSION innodb_lock_wait_timeout = 50000"))
+                except Exception:
+                    pass
+                page_ingestor = TranscriptIngestor(page_db)
+                for raw in page:
+                    normalized = self._normalize(raw.payload)
+                    call = page_ingestor._upsert_call(normalized)
+                    doc = page_ingestor._upsert_document(normalized, call)
+                    snippets = page_ingestor._replace_chunks(doc, normalized)
+                    if normalized.get("turns"):
+                        page_ingestor._replace_artifact(normalized["chorus_call_id"], normalized, snippets)
+                    processed += 1
+                page_db.commit()
+                logger.info("Chorus sync: committed %d/%d calls", processed, total_seen)
+            except Exception:
+                page_db.rollback()
+                raise
+            finally:
+                page_db.close()
+
+        return {"calls_seen": total_seen, "processed": processed}

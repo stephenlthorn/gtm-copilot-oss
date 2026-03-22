@@ -415,6 +415,10 @@ def feishu_disconnect(request: Request, db: Session = Depends(db_session)) -> di
     return {"connected": False, "deleted": deleted}
 
 
+import threading as _threading
+_calls_sync_lock = _threading.Lock()
+
+
 def _sync_calls_impl(since: str | None, db: Session) -> dict:
     if since:
         since_date: date | None = date.fromisoformat(since)
@@ -443,16 +447,37 @@ def _sync_calls_impl(since: str | None, db: Session) -> dict:
 @router.post("/sync/calls")
 def sync_calls(
     since: str | None = Query(default=None, description="YYYY-MM-DD"),
-    db: Session = Depends(db_session),
 ) -> dict:
-    return _sync_calls_impl(since=since, db=db)
+    """Fire-and-forget sync — returns immediately, runs in background thread."""
+    import threading
+    from app.db.session import SessionLocal
+
+    if not _calls_sync_lock.acquire(blocking=False):
+        return {"accepted": False, "reason": "sync already running"}
+
+    def _run() -> None:
+        bg_db = SessionLocal()
+        try:
+            _sync_calls_impl(since=since, db=bg_db)
+        except Exception as exc:
+            import logging
+            logging.getLogger(__name__).warning("Calls sync failed: %s", exc)
+        finally:
+            bg_db.close()
+            _calls_sync_lock.release()
+
+    threading.Thread(target=_run, daemon=True).start()
+    return {"accepted": True, "since": since}
 
 
 @router.post("/sync/calls/background")
-def sync_calls_background(db: Session = Depends(db_session)) -> dict:
+def sync_calls_background() -> dict:
     """Fire-and-forget incremental sync — returns immediately, runs in background thread."""
     import threading
     from app.db.session import SessionLocal
+
+    if not _calls_sync_lock.acquire(blocking=False):
+        return {"accepted": False, "reason": "sync already running"}
 
     def _run() -> None:
         bg_db = SessionLocal()
@@ -463,6 +488,7 @@ def sync_calls_background(db: Session = Depends(db_session)) -> dict:
             logging.getLogger(__name__).warning("Background calls sync failed: %s", exc)
         finally:
             bg_db.close()
+            _calls_sync_lock.release()
 
     threading.Thread(target=_run, daemon=True).start()
     return {"accepted": True}

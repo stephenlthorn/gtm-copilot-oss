@@ -46,6 +46,13 @@ class ChorusConnector:
             return self._fetch_calls_api(since)
         return self._fetch_calls_fake(since)
 
+    def fetch_calls_pages(self, since: date | None = None):
+        """Yield one page of ChorusCallRaw at a time — keeps DB connections alive during fetch."""
+        if not self.api_key:
+            yield self._fetch_calls_fake(since)
+            return
+        yield from self._fetch_calls_api_pages(since)
+
     def _fetch_calls_fake(self, since: date | None = None) -> list[ChorusCallRaw]:
         out: list[ChorusCallRaw] = []
         directory = self.fake_dir if self.fake_dir.exists() else self.legacy_fake_dir
@@ -59,14 +66,19 @@ class ChorusConnector:
 
     def _fetch_calls_api(self, since: date | None = None) -> list[ChorusCallRaw]:
         """Fetch all calls from Chorus v3/engagements API with continuation_key pagination."""
+        out: list[ChorusCallRaw] = []
+        for page in self._fetch_calls_api_pages(since):
+            out.extend(page)
+        return out
+
+    def _fetch_calls_api_pages(self, since: date | None = None):
+        """Yield one page (list[ChorusCallRaw]) at a time."""
         headers = {"Authorization": f"Bearer {self.api_key}"}
         params: dict = {}
         if since:
             params["min_date"] = since.strftime("%Y-%m-%dT%H:%M:%S.000Z")
 
-        out: list[ChorusCallRaw] = []
         pages = 0
-
         with httpx.Client(timeout=30.0) as client:
             while pages < _MAX_PAGES:
                 resp = client.get(f"{self.base_url}/v3/engagements", headers=headers, params=params)
@@ -78,12 +90,15 @@ class ChorusConnector:
                     break
 
                 logger.info("Chorus page %d: %d engagements", pages, len(records))
+                page_out = []
                 for record in records:
                     call_id = str(record.get("engagement_id") or record.get("id") or "")
                     if not call_id:
                         continue
-                    # Normalise into the shape TranscriptIngestor expects
-                    out.append(ChorusCallRaw(chorus_call_id=call_id, payload=self._to_ingestor_payload(call_id, record)))
+                    page_out.append(ChorusCallRaw(chorus_call_id=call_id, payload=self._to_ingestor_payload(call_id, record)))
+
+                if page_out:
+                    yield page_out
 
                 continuation_key = data.get("continuation_key")
                 if not continuation_key:
@@ -92,8 +107,7 @@ class ChorusConnector:
                 params = {"continuation_key": continuation_key}
                 pages += 1
 
-        logger.info("Chorus fetch complete: %d calls across %d pages", len(out), pages + 1)
-        return out
+        logger.info("Chorus fetch complete: %d pages", pages + 1)
 
     @staticmethod
     def _to_ingestor_payload(call_id: str, record: dict) -> dict:
