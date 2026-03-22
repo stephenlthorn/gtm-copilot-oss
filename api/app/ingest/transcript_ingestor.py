@@ -10,7 +10,7 @@ from app.ingest.chorus_connector import ChorusConnector
 from app.models import CallArtifact, ChorusCall, KBDocument, KBChunk, SourceType
 from app.services.artifact_generator import ArtifactGenerator
 from app.services.embedding import EmbeddingService
-from app.utils.chunking import chunk_transcript_turns
+from app.utils.chunking import TextChunk, chunk_transcript_turns
 from app.utils.hashing import sha256_text
 
 logger = logging.getLogger(__name__)
@@ -77,6 +77,9 @@ class TranscriptIngestor:
         participants = list((normalized.get("speaker_map") or {}).values())
         values = {
             "chorus_call_id": call_id,
+            "engagement_type": normalized.get("engagement_type") or "call",
+            "meeting_summary": normalized.get("meeting_summary"),
+            "action_items": normalized.get("action_items") or [],
             "date": date.fromisoformat(md.get("date")),
             "account": md.get("account", "Unknown"),
             "opportunity": md.get("opportunity"),
@@ -138,9 +141,26 @@ class TranscriptIngestor:
 
     def _replace_chunks(self, doc: KBDocument, normalized: dict) -> list[str]:
         self.db.execute(delete(KBChunk).where(KBChunk.document_id == doc.id))
-        chunks = chunk_transcript_turns(normalized.get("turns", []), normalized.get("speaker_map", {}))
-        embeddings = self.embedder.batch_embed([c.text for c in chunks]) if chunks else []
 
+        turns = normalized.get("turns", [])
+        meeting_summary = normalized.get("meeting_summary") or ""
+        action_items = normalized.get("action_items") or []
+
+        if turns:
+            chunks = chunk_transcript_turns(turns, normalized.get("speaker_map", {}))
+        elif meeting_summary or action_items:
+            # No transcript — embed the Chorus-generated summary + action items instead
+            parts = []
+            if meeting_summary:
+                parts.append(f"Meeting Summary:\n{meeting_summary}")
+            if action_items:
+                parts.append("Action Items:\n" + "\n".join(f"- {a}" for a in action_items))
+            text = "\n\n".join(parts)
+            chunks = [TextChunk(text=text, token_count=len(text.split()), metadata={})]
+        else:
+            return []
+
+        embeddings = self.embedder.batch_embed([c.text for c in chunks])
         snippets: list[str] = []
         for idx, (chunk, emb) in enumerate(zip(chunks, embeddings)):
             self.db.add(
@@ -159,20 +179,40 @@ class TranscriptIngestor:
 
     def _replace_artifact(self, call_id: str, normalized: dict, snippets: list[str]) -> None:
         self.db.execute(delete(CallArtifact).where(CallArtifact.chorus_call_id == call_id))
-        artifact = self.generator.generate(normalized, snippets)
-        self.db.add(
-            CallArtifact(
-                chorus_call_id=call_id,
-                summary=artifact["summary"],
-                objections=artifact["objections"],
-                competitors_mentioned=artifact["competitors_mentioned"],
-                risks=artifact["risks"],
-                next_steps=artifact["next_steps"],
-                recommended_collateral=artifact["recommended_collateral"],
-                follow_up_questions=artifact["follow_up_questions"],
-                model_info=artifact["model_info"],
+
+        meeting_summary = normalized.get("meeting_summary") or ""
+        action_items = normalized.get("action_items") or []
+
+        if meeting_summary or action_items:
+            # Use Chorus's pre-generated summary — no OpenAI call needed
+            self.db.add(
+                CallArtifact(
+                    chorus_call_id=call_id,
+                    summary=meeting_summary or "No summary available.",
+                    objections=[],
+                    competitors_mentioned=[],
+                    risks=[],
+                    next_steps=action_items,
+                    recommended_collateral=[],
+                    follow_up_questions=[],
+                    model_info={"source": "chorus_ai"},
+                )
             )
-        )
+        else:
+            artifact = self.generator.generate(normalized, snippets)
+            self.db.add(
+                CallArtifact(
+                    chorus_call_id=call_id,
+                    summary=artifact["summary"],
+                    objections=artifact["objections"],
+                    competitors_mentioned=artifact["competitors_mentioned"],
+                    risks=artifact["risks"],
+                    next_steps=artifact["next_steps"],
+                    recommended_collateral=artifact["recommended_collateral"],
+                    follow_up_questions=artifact["follow_up_questions"],
+                    model_info=artifact["model_info"],
+                )
+            )
 
     def sync(self, since: date | None = None) -> dict:
         from app.db.session import SessionLocal
@@ -208,7 +248,7 @@ class TranscriptIngestor:
                     call = page_ingestor._upsert_call(normalized)
                     doc = page_ingestor._upsert_document(normalized, call)
                     snippets = page_ingestor._replace_chunks(doc, normalized)
-                    if normalized.get("turns"):
+                    if normalized.get("turns") or normalized.get("meeting_summary") or normalized.get("action_items"):
                         page_ingestor._replace_artifact(normalized["chorus_call_id"], normalized, snippets)
                     processed += 1
                 page_db.commit()

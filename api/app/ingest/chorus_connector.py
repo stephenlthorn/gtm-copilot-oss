@@ -95,6 +95,9 @@ class ChorusConnector:
                     call_id = str(record.get("engagement_id") or record.get("id") or "")
                     if not call_id:
                         continue
+                    # Skip link-tracking events — not communications, just analytics noise
+                    if (record.get("type") or record.get("engagement_type")) == "content_viewed":
+                        continue
                     page_out.append(ChorusCallRaw(chorus_call_id=call_id, payload=self._to_ingestor_payload(call_id, record)))
 
                 if page_out:
@@ -136,6 +139,9 @@ class ChorusConnector:
 
         return {
             "chorus_call_id": call_id,
+            "engagement_type": record.get("type") or record.get("engagement_type") or "call",
+            "meeting_summary": record.get("meeting_summary"),
+            "action_items": record.get("action_items") or [],
             "metadata": {
                 "date": date_str,
                 "account": record.get("account_name") or "Unknown",
