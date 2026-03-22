@@ -119,9 +119,9 @@ class ChorusConnector:
         date_str = date.today().isoformat()
         if raw_date is not None:
             try:
-                from datetime import datetime as _dt
+                from datetime import datetime as _dt, timezone as _tz
                 if isinstance(raw_date, (int, float)):
-                    date_str = _dt.utcfromtimestamp(raw_date / 1000 if raw_date > 1e10 else raw_date).strftime("%Y-%m-%d")
+                    date_str = _dt.fromtimestamp(raw_date / 1000 if raw_date > 1e10 else raw_date, tz=_tz.utc).strftime("%Y-%m-%d")
                 else:
                     date_str = _dt.fromisoformat(str(raw_date).replace("Z", "+00:00")).strftime("%Y-%m-%d")
             except Exception:

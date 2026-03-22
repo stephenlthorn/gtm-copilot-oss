@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 from datetime import date, timedelta
+import logging
 import re
+
+logger = logging.getLogger(__name__)
 
 import httpx
 from dateutil.parser import isoparse
@@ -444,11 +447,8 @@ def _sync_calls_impl(since: str | None, db: Session) -> dict:
     return result
 
 
-@router.post("/sync/calls")
-def sync_calls(
-    since: str | None = Query(default=None, description="YYYY-MM-DD"),
-) -> dict:
-    """Fire-and-forget sync — returns immediately, runs in background thread."""
+def _launch_calls_sync(since: str | None) -> dict:
+    """Acquire lock and start background sync thread. Returns accepted/rejected dict."""
     import threading
     from app.db.session import SessionLocal
 
@@ -459,9 +459,8 @@ def sync_calls(
         bg_db = SessionLocal()
         try:
             _sync_calls_impl(since=since, db=bg_db)
-        except Exception as exc:
-            import logging
-            logging.getLogger(__name__).warning("Calls sync failed: %s", exc)
+        except Exception:
+            logger.exception("Calls sync failed (since=%s)", since)
         finally:
             bg_db.close()
             _calls_sync_lock.release()
@@ -470,37 +469,22 @@ def sync_calls(
     return {"accepted": True, "since": since}
 
 
+@router.post("/sync/calls")
+def sync_calls(since: str | None = Query(default=None, description="YYYY-MM-DD")) -> dict:
+    """Fire-and-forget sync — returns immediately, runs in background thread."""
+    return _launch_calls_sync(since=since)
+
+
 @router.post("/sync/calls/background")
 def sync_calls_background() -> dict:
-    """Fire-and-forget incremental sync — returns immediately, runs in background thread."""
-    import threading
-    from app.db.session import SessionLocal
-
-    if not _calls_sync_lock.acquire(blocking=False):
-        return {"accepted": False, "reason": "sync already running"}
-
-    def _run() -> None:
-        bg_db = SessionLocal()
-        try:
-            _sync_calls_impl(since=None, db=bg_db)
-        except Exception as exc:
-            import logging
-            logging.getLogger(__name__).warning("Background calls sync failed: %s", exc)
-        finally:
-            bg_db.close()
-            _calls_sync_lock.release()
-
-    threading.Thread(target=_run, daemon=True).start()
-    return {"accepted": True}
+    """Incremental fire-and-forget sync (no since filter)."""
+    return _launch_calls_sync(since=None)
 
 
 @router.post("/sync/chorus")
-def sync_chorus(
-    since: str | None = Query(default=None, description="YYYY-MM-DD"),
-    db: Session = Depends(db_session),
-) -> dict:
-    # Legacy alias kept for backward compatibility.
-    return _sync_calls_impl(since=since, db=db)
+def sync_chorus(since: str | None = Query(default=None, description="YYYY-MM-DD")) -> dict:
+    """Legacy alias for /sync/calls — now also non-blocking."""
+    return _launch_calls_sync(since=since)
 
 
 @router.get("/audit")

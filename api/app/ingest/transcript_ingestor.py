@@ -63,13 +63,17 @@ class TranscriptIngestor:
 
         return {
             "chorus_call_id": payload.get("chorus_call_id") or payload.get("id"),
+            "engagement_type": payload.get("engagement_type"),
+            "meeting_summary": payload.get("meeting_summary"),
+            "action_items": payload.get("action_items") or [],
             "metadata": md,
             "speaker_map": speaker_map,
             "turns": turns,
+            "recording_url": payload.get("recording_url"),
+            "transcript_url": payload.get("transcript_url"),
         }
 
     def _upsert_call(self, normalized: dict) -> ChorusCall:
-        from sqlalchemy import inspect as _inspect
         from sqlalchemy.dialects.mysql import insert as _mysql_insert
 
         md = normalized.get("metadata", {})
@@ -225,7 +229,7 @@ class TranscriptIngestor:
         try:
             from sqlalchemy import text as _text
             warmup_db.execute(_text("SELECT 1"))
-            warmup_db.execute(_text("SET SESSION innodb_lock_wait_timeout = 50000"))
+            warmup_db.execute(_text("SET SESSION innodb_lock_wait_timeout = 120"))
         except Exception:
             pass
         finally:
@@ -239,7 +243,7 @@ class TranscriptIngestor:
                 # Extend lock wait timeout for this session
                 from sqlalchemy import text as _text
                 try:
-                    page_db.execute(_text("SET SESSION innodb_lock_wait_timeout = 50000"))
+                    page_db.execute(_text("SET SESSION innodb_lock_wait_timeout = 120"))
                 except Exception:
                     pass
                 page_ingestor = TranscriptIngestor(page_db)
