@@ -27,7 +27,7 @@ const DEFAULT_MODEL   = 'gpt-5.4';
 const DEFAULT_THINK   = 'medium';
 const DEFAULT_TOP_K   = 8;
 
-export default function ModelPickerDropdown({ onTopKChange, onModelChange }) {
+export default function ModelPickerDropdown({ onTopKChange, onModelChange, onThinkingChange }) {
   const [open, setOpen]       = useState(false);
   const [model, setModel]     = useState(DEFAULT_MODEL);
   const [thinking, setThink]  = useState(DEFAULT_THINK);
@@ -42,7 +42,7 @@ export default function ModelPickerDropdown({ onTopKChange, onModelChange }) {
       .then(data => {
         if (!data) return;
         if (data.llm_model)        { setModel(data.llm_model); onModelChange?.(data.llm_model); }
-        if (data.reasoning_effort) setThink(data.reasoning_effort);
+        if (data.reasoning_effort) { setThink(data.reasoning_effort); onThinkingChange?.(data.reasoning_effort); }
         if (data.retrieval_top_k)  { setTopK(data.retrieval_top_k); onTopKChange?.(data.retrieval_top_k); }
       })
       .catch(() => {});
@@ -69,7 +69,7 @@ export default function ModelPickerDropdown({ onTopKChange, onModelChange }) {
   }, []);
 
   const pickModel = (id) => { setModel(id); onModelChange?.(id); save({ llm_model: id }); };
-  const pickThink = (t)  => { setThink(t);  save({ reasoning_effort: t }); };
+  const pickThink = (t)  => { setThink(t); onThinkingChange?.(t); save({ reasoning_effort: t }); };
   const pickDepth = (k)  => { setTopK(k); onTopKChange?.(k); save({ retrieval_top_k: k }); };
 
   const currentModel  = MODELS.find(m => m.id === model) || MODELS[0];

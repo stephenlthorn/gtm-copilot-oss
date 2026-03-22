@@ -2,16 +2,18 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { marked } from 'marked';
 import FeedbackButtons from './FeedbackButtons';
+import IntelMeter from './IntelMeter';
 
 // Configure marked once — GFM tables, line breaks, no mangling
 marked.setOptions({ gfm: true, breaks: true });
 
-export default function PersistentChat({ draft, populateSignal, ragEnabled = true, webSearchEnabled = true, tidbExpert = false, topK = 8, model = 'gpt-5.4', section }) {
+export default function PersistentChat({ draft, populateSignal, ragEnabled = true, webSearchEnabled = true, tidbExpert = false, topK = 8, model = 'gpt-5.4', thinking = 'medium', section }) {
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
   const [historyLoaded, setHistoryLoaded] = useState(false);
   const messagesEndRef = useRef(null);
+  const textareaRef = useRef(null);
 
   useEffect(() => {
     fetch('/api/chat/history?model=' + encodeURIComponent(model))
@@ -31,10 +33,17 @@ export default function PersistentChat({ draft, populateSignal, ragEnabled = tru
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, loading]);
 
+  const autoGrow = (el) => {
+    if (!el) return;
+    el.style.height = 'auto';
+    el.style.height = Math.min(el.scrollHeight, 200) + 'px';
+  };
+
   const send = async () => {
     const q = input.trim();
     if (!q || loading) return;
     setInput('');
+    if (textareaRef.current) { textareaRef.current.style.height = 'auto'; }
 
     const userMsg = { id: Date.now() + '-u', role: 'user', content: q };
     setMessages(prev => [...prev, userMsg]);
@@ -84,10 +93,10 @@ export default function PersistentChat({ draft, populateSignal, ragEnabled = tru
 
       <div className="rep-chat-input-row">
         <textarea
+          ref={textareaRef}
           className="rep-chat-input"
-          rows={4}
           value={input}
-          onChange={e => setInput(e.target.value)}
+          onChange={e => { setInput(e.target.value); autoGrow(e.target); }}
           onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } }}
           placeholder="Type a message or use Populate to draft from a template… (Enter to send, Shift+Enter for newline)"
           disabled={loading}
@@ -96,6 +105,7 @@ export default function PersistentChat({ draft, populateSignal, ragEnabled = tru
           {loading ? '…' : '→'}
         </button>
       </div>
+      <IntelMeter model={model} thinking={thinking} ragEnabled={ragEnabled} webSearchEnabled={webSearchEnabled} />
     </div>
   );
 }

@@ -1176,8 +1176,10 @@ pre {
 
 .rep-chat-input {
   flex: 1;
-  resize: vertical;
-  min-height: 80px;
+  resize: none;
+  min-height: 100px;
+  max-height: 200px;
+  overflow-y: auto;
   font-family: var(--font);
   font-size: 0.82rem;
   background: var(--bg);
