@@ -13,7 +13,7 @@ from app.core.settings import get_settings
 logger = logging.getLogger(__name__)
 
 _CHORUS_BASE = "https://chorus.ai"
-_MAX_PAGES = 100  # safety cap
+_MAX_PAGES = 500  # ~8 months of history at 90% content_viewed noise density
 
 
 def _project_root() -> Path:
