@@ -86,6 +86,7 @@ def chat(req: ChatRequest, request: Request) -> dict:
             rag_enabled=req.rag_enabled,
             web_search_enabled=req.web_search_enabled,
             section=req.section,
+            tidb_expert=req.tidb_expert,
         )
         # Persist chat messages
         try:

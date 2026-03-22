@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, timedelta
 import re
 
 import httpx
@@ -416,7 +416,16 @@ def feishu_disconnect(request: Request, db: Session = Depends(db_session)) -> di
 
 
 def _sync_calls_impl(since: str | None, db: Session) -> dict:
-    since_date = date.fromisoformat(since) if since else None
+    if since:
+        since_date: date | None = date.fromisoformat(since)
+    else:
+        # Incremental: use latest call already in DB, or 2 years ago for first-ever sync
+        from app.models import ChorusCall
+        latest = db.execute(select(ChorusCall).order_by(ChorusCall.date.desc()).limit(1)).scalar_one_or_none()
+        if latest and latest.date:
+            since_date = latest.date
+        else:
+            since_date = date.today() - timedelta(days=730)
     ingestor = TranscriptIngestor(db)
     result = ingestor.sync(since=since_date)
     write_audit_log(
@@ -437,6 +446,26 @@ def sync_calls(
     db: Session = Depends(db_session),
 ) -> dict:
     return _sync_calls_impl(since=since, db=db)
+
+
+@router.post("/sync/calls/background")
+def sync_calls_background(db: Session = Depends(db_session)) -> dict:
+    """Fire-and-forget incremental sync — returns immediately, runs in background thread."""
+    import threading
+    from app.db.session import SessionLocal
+
+    def _run() -> None:
+        bg_db = SessionLocal()
+        try:
+            _sync_calls_impl(since=None, db=bg_db)
+        except Exception as exc:
+            import logging
+            logging.getLogger(__name__).warning("Background calls sync failed: %s", exc)
+        finally:
+            bg_db.close()
+
+    threading.Thread(target=_run, daemon=True).start()
+    return {"accepted": True}
 
 
 @router.post("/sync/chorus")

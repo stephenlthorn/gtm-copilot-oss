@@ -10,6 +10,7 @@ from app.core.settings import Settings, get_settings
 from app.models import ChorusCall, KBConfig, SourceType, UserPreference
 from app.models.feedback import AIFeedback
 from app.prompts.personas import DEFAULT_PERSONA, get_default_persona_prompt, normalize_persona
+from app.prompts.templates import TIDB_EXPERT_CONTEXT
 from app.prompts.source_profiles import get_source_profile, format_source_instructions
 from app.retrieval.service import HybridRetriever
 from app.services.llm import LLMService
@@ -288,7 +289,7 @@ class ChatOrchestrator:
         except Exception:
             return []
 
-    def run(self, *, mode: str, user: str, message: str, top_k: int, filters: dict, context: dict, rag_enabled: bool = True, web_search_enabled: bool = True, section: str | None = None) -> tuple[dict, dict]:
+    def run(self, *, mode: str, user: str, message: str, top_k: int, filters: dict, context: dict, rag_enabled: bool = True, web_search_enabled: bool = True, section: str | None = None, tidb_expert: bool = False) -> tuple[dict, dict]:
         blocked = self._guardrail_external_messaging(message)
         if blocked:
             payload = {
@@ -415,6 +416,9 @@ class ChatOrchestrator:
             corrections_text = "\n".join(f"- {c}" for c in feedback_corrections)
             persona_prompt = (persona_prompt or "") + f"\n\nPast corrections from user feedback:\n{corrections_text}"
 
+        if tidb_expert:
+            persona_prompt = (persona_prompt or "") + "\n\n" + TIDB_EXPERT_CONTEXT
+
         citations = [
             {
                 "title": hit.title,
@@ -448,6 +452,7 @@ class ChatOrchestrator:
             hits,
             model=resolved_model,
             tools=llm_tools,
+            allow_ungrounded=skip_rag,
             persona_name=persona_name,
             persona_prompt=persona_prompt,
             reasoning_effort=resolved_reasoning,

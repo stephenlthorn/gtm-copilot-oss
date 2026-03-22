@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
@@ -8,6 +9,11 @@ from pathlib import Path
 import httpx
 
 from app.core.settings import get_settings
+
+logger = logging.getLogger(__name__)
+
+_CHORUS_BASE = "https://chorus.ai"
+_MAX_PAGES = 100  # safety cap
 
 
 def _project_root() -> Path:
@@ -32,10 +38,11 @@ class ChorusConnector:
         self.fake_dir = base / "fake_calls"
         self.legacy_fake_dir = base / "fake_chorus"
         self.api_key = self.settings.call_api_key or self.settings.chorus_api_key
-        self.base_url = self.settings.call_base_url or self.settings.chorus_base_url
+        # Default to chorus.ai when only the key is set (CALL_BASE_URL not required)
+        self.base_url = (self.settings.call_base_url or self.settings.chorus_base_url or _CHORUS_BASE).rstrip("/")
 
     def fetch_calls(self, since: date | None = None) -> list[ChorusCallRaw]:
-        if self.api_key and self.base_url:
+        if self.api_key:
             return self._fetch_calls_api(since)
         return self._fetch_calls_fake(since)
 
@@ -51,22 +58,80 @@ class ChorusConnector:
         return out
 
     def _fetch_calls_api(self, since: date | None = None) -> list[ChorusCallRaw]:
+        """Fetch all calls from Chorus v3/engagements API with continuation_key pagination."""
         headers = {"Authorization": f"Bearer {self.api_key}"}
-        params = {}
+        params: dict = {}
         if since:
-            params["since"] = since.isoformat()
+            params["min_date"] = since.strftime("%Y-%m-%dT%H:%M:%S.000Z")
 
-        url = f"{self.base_url.rstrip('/')}/calls"
-        with httpx.Client(timeout=30.0) as client:
-            response = client.get(url, headers=headers, params=params)
-            response.raise_for_status()
-            payload = response.json()
-
-        calls = payload.get("calls", [])
         out: list[ChorusCallRaw] = []
-        for call in calls:
-            call_id = call.get("chorus_call_id") or call.get("id")
-            if not call_id:
-                continue
-            out.append(ChorusCallRaw(chorus_call_id=call_id, payload=call))
+        pages = 0
+
+        with httpx.Client(timeout=30.0) as client:
+            while pages < _MAX_PAGES:
+                resp = client.get(f"{self.base_url}/v3/engagements", headers=headers, params=params)
+                resp.raise_for_status()
+                data = resp.json()
+
+                records = data.get("engagements") or []
+                if not records:
+                    break
+
+                logger.info("Chorus page %d: %d engagements", pages, len(records))
+                for record in records:
+                    call_id = str(record.get("engagement_id") or record.get("id") or "")
+                    if not call_id:
+                        continue
+                    # Normalise into the shape TranscriptIngestor expects
+                    out.append(ChorusCallRaw(chorus_call_id=call_id, payload=self._to_ingestor_payload(call_id, record)))
+
+                continuation_key = data.get("continuation_key")
+                if not continuation_key:
+                    break
+
+                params = {"continuation_key": continuation_key}
+                pages += 1
+
+        logger.info("Chorus fetch complete: %d calls across %d pages", len(out), pages + 1)
         return out
+
+    @staticmethod
+    def _to_ingestor_payload(call_id: str, record: dict) -> dict:
+        """Convert a /v3/engagements record to the shape TranscriptIngestor._normalize expects."""
+        raw_date = record.get("date_time") or record.get("start_time") or record.get("date")
+        date_str = date.today().isoformat()
+        if raw_date is not None:
+            try:
+                from datetime import datetime as _dt
+                if isinstance(raw_date, (int, float)):
+                    date_str = _dt.utcfromtimestamp(raw_date / 1000 if raw_date > 1e10 else raw_date).strftime("%Y-%m-%d")
+                else:
+                    date_str = _dt.fromisoformat(str(raw_date).replace("Z", "+00:00")).strftime("%Y-%m-%d")
+            except Exception:
+                pass
+
+        participants = record.get("participants") or []
+        speaker_map = {}
+        for idx, p in enumerate(participants, start=1):
+            name = p.get("name") or p.get("email") or f"Speaker {idx}"
+            speaker_map[f"S{idx}"] = {
+                "name": name,
+                "role": p.get("role") or "other",
+                "email": p.get("email"),
+            }
+
+        return {
+            "chorus_call_id": call_id,
+            "metadata": {
+                "date": date_str,
+                "account": record.get("account_name") or "Unknown",
+                "opportunity": record.get("opportunity_name"),
+                "stage": None,
+                "rep_email": record.get("user_email") or "unknown@example.com",
+                "se_email": None,
+            },
+            "speaker_map": speaker_map,
+            "turns": [],  # engagement list has no transcript; full transcript fetched separately if needed
+            "recording_url": record.get("url"),
+            "transcript_url": record.get("url"),
+        }

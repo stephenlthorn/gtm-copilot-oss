@@ -62,7 +62,7 @@ def _fulltext_score(text: str, title: str, source_id: str, query: str) -> float:
 @router.get("/documents")
 def list_documents(
     source_type: str | None = Query(default=None),
-    limit: int = Query(default=100, ge=1, le=1000),
+    limit: int = Query(default=100, ge=1, le=10000),
     request: Request = None,
     db: Session = Depends(db_session),
 ) -> list[dict]:
@@ -78,16 +78,13 @@ def list_documents(
     if viewer_email:
         filtered: list[KBDocument] = []
         for doc in docs:
-            if doc.source_type == SourceType.GOOGLE_DRIVE:
-                tags = doc.tags if isinstance(doc.tags, dict) else {}
-                indexed_for = str(tags.get("user_email", "")).strip().lower()
-                if indexed_for and indexed_for != viewer_email:
-                    continue
+            # Feishu docs are per-user; filter to viewer only
             if doc.source_type == SourceType.FEISHU:
                 tags = doc.tags if isinstance(doc.tags, dict) else {}
                 indexed_for = str(tags.get("user_email", "")).strip().lower()
                 if indexed_for and indexed_for != viewer_email:
                     continue
+            # Google Drive and Chorus are shared workspace content — no per-user filter
             filtered.append(doc)
         docs = filtered
     return [

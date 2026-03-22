@@ -8,8 +8,12 @@
     "start": "NODE_ENV=production node server.js"
   },
   "dependencies": {
+    "dompurify": "^3.3.3",
+    "marked": "^17.0.5",
     "next": "14.2.15",
     "react": "18.3.1",
-    "react-dom": "18.3.1"
+    "react-dom": "18.3.1",
+    "react-markdown": "^10.1.0",
+    "remark-gfm": "^4.0.1"
   }
 }

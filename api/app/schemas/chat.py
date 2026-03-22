@@ -29,6 +29,7 @@ class ChatRequest(BaseModel):
     rag_enabled: bool = True
     web_search_enabled: bool = True
     section: str | None = None
+    tidb_expert: bool = False
 
 
 class Citation(BaseModel):

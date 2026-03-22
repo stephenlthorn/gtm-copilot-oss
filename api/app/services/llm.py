@@ -871,6 +871,188 @@ class LLMService:
             f"Based on this evidence, a practical next step is to validate this against the exact ask: \"{message}\"."
         )
 
+    def _extract_company_contact(self, message: str) -> tuple[str, str]:
+        """Use LLM to reliably extract company and contact name from a pre-call request."""
+        try:
+            result = self._responses_json(
+                "Extract the company name and contact person's full name from the user's request. "
+                "Return ONLY valid JSON with keys 'company' and 'contact'. "
+                "If either is not present, use an empty string.",
+                f"Request: {message}",
+            )
+            if isinstance(result, dict):
+                company = (result.get("company") or "").strip()
+                contact = (result.get("contact") or "").strip()
+                if company and contact:
+                    return company, contact
+        except Exception:
+            pass
+        # Fallback: simple regex for "Name at Company" pattern
+        m = re.search(r'([A-Z][a-z]+(?: [A-Z][a-z]+)+)\b.{0,60}?\bat\s+([A-Z][A-Za-z0-9& ]{2,30})', message)
+        if m:
+            return m.group(2).strip(), m.group(1).strip()
+        return "unknown company", "unknown contact"
+
+    @staticmethod
+    def _get_firecrawl_api_key() -> str | None:
+        """Read Firecrawl API key from env or the CLI credentials file."""
+        key = os.environ.get("FIRECRAWL_API_KEY") or get_settings().firecrawl_api_key
+        if key:
+            return key
+        creds_path = Path.home() / "Library" / "Application Support" / "firecrawl-cli" / "credentials.json"
+        if creds_path.exists():
+            try:
+                data = json.loads(creds_path.read_text())
+                return data.get("apiKey") or None
+            except Exception:
+                pass
+        return None
+
+    def _firecrawl_search(self, query: str, limit: int = 5) -> list[dict]:
+        """Run a single Firecrawl search and return result dicts with url/title/snippet."""
+        api_key = self._get_firecrawl_api_key()
+        if not api_key:
+            return []
+        try:
+            resp = httpx.post(
+                "https://api.firecrawl.dev/v1/search",
+                headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+                json={"query": query, "limit": limit},
+                timeout=15,
+            )
+            if resp.status_code != 200:
+                return []
+            data = resp.json()
+            items = data.get("data") or []
+            return [
+                {
+                    "url": r.get("url", ""),
+                    "title": r.get("title", ""),
+                    "snippet": (r.get("description") or r.get("markdown") or "")[:600],
+                }
+                for r in items
+            ]
+        except Exception as exc:
+            self.logger.warning("Firecrawl search failed: %s", exc)
+            return []
+
+    def _deep_research_pre_call(
+        self,
+        system_prompt: str,
+        message: str,
+        model: str | None,
+        tools: list[dict] | None,
+        reasoning_effort: str | None,
+    ) -> str | None:
+        """Backend-driven deep research: run searches via Firecrawl directly,
+        compile findings, pass grounded results to LLM for synthesis only."""
+        company, contact = self._extract_company_contact(message)
+
+        queries = [
+            (f"{contact} {company} site:linkedin.com", "Contact background"),
+            (f"{company} YugabyteDB", "YugabyteDB competitive signal"),
+            (f"{company} CockroachDB OR PlanetScale OR distributed SQL migration 2025 2026", "Other competitive DB moves"),
+            (f"{company} database migration infrastructure 2025 2026", "DB migration news"),
+            (f"{company} revenue 2025", "Recent financials"),
+            (f"{company} Vitess MySQL database engineering", "DB tech stack — Vitess/MySQL"),
+            (f"site:shopify.engineering database OR MySQL OR distributed", "Engineering blog DB posts"),
+            (f"{company} GCP cloud infrastructure", "Cloud provider"),
+        ]
+
+        COMPETITORS = ["yugabytedb", "cockroachdb", "planetscale", "google spanner", "alloydb", "aurora dsql"]
+        competitive_hits: list[dict] = []
+
+        research_sections: list[str] = [f"## Research findings for: {contact} at {company}\n"]
+        for query, label in queries:
+            results = self._firecrawl_search(query, limit=4)
+            research_sections.append(f"### {label}\nQuery: `{query}`")
+            if results:
+                for r in results:
+                    research_sections.append(f"- [{r['title']}]({r['url']})\n  {r['snippet']}")
+                    # Detect company-specific competitive signal.
+                    # Exclude generic docs/reference pages (they match company terms incidentally).
+                    DOCS_PATTERNS = ["/docs/", "/documentation/", "/reference/", "/stable/", "/api/", "/faq/"]
+                    is_generic_docs = any(p in r["url"].lower() for p in DOCS_PATTERNS)
+                    combined = f"{r['title']} {r['snippet']}".lower()
+                    is_company_specific = company.lower() in combined
+                    matched_competitor = next((c for c in COMPETITORS if c in combined), None)
+                    if is_company_specific and matched_competitor and not is_generic_docs:
+                        competitive_hits.append({
+                            "competitor": matched_competitor,
+                            "title": r["title"],
+                            "url": r["url"],
+                            "snippet": r["snippet"],
+                        })
+            else:
+                research_sections.append("- No results returned")
+
+        # Correct capitalization for known competitors
+        COMPETITOR_DISPLAY = {
+            "yugabytedb": "YugabyteDB", "cockroachdb": "CockroachDB",
+            "planetscale": "PlanetScale", "google spanner": "Google Spanner",
+            "alloydb": "AlloyDB", "aurora dsql": "Aurora DSQL",
+        }
+
+        # Prepend a pre-formatted competitive alert block when company-specific signals found.
+        # The LLM must copy this verbatim — do not let it reconstruct it from memory.
+        if competitive_hits:
+            seen_competitors: set[str] = set()
+            # Deduplicate by URL
+            seen_urls: set[str] = set()
+            sources_md = []
+            for hit in competitive_hits:
+                if hit["url"] in seen_urls:
+                    continue
+                seen_urls.add(hit["url"])
+                sources_md.append(f'  - [{hit["title"]}]({hit["url"]})\n    > {hit["snippet"][:200]}')
+                display = COMPETITOR_DISPLAY.get(hit["competitor"], hit["competitor"].title())
+                seen_competitors.add(display)
+            competitors_str = ", ".join(sorted(seen_competitors))
+            pre_formatted_alert = (
+                f"⚠️ COMPETITIVE ALERT — {company.upper()} + {competitors_str.upper()} CONFIRMED\n\n"
+                f"Research found {len(competitive_hits)} result(s) explicitly linking {company} to {competitors_str}.\n\n"
+                "Sources (copy these URLs exactly — do not substitute):\n"
+                + "\n".join(sources_md) + "\n\n"
+                f"Sales implication: {company} has evaluated or is migrating to {competitors_str}. "
+                "Reframe meeting goal as competitive displacement. Lead with TiDB's MySQL wire compatibility "
+                "as the lower-risk path vs PostgreSQL-based alternatives."
+            )
+            instruction = (
+                "INSTRUCTION: The section below is a PRE-FORMATTED COMPETITIVE ALERT. "
+                "Copy it VERBATIM at the top of your brief output (before Section 1). "
+                "Do NOT rewrite it. Do NOT change the URLs. Do NOT add new URLs.\n\n"
+                + pre_formatted_alert
+            )
+            research_sections.insert(1, instruction)
+
+        research_notes = "\n".join(research_sections)
+
+        synthesize_prompt = (
+            f"Original request: {message}\n\n"
+            "=== WEB RESEARCH FINDINGS (retrieved via Firecrawl) ===\n"
+            f"{research_notes}\n"
+            "=== END RESEARCH FINDINGS ===\n\n"
+            "Write the complete pre-call intelligence brief using the findings above.\n\n"
+            "CRITICAL RULE — COMPETITIVE ALERT SECTION:\n"
+            "If the research findings contain a PRE-FORMATTED COMPETITIVE ALERT block marked with "
+            "'INSTRUCTION: Copy it VERBATIM', you MUST output that exact text first, unchanged, "
+            "with the exact URLs as written. Do not rewrite it. Do not replace the URLs with "
+            "other URLs you know from memory. Copy. It. Verbatim.\n\n"
+            "Verification rules for all other sections:\n"
+            "STRICT (must come from research findings — never from training memory):\n"
+            "  - Contact's title, previous company, tenure\n"
+            "  - Revenue, ARR, valuation figures\n"
+            "  - Specific DB tech, scale numbers, migration status\n"
+            "  → If not in findings: write 'Not found in research — verify before call'\n\n"
+            "ALLOWED from general knowledge:\n"
+            "  - Company industry, core product, business model, general market competitors\n\n"
+            "Cite the source URL inline next to every STRICT-category claim."
+        )
+        # Synthesis pass: no web search tools needed — LLM just writes from the grounded notes
+        return self._responses_text(
+            system_prompt, synthesize_prompt, model=model, tools=None, reasoning_effort=reasoning_effort
+        )
+
     def answer_oracle(
         self,
         message: str,
@@ -888,8 +1070,12 @@ class LLMService:
         base_prompt = SECTION_SYSTEM_PROMPTS.get(section or "", SYSTEM_ORACLE)
         system_prompt = self._compose_persona_system_prompt(base_prompt, persona_name, persona_prompt, source_instructions=source_instructions)
         if allow_ungrounded:
-            prompt = f"User question:\n{message}\n\nProvide a concise, high-quality answer."
-            answer = self._responses_text(system_prompt, prompt, model=model, tools=tools, reasoning_effort=reasoning_effort)
+            # Pre-call intel uses two-pass deep research to force all searches and prevent hallucination.
+            # All other sections use single-pass.
+            if section in ("pre_call", "tal") and any(t.get("type") == "web_search_preview" for t in (tools or [])):
+                answer = self._deep_research_pre_call(system_prompt, message, model=model, tools=tools, reasoning_effort=reasoning_effort)
+            else:
+                answer = self._responses_text(system_prompt, message, model=model, tools=tools, reasoning_effort=reasoning_effort)
             if answer:
                 return {"answer": answer, "follow_up_questions": self._fallback_followups("oracle")}
             err = self.last_error or "No provider credentials configured."

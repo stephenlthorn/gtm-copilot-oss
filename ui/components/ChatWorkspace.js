@@ -41,6 +41,7 @@ export default function ChatWorkspace() {
   const [populateSignal, setPopulateSignal] = useState(0); // increment to trigger populate
   const [ragEnabled, setRagEnabled] = useState(true);
   const [webSearchEnabled, setWebSearchEnabled] = useState(true);
+  const [tidbExpert, setTidbExpert] = useState(false);
   const [topK, setTopK] = useState(8);
   const [chatModel, setChatModel] = useState('gpt-5.4');
 
@@ -162,6 +163,13 @@ export default function ChatWorkspace() {
           >
             Web {webSearchEnabled ? 'On' : 'Off'}
           </button>
+          <button
+            onClick={() => setTidbExpert(v => !v)}
+            title="Inject TiDB expert context into every response"
+            style={{ fontSize: '0.72rem', padding: '0.25rem 0.55rem', borderRadius: '4px', border: '1px solid var(--border)', cursor: 'pointer', background: tidbExpert ? '#7c3aed' : 'transparent', color: tidbExpert ? '#fff' : 'var(--text-2)' }}
+          >
+            TiDB Expert {tidbExpert ? 'On' : 'Off'}
+          </button>
           <Link href="/settings" style={{ fontSize: '0.78rem', color: 'var(--text-2)', padding: '0.3rem 0.6rem', borderRadius: '4px', textDecoration: 'none', border: '1px solid var(--border)' }}>⚙ Settings</Link>
           <button onClick={handleLogout} disabled={loggingOut} style={{ fontSize: '0.78rem', color: 'var(--text-2)', padding: '0.3rem 0.6rem', borderRadius: '4px', background: 'transparent', border: '1px solid var(--border)', cursor: 'pointer' }}>
             {loggingOut ? 'Signing out…' : '→ Sign out'}
@@ -207,7 +215,7 @@ export default function ChatWorkspace() {
       </div>
 
       {/* RIGHT */}
-      <PersistentChat draft={chatDraft} populateSignal={populateSignal} ragEnabled={ragEnabled} webSearchEnabled={webSearchEnabled} topK={topK} model={chatModel} section={section} />
+      <PersistentChat draft={chatDraft} populateSignal={populateSignal} ragEnabled={ragEnabled} webSearchEnabled={webSearchEnabled} tidbExpert={tidbExpert} topK={topK} model={chatModel} section={section} />
     </div>
     </div>
   );
