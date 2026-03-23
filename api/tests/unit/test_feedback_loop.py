@@ -67,20 +67,63 @@ def test_feedback_read_failure_category_nullable():
 
 
 def test_invalid_failure_category_slug_dropped_to_none():
-    """Invalid slug must be silently dropped to None in create_feedback."""
-    from app.api.routes.feedback import VALID_CATEGORIES
-    invalid_slug = "not_a_valid_category"
-    category = invalid_slug if invalid_slug in VALID_CATEGORIES else None
-    assert category is None
+    """Invalid slug must be silently dropped to None — route must pass None to AIFeedback."""
+    from app.api.routes.feedback import create_feedback
+    from app.schemas.feedback import FeedbackCreate
+
+    body = FeedbackCreate(
+        mode="oracle",
+        query_text="test query",
+        original_response="test response",
+        rating="negative",
+        failure_category="not_a_valid_category",
+    )
+    db = MagicMock()
+
+    with patch("app.api.routes.feedback.AIFeedback") as mock_ai_feedback, \
+         patch("app.api.routes.feedback.EmbeddingService") as mock_embedding_svc:
+        mock_embedding_svc.return_value.embed.return_value = None
+        mock_instance = MagicMock()
+        mock_ai_feedback.return_value = mock_instance
+
+        create_feedback(body=body, x_user_email="user@example.com", db=db)
+
+        _, kwargs = mock_ai_feedback.call_args
+        assert kwargs["failure_category"] is None, (
+            "Invalid failure_category slug must be dropped to None before passing to AIFeedback"
+        )
 
 
 def test_valid_failure_category_slug_persists():
-    """Valid slug must pass through unchanged."""
-    from app.api.routes.feedback import VALID_CATEGORIES
-    for slug in ["wrong_info", "missing_info", "wrong_context",
-                 "outdated_info", "too_generic", "wrong_tone", "incomplete"]:
-        result = slug if slug in VALID_CATEGORIES else None
-        assert result == slug, f"Expected {slug} to be valid"
+    """Valid slug must pass through unchanged to AIFeedback."""
+    from app.api.routes.feedback import create_feedback
+    from app.schemas.feedback import FeedbackCreate
+
+    valid_slugs = ["wrong_info", "missing_info", "wrong_context",
+                   "outdated_info", "too_generic", "wrong_tone", "incomplete"]
+
+    for slug in valid_slugs:
+        body = FeedbackCreate(
+            mode="oracle",
+            query_text="test query",
+            original_response="test response",
+            rating="negative",
+            failure_category=slug,
+        )
+        db = MagicMock()
+
+        with patch("app.api.routes.feedback.AIFeedback") as mock_ai_feedback, \
+             patch("app.api.routes.feedback.EmbeddingService") as mock_embedding_svc:
+            mock_embedding_svc.return_value.embed.return_value = None
+            mock_instance = MagicMock()
+            mock_ai_feedback.return_value = mock_instance
+
+            create_feedback(body=body, x_user_email="user@example.com", db=db)
+
+            _, kwargs = mock_ai_feedback.call_args
+            assert kwargs["failure_category"] == slug, (
+                f"Valid slug '{slug}' must be passed unchanged to AIFeedback"
+            )
 
 
 def test_aifeedback_model_has_failure_category_column():
