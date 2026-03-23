@@ -76,6 +76,17 @@ class ChorusSyncService:
                     self._create_artifact(call_data, transcript)
                     artifacts += 1
 
+                    # Trigger MEDDPICC delta pipeline
+                    if transcript:
+                        try:
+                            from app.services.account_memory import AccountMemoryService
+                            from app.services.llm import LLMService
+                            svc = AccountMemoryService(self.db)
+                            llm = LLMService()
+                            svc.run_delta_pipeline(row, transcript, llm)
+                        except Exception as exc:
+                            logger.warning("Account memory delta pipeline failed for %s: %s", call_data.call_id, exc)
+
                 self.db.flush()
             except Exception as exc:
                 logger.exception("Failed to sync call %s", call_data.call_id)
@@ -253,6 +264,17 @@ class ChorusSyncService:
                     if transcript:
                         indexed += 1
                     self._create_artifact(call_data, transcript)
+
+                    # Trigger MEDDPICC delta pipeline
+                    if transcript:
+                        try:
+                            from app.services.account_memory import AccountMemoryService
+                            from app.services.llm import LLMService
+                            svc = AccountMemoryService(self.db)
+                            llm = LLMService()
+                            svc.run_delta_pipeline(row, transcript, llm)
+                        except Exception as exc:
+                            logger.warning("Account memory delta pipeline failed for %s: %s", call_data.call_id, exc)
 
                 self.db.flush()
             except Exception as exc:
