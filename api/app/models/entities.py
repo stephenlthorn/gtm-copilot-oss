@@ -10,6 +10,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.constants import DEFAULT_EMBEDDING_DIMENSIONS
 from app.db.base import Base
+from app.models.prompt_models import PromptRegistry, PromptVersion, PromptUserOverride  # noqa: F401
 from app.db.tidb_vector import TiDBVector
 
 UUID_TYPE = Uuid(as_uuid=True)
@@ -409,4 +410,3 @@ class ChatMessage(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
-from app.models.prompt_models import PromptRegistry, PromptVersion, PromptUserOverride  # noqa: F401, E402

@@ -1,4 +1,5 @@
 import pytest
+import sqlalchemy.exc
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 from app.db.base import Base
@@ -81,5 +82,5 @@ def test_prompt_user_override_unique_constraint(db):
         content="another custom",
     )
     db.add(override2)
-    with pytest.raises(Exception):  # IntegrityError from unique constraint
+    with pytest.raises(sqlalchemy.exc.IntegrityError):
         db.commit()
