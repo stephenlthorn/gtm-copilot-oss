@@ -493,3 +493,88 @@ def test_apply_filters_account_still_uses_doc_tags_for_non_chorus():
     doc.tags = {"account": "acme corp"}
     chunk = _make_chunk({})
     assert HybridRetriever._apply_filters(doc, {"account": ["Acme Corp"]}, chunk) is True
+
+
+# ---------------------------------------------------------------------------
+# Task 7: Integration test — end-to-end ingest and retrieve
+# ---------------------------------------------------------------------------
+
+@pytest.fixture
+def sqlite_db():
+    """Spin up a fresh in-memory SQLite session with all tables created."""
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+    from app.db.base import Base
+    import app.models.entities  # noqa: F401 — registers all ORM models with Base
+    engine = create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    Session = sessionmaker(bind=engine)
+    db = Session()
+    yield db
+    db.close()
+    engine.dispose()
+
+
+def test_integration_ingest_and_retrieve_by_call_outcome(sqlite_db):
+    """Ingest a call with call_outcome='won'; search with outcome filter returns it."""
+    from app.ingest.transcript_ingestor import TranscriptIngestor
+    from app.retrieval.service import HybridRetriever
+    from unittest.mock import MagicMock, patch
+
+    # Patch EmbeddingService so it does not make real API calls
+    mock_embed_val = [0.1] * 1536
+    with patch("app.ingest.transcript_ingestor.EmbeddingService") as MockEmbed, \
+         patch("app.retrieval.service.EmbeddingService") as MockRetrieveEmbed:
+        MockEmbed.return_value.batch_embed.return_value = [mock_embed_val]
+        MockRetrieveEmbed.return_value.embed.return_value = mock_embed_val
+        MockRetrieveEmbed.return_value.client = MagicMock()
+
+        ingestor = TranscriptIngestor(sqlite_db)
+        payload = {
+            "chorus_call_id": "call-won-001",
+            "date": "2026-03-01",
+            "account": "Acme Corp",
+            "rep_email": "alice@corp.com",
+            "call_outcome": "won",
+            "stage": "Discovery",
+            "turns": [
+                {"speaker_id": "S1", "start_time_sec": 0, "end_time_sec": 60,
+                 "text": "Let us discuss the architecture of your system today."},
+            ],
+            "speaker_map": {"S1": {"name": "AE", "role": "ae", "email": "alice@corp.com"}},
+            "meeting_summary": None,
+            "action_items": [],
+        }
+        normalized = ingestor._normalize(payload)
+        call = ingestor._upsert_call(normalized)
+        doc = ingestor._upsert_document(normalized, call)
+        ingestor._replace_chunks(doc, normalized, call)
+        sqlite_db.commit()
+
+        retriever = HybridRetriever(sqlite_db)
+
+        # Filter by won outcome — must return chunks
+        hits_won = retriever.search(
+            "architecture",
+            filters={"source_type": ["chorus"], "call_outcome": ["won"]},
+        )
+        assert len(hits_won) >= 1
+
+        # Filter by lost outcome — must return nothing
+        hits_lost = retriever.search(
+            "architecture",
+            filters={"source_type": ["chorus"], "call_outcome": ["lost"]},
+        )
+        assert len(hits_lost) == 0
+
+        # Filter by rep email — must return chunks for alice
+        hits_rep = retriever.search(
+            "architecture",
+            filters={"source_type": ["chorus"], "rep_email": "alice@corp.com"},
+        )
+        assert len(hits_rep) >= 1
+
+        # KBChunk.text must not contain the account/stage prefix
+        import re
+        for hit in hits_won:
+            assert not re.match(r"^\S.*\|.*rep:", hit.text)
