@@ -4,8 +4,9 @@ import enum
 import uuid
 from datetime import date, datetime
 
+import sqlalchemy as sa
 from pgvector.sqlalchemy import Vector
-from sqlalchemy import JSON, Date, DateTime, Enum, ForeignKey, Index, Integer, String, Text, UniqueConstraint, Uuid, func
+from sqlalchemy import Boolean, JSON, Date, DateTime, Enum, ForeignKey, Index, Integer, String, Text, UniqueConstraint, Uuid, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.constants import DEFAULT_EMBEDDING_DIMENSIONS
@@ -380,6 +381,11 @@ class UserPreference(Base):
     llm_model: Mapped[str | None] = mapped_column(String(64))
     reasoning_effort: Mapped[str | None] = mapped_column(String(16))
     retrieval_top_k: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    intel_brief_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default=sa.true())
+    intel_brief_summarizer_model: Mapped[str | None] = mapped_column(String(64), nullable=True, server_default="gpt-5.4-mini")
+    intel_brief_summarizer_effort: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    intel_brief_synthesis_model: Mapped[str | None] = mapped_column(String(64), nullable=True, server_default="gpt-5.4")
+    intel_brief_synthesis_effort: Mapped[str] = mapped_column(String(16), nullable=False, server_default="medium")
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
     )

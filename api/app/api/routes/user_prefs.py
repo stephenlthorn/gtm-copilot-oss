@@ -38,6 +38,16 @@ def upsert_user_preferences(
         pref.reasoning_effort = body.reasoning_effort or None
     if body.retrieval_top_k is not None:
         pref.retrieval_top_k = body.retrieval_top_k
+    if body.intel_brief_enabled is not None:
+        pref.intel_brief_enabled = body.intel_brief_enabled
+    if body.intel_brief_summarizer_model is not None:
+        pref.intel_brief_summarizer_model = body.intel_brief_summarizer_model or None
+    if body.intel_brief_summarizer_effort is not None:
+        pref.intel_brief_summarizer_effort = body.intel_brief_summarizer_effort or None
+    if body.intel_brief_synthesis_model is not None:
+        pref.intel_brief_synthesis_model = body.intel_brief_synthesis_model or None
+    if body.intel_brief_synthesis_effort is not None:
+        pref.intel_brief_synthesis_effort = body.intel_brief_synthesis_effort
     db.commit()
     db.refresh(pref)
     return pref
