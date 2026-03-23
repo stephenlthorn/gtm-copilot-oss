@@ -182,7 +182,7 @@ class TranscriptIngestor:
         action_items = normalized.get("action_items") or []
 
         # Assemble call-level metadata to merge into each chunk's metadata_json
-        call_metadata: dict = {
+        call_metadata: dict[str, str] = {
             "rep_email": call.rep_email,
             "account": call.account,
             "date": call.date.isoformat(),

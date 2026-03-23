@@ -243,6 +243,7 @@ def _make_ingestor_with_mock_db():
     ingestor.db = MagicMock()
     ingestor.embedder = MagicMock()
     ingestor.embedder.batch_embed.return_value = [[0.1] * 1536]
+    ingestor.generator = MagicMock()
     return ingestor
 
 
