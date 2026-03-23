@@ -6,6 +6,7 @@ import KnowledgeSourcesPanel from '../../../components/KnowledgeSourcesPanel';
 import CallsPanel from '../../../components/CallsPanel';
 import SourceProfilesPanel from '../../../components/SourceProfilesPanel';
 import PromptStudio from '../../../components/PromptStudio';
+import IntelBriefSettingsPanel from '../../../components/IntelBriefSettingsPanel';
 
 const NAV = [
   ['#account', 'Account'],
@@ -201,6 +202,17 @@ export default async function SettingsPage() {
 - Aurora: TiDB scales writes horizontally (Aurora scales reads only). TiDB avoids vendor lock-in.
 - AlloyDB: TiDB is open-source with no cloud vendor dependency. True horizontal write scaling.`}</pre>
             </details>
+          </div>
+        </div>
+
+        {/* Intelligence Brief panel */}
+        <div className="panel" style={{ marginTop: '0.75rem' }}>
+          <div className="panel-header">
+            <span className="panel-title">Intelligence Brief</span>
+            <span className="tag">Pre-Call Intel</span>
+          </div>
+          <div className="panel-body">
+            <IntelBriefSettingsPanel />
           </div>
         </div>
 
