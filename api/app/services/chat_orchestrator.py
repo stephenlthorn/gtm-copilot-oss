@@ -436,6 +436,47 @@ class ChatOrchestrator:
         if tidb_expert:
             persona_prompt = (persona_prompt or "") + "\n\n" + TIDB_EXPERT_CONTEXT
 
+        # Inject account deal memory for post-call and follow-up sections
+        if section in ("post_call", "follow_up"):
+            try:
+                from app.services.account_memory import canonicalize_account
+                from app.models import AccountDealMemory
+                import json as _json
+
+                # Resolve account name from mode_filters or call context
+                account_name = None
+                if mode_filters and mode_filters.get("account"):
+                    acct_val = mode_filters["account"]
+                    account_name = acct_val[0] if isinstance(acct_val, list) else acct_val
+
+                if account_name and self.db is not None:
+                    memory = self.db.get(AccountDealMemory, canonicalize_account(account_name))
+                    if memory and (memory.meddpicc or memory.summary):
+                        memory_context = (
+                            f"\n\n=== ACCOUNT HISTORY: {account_name} ===\n"
+                            f"Deal stage: {memory.deal_stage or 'Unknown'} | "
+                            f"Status: {memory.status} | "
+                            f"Calls to date: {memory.call_count}\n"
+                        )
+                        if memory.summary:
+                            memory_context += f"Summary: {memory.summary}\n"
+                        if memory.meddpicc:
+                            scored = {k: v for k, v in memory.meddpicc.items() if v.get("score", 0) > 0}
+                            if scored:
+                                memory_context += f"MEDDPICC (current state):\n{_json.dumps(scored, indent=2)}\n"
+                        if memory.key_contacts:
+                            memory_context += f"Key contacts: {_json.dumps(memory.key_contacts)}\n"
+                        if memory.tech_stack:
+                            confirmed = memory.tech_stack.get("confirmed", [])
+                            likely = memory.tech_stack.get("likely", [])
+                            if confirmed or likely:
+                                memory_context += f"Tech stack — confirmed: {confirmed}, likely: {likely}\n"
+                        memory_context += "=== END ACCOUNT HISTORY ===\n"
+                        persona_prompt = (persona_prompt or "") + memory_context
+            except Exception as exc:
+                import logging
+                logging.getLogger(__name__).warning("Failed to inject account memory: %s", exc)
+
         citations = [
             {
                 "title": hit.title,
