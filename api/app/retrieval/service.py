@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import math
+import os
 import re
 from collections import Counter
 from dataclasses import asdict
@@ -408,7 +409,39 @@ class HybridRetriever:
                 continue
             scored.append((score, chunk, doc))
 
+        # Apply ChunkQualitySignal nudge for chunks with ≥10 signals
+        if scored:
+            _chunk_ids = [str(chunk.id) for _, chunk, _ in scored]
+            from app.models.feedback import ChunkQualitySignal
+            from sqlalchemy import func as _func, case
+            quality_rows = self.db.execute(
+                select(
+                    ChunkQualitySignal.chunk_id,
+                    _func.sum(case((ChunkQualitySignal.signal == "cited_positive", 1), else_=0)).label("pos"),
+                    _func.sum(case((ChunkQualitySignal.signal == "cited_negative", 1), else_=0)).label("neg"),
+                )
+                .where(ChunkQualitySignal.chunk_id.in_(_chunk_ids))
+                .group_by(ChunkQualitySignal.chunk_id)
+            ).all()
+            quality_map: dict[str, tuple[int, int]] = {
+                str(row.chunk_id): (int(row.pos), int(row.neg)) for row in quality_rows
+                if int(row.pos) + int(row.neg) >= 10
+            }
+            if quality_map:
+                new_scored = []
+                for score, chunk, doc in scored:
+                    cid = str(chunk.id)
+                    if cid in quality_map:
+                        pos, neg = quality_map[cid]
+                        positive_rate = pos / (pos + neg)
+                        score = max(0.0, min(1.0, score + 0.05 * (positive_rate - 0.5)))
+                    new_scored.append((score, chunk, doc))
+                scored = new_scored
+
         scored.sort(key=lambda item: item[0], reverse=True)
+        _min_score = float(os.getenv("RAG_MIN_SCORE", "0.12"))
+        # Call-focused primary chunks always score ≥ 0.9999 and are never filtered.
+        scored = [(s, c, d) for s, c, d in scored if s >= _min_score]
         # If call-focused primary doc is set, return all scored chunks (no top_k cap)
         # so that all primary call chunks reach the LLM.
         if call_focused_primary_doc_id:
