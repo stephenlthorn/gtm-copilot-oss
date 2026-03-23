@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from datetime import date, timedelta
+import os
+import uuid
+from datetime import date, datetime, timedelta, timezone
 import logging
 import re
 
@@ -18,6 +20,7 @@ from app.ingest.drive_ingestor import DriveIngestor
 from app.ingest.feishu_ingestor import FeishuIngestor
 from app.ingest.transcript_ingestor import TranscriptIngestor
 from app.models import AuditLog, AuditStatus, KBConfig
+from app.models.feedback import AIFeedback, PromptSuggestion
 from app.prompts.personas import normalize_persona
 from app.schemas.kb_config import KBConfigRead, KBConfigUpdate
 from app.services.audit import write_audit_log
@@ -645,6 +648,52 @@ def sync_feishu(request: Request, db: Session = Depends(db_session)) -> dict:
         status=AuditStatus.OK,
     )
     return {"status": status_value, "message": message, **result}
+
+
+@router.get("/feedback-patterns")
+def get_feedback_patterns(
+    days: int = Query(default=7, ge=1, le=90),
+    db: Session = Depends(db_session),
+):
+    """Aggregate negative feedback by (mode, failure_category) for the last N days."""
+    cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+
+    rows = db.execute(
+        select(
+            AIFeedback.mode,
+            AIFeedback.failure_category,
+            func.count(AIFeedback.id).label("count"),
+            func.max(AIFeedback.created_at).label("last_seen"),
+        )
+        .where(AIFeedback.rating == "negative")
+        .where(AIFeedback.failure_category.isnot(None))
+        .where(AIFeedback.created_at >= cutoff)
+        .group_by(AIFeedback.mode, AIFeedback.failure_category)
+        .order_by(func.count(AIFeedback.id).desc())
+        .limit(20)
+    ).all()
+
+    result = []
+    for row in rows:
+        examples_rows = db.execute(
+            select(AIFeedback.query_text)
+            .where(AIFeedback.rating == "negative")
+            .where(AIFeedback.failure_category == row.failure_category)
+            .where(AIFeedback.mode == row.mode)
+            .where(AIFeedback.created_at >= cutoff)
+            .order_by(AIFeedback.created_at.desc())
+            .limit(2)
+        ).scalars().all()
+
+        result.append({
+            "mode": row.mode,
+            "failure_category": row.failure_category,
+            "count": row.count,
+            "last_seen": row.last_seen.isoformat() if row.last_seen else None,
+            "examples": list(examples_rows),
+        })
+
+    return result
 
 
 @router.get("/chunk-quality")

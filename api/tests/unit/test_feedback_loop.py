@@ -191,3 +191,70 @@ def test_migration_003_upgrade_creates_prompt_suggestions_table():
     migration.downgrade()
     mock_op.drop_table.assert_called_once_with("prompt_suggestions")
     mock_op.drop_column.assert_called_once_with("ai_feedback", "failure_category")
+
+
+# ---------------------------------------------------------------------------
+# Task 3: GET /admin/feedback-patterns
+# ---------------------------------------------------------------------------
+
+def _make_db_feedback_row(mode="oracle", failure_category="too_generic",
+                           rating="negative", query_text="test query",
+                           days_ago=1):
+    """Helper: create a MagicMock row mimicking AIFeedback query result."""
+    import datetime
+    row = MagicMock()
+    row.mode = mode
+    row.failure_category = failure_category
+    row.rating = rating
+    row.query_text = query_text
+    row.count = 3
+    row.last_seen = datetime.datetime.now(datetime.timezone.utc)
+    return row
+
+
+def test_feedback_patterns_endpoint_exists():
+    """GET /admin/feedback-patterns route must be registered."""
+    from app.api.routes.admin import router
+    route_paths = [r.path for r in router.routes]
+    assert "/feedback-patterns" in route_paths
+
+
+def test_feedback_patterns_groups_by_mode_and_category():
+    """feedback-patterns must group negative feedback by (mode, failure_category)."""
+    from app.api.routes.admin import get_feedback_patterns
+    import datetime
+
+    mock_db = MagicMock()
+
+    agg_row = MagicMock()
+    agg_row.mode = "oracle"
+    agg_row.failure_category = "too_generic"
+    agg_row.count = 5
+    agg_row.last_seen = datetime.datetime(2026, 3, 23, 10, 0, 0, tzinfo=datetime.timezone.utc)
+
+    examples_scalars = MagicMock()
+    examples_scalars.all.return_value = ["What should I say?", "Help with Acme"]
+
+    mock_db.execute.side_effect = [
+        MagicMock(all=MagicMock(return_value=[agg_row])),
+        MagicMock(scalars=MagicMock(return_value=examples_scalars)),
+    ]
+
+    result = get_feedback_patterns(days=7, db=mock_db)
+
+    assert len(result) == 1
+    assert result[0]["mode"] == "oracle"
+    assert result[0]["failure_category"] == "too_generic"
+    assert result[0]["count"] == 5
+    assert len(result[0]["examples"]) == 2
+
+
+def test_feedback_patterns_returns_empty_when_no_data():
+    """feedback-patterns must return empty list when no negative feedback exists."""
+    from app.api.routes.admin import get_feedback_patterns
+
+    mock_db = MagicMock()
+    mock_db.execute.return_value = MagicMock(all=MagicMock(return_value=[]))
+
+    result = get_feedback_patterns(days=7, db=mock_db)
+    assert result == []
