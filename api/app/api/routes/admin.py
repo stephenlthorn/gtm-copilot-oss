@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 import uuid
 from datetime import date, datetime, timedelta, timezone
@@ -11,6 +12,8 @@ logger = logging.getLogger(__name__)
 import httpx
 from dateutil.parser import isoparse
 from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request
+from openai import OpenAI
+from pydantic import BaseModel as PydanticBaseModel
 from sqlalchemy import case, func, select
 from sqlalchemy.orm import Session
 
@@ -22,6 +25,13 @@ from app.ingest.transcript_ingestor import TranscriptIngestor
 from app.models import AuditLog, AuditStatus, KBConfig
 from app.models.feedback import AIFeedback, PromptSuggestion
 from app.prompts.personas import normalize_persona
+from app.prompts.templates import (
+    SYSTEM_ORACLE,
+    SYSTEM_CALL_COACH,
+    SYSTEM_REP_EXECUTION,
+    SYSTEM_SE_EXECUTION,
+    SYSTEM_MARKETING_EXECUTION,
+)
 from app.schemas.kb_config import KBConfigRead, KBConfigUpdate
 from app.services.audit import write_audit_log
 from app.services.google_drive_credentials import GoogleDriveCredentialService
@@ -652,6 +662,20 @@ def sync_feishu(request: Request, db: Session = Depends(db_session)) -> dict:
 
 SUGGESTION_THRESHOLD_DEFAULT = 3
 
+BUILTIN_PROMPT_MAP = {
+    "oracle": SYSTEM_ORACLE,
+    "call_assistant": SYSTEM_CALL_COACH,
+    "rep": SYSTEM_REP_EXECUTION,
+    "se": SYSTEM_SE_EXECUTION,
+    "marketing": SYSTEM_MARKETING_EXECUTION,
+}
+
+
+class FeedbackSuggestionRequest(PydanticBaseModel):
+    mode: str
+    failure_category: str
+    prompt_type: str  # "persona" | "builtin"
+
 
 @router.get("/feedback-alerts")
 def get_feedback_alerts(db: Session = Depends(db_session)):
@@ -788,3 +812,102 @@ def chunk_quality_stats(
         }
         for row in rows
     ]
+
+
+@router.post("/feedback-suggestions")
+def create_feedback_suggestion(
+    body: FeedbackSuggestionRequest,
+    request: Request,
+    db: Session = Depends(db_session),
+):
+    """Generate a GPT-4 prompt suggestion for a (mode, failure_category) pattern."""
+    # 1. Load 5 most recent failing queries
+    examples = db.execute(
+        select(AIFeedback.query_text, AIFeedback.original_response)
+        .where(AIFeedback.rating == "negative")
+        .where(AIFeedback.failure_category == body.failure_category)
+        .where(AIFeedback.mode == body.mode)
+        .order_by(AIFeedback.created_at.desc())
+        .limit(5)
+    ).all()
+
+    if not examples:
+        raise HTTPException(status_code=404, detail="No failures found for this mode/category")
+
+    # 2. Load current prompt
+    if body.prompt_type == "persona":
+        kb_config = db.execute(select(KBConfig)).scalar_one_or_none()
+        current_prompt = (kb_config.persona_prompt if kb_config else None) or ""
+        if not current_prompt:
+            raise HTTPException(status_code=404, detail="No persona prompt configured")
+    elif body.prompt_type == "builtin":
+        current_prompt = BUILTIN_PROMPT_MAP.get(body.mode)
+        if not current_prompt:
+            raise HTTPException(status_code=400, detail=f"No built-in prompt for mode: {body.mode}")
+    else:
+        raise HTTPException(status_code=422, detail="prompt_type must be 'persona' or 'builtin'")
+
+    # 3. Build GPT-4o prompt
+    formatted_examples = "\n\n".join(
+        f"Query: {ex.query_text}\nResponse: {ex.original_response}"
+        for ex in examples
+    )
+    system = "You are a prompt engineering assistant. Analyze failure patterns and suggest precise edits to improve an AI system prompt."
+    user = f"""Mode: {body.mode}
+Failure category: {body.failure_category}
+Threshold: {len(examples)} users flagged this as '{body.failure_category}'
+
+Recent failing queries and responses:
+{formatted_examples}
+
+Current {body.prompt_type} prompt:
+{current_prompt}
+
+Suggest a specific edit to reduce '{body.failure_category}' failures. Return JSON: {{"reasoning": "2-3 sentence explanation", "suggested_prompt": "full revised prompt text"}}"""
+
+    # 4. Call GPT-4o
+    settings = get_settings()
+    token = request.headers.get("X-OpenAI-Token") or settings.openai_api_key
+    try:
+        client = OpenAI(api_key=token)
+        response = client.chat.completions.create(
+            model="gpt-4o",
+            messages=[
+                {"role": "system", "content": system},
+                {"role": "user", "content": user},
+            ],
+            response_format={"type": "json_object"},
+            temperature=0.3,
+        )
+        raw = response.choices[0].message.content
+        parsed = json.loads(raw)
+        reasoning = parsed["reasoning"]
+        suggested_prompt = parsed["suggested_prompt"]
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"GPT-4 call failed: {exc}")
+
+    # 5. Save PromptSuggestion row
+    suggestion = PromptSuggestion(
+        mode=body.mode,
+        failure_category=body.failure_category,
+        prompt_type=body.prompt_type,
+        reasoning=reasoning,
+        current_prompt=current_prompt,
+        suggested_prompt=suggested_prompt,
+    )
+    db.add(suggestion)
+    db.commit()
+    db.refresh(suggestion)
+
+    return {
+        "id": str(suggestion.id),
+        "mode": suggestion.mode,
+        "failure_category": suggestion.failure_category,
+        "prompt_type": suggestion.prompt_type,
+        "reasoning": suggestion.reasoning,
+        "current_prompt": suggestion.current_prompt,
+        "suggested_prompt": suggestion.suggested_prompt,
+        "applied_at": suggestion.applied_at,
+        "dismissed_at": suggestion.dismissed_at,
+        "created_at": suggestion.created_at.isoformat(),
+    }

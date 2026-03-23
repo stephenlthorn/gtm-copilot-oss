@@ -336,3 +336,125 @@ def test_feedback_alerts_resets_window_from_last_suggestion():
 
     assert len(result) == 1
     assert result[0]["mode"] == "rep"
+
+
+# ---------------------------------------------------------------------------
+# Task 5: POST /admin/feedback-suggestions
+# ---------------------------------------------------------------------------
+
+def test_feedback_suggestions_endpoint_exists():
+    """POST /admin/feedback-suggestions route must be registered."""
+    from app.api.routes.admin import router
+    route_paths = [r.path for r in router.routes]
+    assert "/feedback-suggestions" in route_paths
+
+
+def test_feedback_suggestions_calls_gpt4_and_saves_row():
+    """create_feedback_suggestion must call OpenAI and save PromptSuggestion to DB."""
+    import json
+    from app.api.routes.admin import create_feedback_suggestion, FeedbackSuggestionRequest
+
+    mock_db = MagicMock()
+
+    ex1 = MagicMock()
+    ex1.query_text = "What should I say on the Acme call?"
+    ex1.original_response = "Here is some generic advice..."
+    ex2 = MagicMock()
+    ex2.query_text = "How do I position against Snowflake?"
+    ex2.original_response = "You should consider..."
+
+    mock_kb = MagicMock()
+    mock_kb.persona_prompt = "You are a helpful sales assistant."
+
+    mock_db.execute.side_effect = [
+        MagicMock(all=MagicMock(return_value=[ex1, ex2])),
+        MagicMock(scalar_one_or_none=MagicMock(return_value=mock_kb)),
+    ]
+
+    gpt_response_content = json.dumps({
+        "reasoning": "The prompt lacks specificity about account context.",
+        "suggested_prompt": "You are a highly specific sales assistant...",
+    })
+
+    mock_request = MagicMock()
+    mock_request.headers.get.return_value = "test-token"
+
+    body = FeedbackSuggestionRequest(
+        mode="oracle",
+        failure_category="too_generic",
+        prompt_type="persona",
+    )
+
+    mock_completion = MagicMock()
+    mock_completion.choices[0].message.content = gpt_response_content
+
+    with patch("app.api.routes.admin.OpenAI") as mock_openai_cls:
+        mock_client = MagicMock()
+        mock_openai_cls.return_value = mock_client
+        mock_client.chat.completions.create.return_value = mock_completion
+
+        added_objects = []
+        mock_db.add.side_effect = lambda obj: added_objects.append(obj)
+
+        def mock_refresh(obj):
+            obj.id = uuid.uuid4()
+            import datetime
+            obj.created_at = datetime.datetime.now(datetime.timezone.utc)
+
+        mock_db.refresh.side_effect = mock_refresh
+
+        result = create_feedback_suggestion(body=body, request=mock_request, db=mock_db)
+
+    mock_client.chat.completions.create.assert_called_once()
+    call_kwargs = mock_client.chat.completions.create.call_args[1]
+    assert call_kwargs["model"] == "gpt-4o"
+
+    mock_db.add.assert_called_once()
+    mock_db.commit.assert_called()
+
+    added = added_objects[0]
+    assert added.mode == "oracle"
+    assert added.failure_category == "too_generic"
+    assert added.prompt_type == "persona"
+    assert added.reasoning == "The prompt lacks specificity about account context."
+
+
+def test_feedback_suggestions_returns_502_on_openai_failure():
+    """create_feedback_suggestion must return 502 when GPT-4 call raises."""
+    from fastapi import HTTPException
+    from app.api.routes.admin import create_feedback_suggestion, FeedbackSuggestionRequest
+
+    mock_db = MagicMock()
+
+    ex1 = MagicMock()
+    ex1.query_text = "test"
+    ex1.original_response = "test"
+
+    mock_kb = MagicMock()
+    mock_kb.persona_prompt = "You are a sales assistant."
+
+    mock_db.execute.side_effect = [
+        MagicMock(all=MagicMock(return_value=[ex1])),
+        MagicMock(scalar_one_or_none=MagicMock(return_value=mock_kb)),
+    ]
+
+    mock_request = MagicMock()
+    mock_request.headers.get.return_value = "test-token"
+
+    body = FeedbackSuggestionRequest(
+        mode="oracle",
+        failure_category="too_generic",
+        prompt_type="persona",
+    )
+
+    with patch("app.api.routes.admin.OpenAI") as mock_openai_cls:
+        mock_client = MagicMock()
+        mock_openai_cls.return_value = mock_client
+        mock_client.chat.completions.create.side_effect = Exception("API error")
+
+        import pytest
+        with pytest.raises(HTTPException) as exc_info:
+            create_feedback_suggestion(body=body, request=mock_request, db=mock_db)
+
+    assert exc_info.value.status_code == 502
+    mock_db.commit.assert_not_called()
