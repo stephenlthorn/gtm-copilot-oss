@@ -362,6 +362,23 @@ class ChatOrchestrator:
             if getattr(user_pref, "retrieval_top_k", None):
                 resolved_top_k = user_pref.retrieval_top_k
 
+        intel_brief_enabled: bool = True
+        intel_brief_summarizer_model: str = "gpt-5.4-mini"
+        intel_brief_summarizer_effort: str | None = None
+        intel_brief_synthesis_model: str = "gpt-5.4"
+        intel_brief_synthesis_effort: str = "medium"
+        if user_pref:
+            if getattr(user_pref, "intel_brief_enabled", None) is not None:
+                intel_brief_enabled = user_pref.intel_brief_enabled
+            if getattr(user_pref, "intel_brief_summarizer_model", None):
+                intel_brief_summarizer_model = user_pref.intel_brief_summarizer_model
+            if getattr(user_pref, "intel_brief_summarizer_effort", None):
+                intel_brief_summarizer_effort = user_pref.intel_brief_summarizer_effort
+            if getattr(user_pref, "intel_brief_synthesis_model", None):
+                intel_brief_synthesis_model = user_pref.intel_brief_synthesis_model
+            if getattr(user_pref, "intel_brief_synthesis_effort", None):
+                intel_brief_synthesis_effort = user_pref.intel_brief_synthesis_effort
+
         mode_filters = dict(filters or {})
         mode_filters["viewer_email"] = (user or "").strip().lower()
         requested_sources = [str(s).lower() for s in (mode_filters.get("source_type") or [])]
@@ -458,6 +475,11 @@ class ChatOrchestrator:
             reasoning_effort=resolved_reasoning,
             source_instructions=source_instructions or None,
             section=section,
+            intel_brief_enabled=intel_brief_enabled,
+            intel_brief_summarizer_model=intel_brief_summarizer_model,
+            intel_brief_summarizer_effort=intel_brief_summarizer_effort,
+            intel_brief_synthesis_model=intel_brief_synthesis_model,
+            intel_brief_synthesis_effort=intel_brief_synthesis_effort,
         )
         data["citations"] = citations
         return data, self.retriever.retrieval_payload(hits, resolved_top_k)

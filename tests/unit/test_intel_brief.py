@@ -105,3 +105,96 @@ def test_summarize_query_results_all_fail():
     assert results[0][1] == "snippet A"
     assert results[1][1] == "snippet B"
     assert results[2][1] == "snippet C"
+
+
+def test_deep_research_uses_summaries_when_enabled():
+    """When intel_brief_enabled=True, synthesis uses summary paragraphs not raw snippets."""
+    from app.services.llm import LLMService
+
+    svc = LLMService.__new__(LLMService)
+    svc.logger = MagicMock()
+
+    svc._firecrawl_search = MagicMock(return_value=[
+        {"url": "https://example.com", "title": "Title", "snippet": "raw snippet content"}
+    ])
+    svc._extract_company_contact = MagicMock(return_value=("Acme Corp", "Jane Doe"))
+
+    svc._summarize_query_results = MagicMock(return_value=[
+        ("Contact background", "SUMMARY: Jane Doe is a VP Engineering"),
+        ("YugabyteDB competitive signal", "SUMMARY: no YugabyteDB signal found"),
+        ("Other competitive DB moves", "SUMMARY: no other signals"),
+        ("DB migration news", "SUMMARY: recent migration news"),
+        ("Recent financials", "SUMMARY: financials"),
+        ("DB tech stack — Vitess/MySQL", "SUMMARY: uses MySQL"),
+        ("Engineering blog DB posts", "SUMMARY: blog posts"),
+        ("Cloud provider", "SUMMARY: uses AWS"),
+    ])
+
+    synthesis_calls = []
+
+    def fake_responses_text(system, user, model=None, tools=None, reasoning_effort=None):
+        synthesis_calls.append({"model": model, "effort": reasoning_effort, "prompt": user})
+        return "final brief"
+
+    svc._responses_text = fake_responses_text
+
+    result = svc._deep_research_pre_call(
+        system_prompt="system",
+        message="prepare for Jane Doe at Acme",
+        model="gpt-old",
+        tools=None,
+        reasoning_effort="low",
+        intel_brief_enabled=True,
+        intel_brief_summarizer_model="gpt-5.4-mini",
+        intel_brief_summarizer_effort=None,
+        intel_brief_synthesis_model="gpt-5.4",
+        intel_brief_synthesis_effort="medium",
+    )
+
+    assert result == "final brief"
+    assert len(synthesis_calls) == 1
+    assert synthesis_calls[0]["model"] == "gpt-5.4"
+    assert synthesis_calls[0]["effort"] == "medium"
+    assert "SUMMARY:" in synthesis_calls[0]["prompt"]
+    assert "raw snippet content" not in synthesis_calls[0]["prompt"]
+    svc._summarize_query_results.assert_called_once()
+    call_args = svc._summarize_query_results.call_args
+    assert len(call_args[0][0]) == 8
+
+
+def test_deep_research_skips_summaries_when_disabled():
+    """When intel_brief_enabled=False, summarizer is not called, raw snippets used."""
+    from app.services.llm import LLMService
+
+    svc = LLMService.__new__(LLMService)
+    svc.logger = MagicMock()
+    svc._firecrawl_search = MagicMock(return_value=[
+        {"url": "https://example.com", "title": "Title", "snippet": "raw snippet content"}
+    ])
+    svc._extract_company_contact = MagicMock(return_value=("Acme Corp", "Jane Doe"))
+    svc._summarize_query_results = MagicMock()
+
+    synthesis_calls = []
+
+    def fake_responses_text(system, user, model=None, tools=None, reasoning_effort=None):
+        synthesis_calls.append({"model": model, "prompt": user})
+        return "final brief"
+
+    svc._responses_text = fake_responses_text
+
+    result = svc._deep_research_pre_call(
+        system_prompt="system",
+        message="prepare for Jane Doe at Acme",
+        model="gpt-old",
+        tools=None,
+        reasoning_effort="low",
+        intel_brief_enabled=False,
+        intel_brief_summarizer_model="gpt-5.4-mini",
+        intel_brief_summarizer_effort=None,
+        intel_brief_synthesis_model="gpt-5.4",
+        intel_brief_synthesis_effort="medium",
+    )
+
+    assert result == "final brief"
+    svc._summarize_query_results.assert_not_called()
+    assert "raw snippet content" in synthesis_calls[0]["prompt"]

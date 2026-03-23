@@ -974,6 +974,12 @@ class LLMService:
         model: str | None,
         tools: list[dict] | None,
         reasoning_effort: str | None,
+        *,
+        intel_brief_enabled: bool = True,
+        intel_brief_summarizer_model: str = "gpt-5.4-mini",
+        intel_brief_summarizer_effort: str | None = None,
+        intel_brief_synthesis_model: str = "gpt-5.4",
+        intel_brief_synthesis_effort: str = "medium",
     ) -> str | None:
         """Backend-driven deep research: run searches via Firecrawl directly,
         compile findings, pass grounded results to LLM for synthesis only."""
@@ -993,12 +999,15 @@ class LLMService:
         COMPETITORS = ["yugabytedb", "cockroachdb", "planetscale", "google spanner", "alloydb", "aurora dsql"]
         competitive_hits: list[dict] = []
 
+        query_raw_results: list[tuple[str, list[str]]] = []
         research_sections: list[str] = [f"## Research findings for: {contact} at {company}\n"]
         for query, label in queries:
             results = self._firecrawl_search(query, limit=4)
             research_sections.append(f"### {label}\nQuery: `{query}`")
             if results:
+                snippets_for_query: list[str] = []
                 for r in results:
+                    snippets_for_query.append(r["snippet"])
                     research_sections.append(f"- [{r['title']}]({r['url']})\n  {r['snippet']}")
                     # Detect company-specific competitive signal.
                     # Exclude generic docs/reference pages (they match company terms incidentally).
@@ -1014,8 +1023,10 @@ class LLMService:
                             "url": r["url"],
                             "snippet": r["snippet"],
                         })
+                query_raw_results.append((label, snippets_for_query))
             else:
                 research_sections.append("- No results returned")
+                query_raw_results.append((label, []))
 
         # Correct capitalization for known competitors
         COMPETITOR_DISPLAY = {
@@ -1056,6 +1067,21 @@ class LLMService:
             )
             research_sections.insert(1, instruction)
 
+        # Two-stage: replace raw-snippet sections with Mini summaries
+        if intel_brief_enabled:
+            summaries = self._summarize_query_results(
+                query_raw_results,
+                model=intel_brief_summarizer_model,
+                reasoning_effort=intel_brief_summarizer_effort,
+            )
+            summary_body = [f"### {lbl}\n{para}" for lbl, para in summaries]
+            if competitive_hits:
+                # keep header (index 0) + competitive alert (index 1), replace rest
+                research_sections = research_sections[:2] + summary_body
+            else:
+                # keep header (index 0) only, replace rest
+                research_sections = research_sections[:1] + summary_body
+
         research_notes = "\n".join(research_sections)
 
         synthesize_prompt = (
@@ -1081,7 +1107,11 @@ class LLMService:
         )
         # Synthesis pass: no web search tools needed — LLM just writes from the grounded notes
         return self._responses_text(
-            system_prompt, synthesize_prompt, model=model, tools=None, reasoning_effort=reasoning_effort
+            system_prompt,
+            synthesize_prompt,
+            model=intel_brief_synthesis_model if intel_brief_enabled else model,
+            tools=None,
+            reasoning_effort=intel_brief_synthesis_effort if intel_brief_enabled else reasoning_effort,
         )
 
     def answer_oracle(
@@ -1100,6 +1130,11 @@ class LLMService:
         user_email: str | None = None,
         tidb_expert_enabled: bool = False,
         prompt_service: PromptService | None = None,
+        intel_brief_enabled: bool = True,
+        intel_brief_summarizer_model: str = "gpt-5.4-mini",
+        intel_brief_summarizer_effort: str | None = None,
+        intel_brief_synthesis_model: str = "gpt-5.4",
+        intel_brief_synthesis_effort: str = "medium",
     ) -> dict[str, Any]:
         if prompt_service:
             base_prompt = prompt_service.resolve_for_section(
@@ -1114,7 +1149,18 @@ class LLMService:
             # Pre-call intel uses two-pass deep research to force all searches and prevent hallucination.
             # All other sections use single-pass.
             if section in ("pre_call", "tal") and any(t.get("type") == "web_search_preview" for t in (tools or [])):
-                answer = self._deep_research_pre_call(system_prompt, message, model=model, tools=tools, reasoning_effort=reasoning_effort)
+                answer = self._deep_research_pre_call(
+                    system_prompt,
+                    message,
+                    model=model,
+                    tools=tools,
+                    reasoning_effort=reasoning_effort,
+                    intel_brief_enabled=intel_brief_enabled,
+                    intel_brief_summarizer_model=intel_brief_summarizer_model,
+                    intel_brief_summarizer_effort=intel_brief_summarizer_effort,
+                    intel_brief_synthesis_model=intel_brief_synthesis_model,
+                    intel_brief_synthesis_effort=intel_brief_synthesis_effort,
+                )
             else:
                 answer = self._responses_text(system_prompt, message, model=model, tools=tools, reasoning_effort=reasoning_effort)
             if answer:
