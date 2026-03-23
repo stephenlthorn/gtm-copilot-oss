@@ -110,7 +110,7 @@ New signature:
 def _replace_chunks(self, doc: KBDocument, normalized: dict, call: ChorusCall) -> list[str]:
 ```
 
-All three call sites inside `sync()` must pass `call` as the third argument.
+The one call site inside `sync()` must pass `call` as the third argument. In the actual implementation, `sync()` instantiates a `page_ingestor` object per page. `_normalize` is called on `self` (the outer ingestor), but `_upsert_call` and `_replace_chunks` are both called on `page_ingestor` (not `self`). The update is therefore `page_ingestor._replace_chunks(doc, normalized, call)`, where `call` is the value returned by `page_ingestor._upsert_call(normalized)` (not `self._upsert_call(normalized)`) on the line immediately above.
 
 ### 3.5 Retrieval filter changes
 
@@ -136,7 +136,7 @@ The additional filter logic reads from `(chunk.metadata_json or {})` when `chunk
 - `stage` filter: if `filters["stage"]` is set (list of strings), check that `metadata_json["stage"]` is in the set (case-insensitive). Only applied for CHORUS source.
 - `call_outcome` filter: if `filters["call_outcome"]` is set (list of strings), check that `metadata_json["call_outcome"]` is in the set. Only applied for CHORUS source.
 
-The existing `account` filter currently reads from `doc.tags["account"]`. For CHORUS chunks that now carry `account` in `metadata_json`, the chunk-level value should be used as the authoritative source (falls back to `doc.tags` for non-CHORUS or pre-migration chunks).
+The existing `account` filter currently reads from `doc.tags["account"]`. For CHORUS chunks that now carry `account` in `metadata_json`, the chunk-level value should be used as the authoritative source when present. For non-CHORUS chunks or pre-migration CHORUS chunks (where `metadata_json["account"]` is absent), the filter falls back to `doc.tags["account"]`. This means pre-migration CHORUS chunks are not excluded by the `account` filter even though they lack the `account` key in `metadata_json` — the fallback to `doc.tags` prevents them from being silently dropped. The general rule in §9 ("a filter key that is set but the chunk has no matching `metadata_json` key causes the chunk to be excluded") applies to the new filter keys (`rep_email`, `stage`, `call_outcome`) only — not to `account`, which retains its existing doc-level fallback.
 
 **Option B:** Apply chunk-level filters inline in `search()` after the deduplication loop, as a separate predicate. This avoids changing `_apply_filters` signature but is less cohesive.
 
@@ -146,6 +146,8 @@ All callers of `_apply_filters` in `search()` must pass the `chunk` object:
 ```python
 if not self._apply_filters(doc, filters, chunk):
 ```
+
+**Note on `call_focused_primary_doc_id` fast-path:** `search()` contains a fast-path for a primary document. In the current code, `_apply_filters(doc, filters)` is called at the top of the scoring loop, and the fast-path branch (`if call_focused_primary_doc_id and ...`) comes after it. This ordering is already correct and must be preserved. The only change required is to add the `chunk` argument to the single existing `_apply_filters` call (changing `self._apply_filters(doc, filters)` to `self._apply_filters(doc, filters, chunk)`). Do not add a second `_apply_filters` call and do not reorder the branch. Add a code comment at the fast-path branch confirming that `_apply_filters` (with chunk) has already been applied above it.
 
 ---
 
@@ -159,7 +161,7 @@ Embedding models treat context-free dialogue ("we need better latency at scale")
 
 File: `api/app/ingest/transcript_ingestor.py`
 
-Add a static method (or module-level function) `_build_embed_text`:
+Add a module-level function `_build_embed_text` (not a static method — the call site in §4.3 uses it without a class qualifier, consistent with other module-level helpers like `_coerce_outcome`):
 
 ```
 _build_embed_text(chunk_text: str, call_metadata: dict) -> str
@@ -168,13 +170,20 @@ _build_embed_text(chunk_text: str, call_metadata: dict) -> str
 Behavior:
 - Constructs a context prefix of the form:
   `{account} | {stage} | {date} | rep:{rep_email}`
-- If `stage` is `None` or empty, the `stage` segment is omitted from the prefix (not replaced with a placeholder).
+- If `stage` is `None` or empty, the entire ` | {stage}` token (including its leading pipe and space) is omitted from the prefix — not replaced with an empty string. This means the prefix has three parts, not four, and contains no double-pipe. In that case the prefix is: `{account} | {date} | rep:{rep_email}` (e.g. `"Acme Corp | 2026-03-15 | rep:alice@corp.com"`). The prefix must be built conditionally (not with a naïve `f-string` substitution that would produce `"Acme Corp |  | 2026-03-15 | rep:alice@corp.com"`).
 - Returns `f"{prefix}\n\n{chunk_text}"`.
-- `call_metadata` is the same dict assembled in Change 1, so no additional data fetching is needed.
+- `call_metadata` is the same dict assembled in Change 1, so no additional data fetching is needed. When `stage` is absent or falsy, the `"stage"` key is not present in `call_metadata` at all (not set to `None`). `_build_embed_text` must use `call_metadata.get("stage")` (not `call_metadata["stage"]`) to avoid a `KeyError` for no-stage calls.
 
-Example output:
+Example output (with stage):
 ```
 Acme Corp | Discovery | 2026-03-15 | rep:alice@corp.com
+
+00:01:23 AE: Let me understand your current architecture...
+```
+
+Example output (no stage):
+```
+Acme Corp | 2026-03-15 | rep:alice@corp.com
 
 00:01:23 AE: Let me understand your current architecture...
 ```
@@ -210,7 +219,7 @@ Migration `20260316_000004_tidb_compatibility.py` already adds a HNSW vector ind
 
 ### 5.2 New migration
 
-File: `api/alembic/versions/20260324_000001_add_kb_chunks_hnsw_index.py`
+File: `api/alembic/versions/20260324_000001_add_hnsw_index_and_call_outcome.py`
 
 ```
 revision = "20260324_000001"
@@ -218,7 +227,7 @@ down_revision = "20260323_000002"
 ```
 
 `upgrade()` behavior:
-- Check `bind.dialect.name`.
+- Obtain the connection with `bind = op.get_bind()` (matching the pattern used in the existing `20260316_000004` migration). Check `bind.dialect.name`.
 - If `"mysql"` (TiDB): execute the DDL:
   ```sql
   ALTER TABLE kb_chunks
@@ -240,7 +249,9 @@ down_revision = "20260323_000002"
 
 ### 5.3 Relationship to existing migration
 
-Migration `20260316_000004` uses the index name `idx_kb_chunks_embedding`. The new migration uses `idx_kb_chunks_embedding_hnsw` to avoid a collision if the old index succeeded. The implementer should verify which name exists in the target TiDB instance before running; if `idx_kb_chunks_embedding` exists and is valid, the new migration body can reference the old name in downgrade only (or be left as a no-op since the old migration already created it). The canonical behavior is: at least one HNSW index on `kb_chunks.embedding` must exist in TiDB production.
+Migration `20260316_000004` uses the index name `idx_kb_chunks_embedding`. The new migration uses `idx_kb_chunks_embedding_hnsw` to avoid a collision if the old index succeeded. Both `upgrade()` and `downgrade()` wrap their DDL in `try/except Exception: pass`, which makes this migration safe to apply regardless of whether the old index exists — a duplicate-index error from TiDB will be swallowed, and the migration will succeed. The canonical post-migration state is: at least one HNSW index on `kb_chunks.embedding` must exist in TiDB production. Note that `try/except Exception: pass` swallows all exceptions including transient failures (network errors, out-of-memory during index build, permissions failures) — not only duplicate-index errors. This means the migration will always report success even if the index was not created. To confirm the index exists after applying the migration, run `SHOW INDEXES FROM kb_chunks` and verify a row with `Key_name = 'idx_kb_chunks_embedding_hnsw'` (or the name from the prior migration) appears. This post-apply check is an operational step, not enforced in the migration code itself.
+
+If TiDB production already has only the old index (`idx_kb_chunks_embedding` from migration `20260316_000004`), and this new migration fails silently (the `try/except` swallows the error), the old index remains and ANN queries continue to use it. In that case, running `downgrade()` will silently no-op (the new index name does not exist, the `try/except` swallows the drop error), leaving the old index intact. This is operationally benign — ANN performance is unaffected. It is acceptable and does not need to be fixed in the migration code.
 
 ---
 
@@ -262,13 +273,15 @@ Valid values: `"won"`, `"lost"`, `"no_decision"`, `"active"`, `None`. No DB-leve
 
 File: `api/app/ingest/transcript_ingestor.py`
 
-In `_normalize()`, the `md` dict (lines 55–62) gains:
+**Short-circuit path:** `_normalize` has an early-return at lines 28–30 that returns the payload unchanged when both `"metadata"` and `"turns"` keys are already present (already-normalized payloads). In that case, `_upsert_call` reads `md = normalized.get("metadata", {})` directly from the payload, so `call_outcome` will be available as `md.get("call_outcome")` via the existing `payload["metadata"]` sub-dict. This path does not need a code change — it already passes `call_outcome` through naturally if the caller includes it in `payload["metadata"]`. The change below only affects the code path where the early-return is NOT taken.
+
+In `_normalize()`, inside the `md` dict (lines 55–62), add the new key alongside the other `md` fields:
 
 ```python
 "call_outcome": payload.get("call_outcome") or payload.get("metadata", {}).get("call_outcome"),
 ```
 
-No coercion is applied in `_normalize` — the raw string from the Chorus payload is passed through. Coercion to the four canonical values happens in `_upsert_call`.
+No coercion is applied in `_normalize` — the raw string from the Chorus payload is passed through. When the key is absent from the payload, `md["call_outcome"]` is `None`. There is no default fallback value for this field (unlike `rep_email`, which defaults to `"unknown@example.com"`). `None` is the correct pass-through when the Chorus payload does not include `call_outcome`. If the payload contains `call_outcome` as an empty string `""`, the `or` expression treats it as falsy and falls through to the metadata dict lookup — this is harmless since `""` is not a valid outcome value and `_coerce_outcome` will map it to `None`. Coercion to the four canonical values happens in `_upsert_call`.
 
 ### 6.3 Upsert change
 
@@ -299,9 +312,9 @@ Returns `_OUTCOME_MAP.get((raw or "").strip().lower())` — returns `None` for u
 
 ### 6.4 Alembic migration
 
-The `call_outcome` column is added in the same new migration as the HNSW index (or a separate migration — either is acceptable). If separate:
+The `call_outcome` column is added in the same migration as the HNSW index. A combined migration keeps the chain simple and avoids an extra revision entry.
 
-File: `api/alembic/versions/20260324_000001_add_kb_chunks_hnsw_index.py` (combined)
+File: `api/alembic/versions/20260324_000001_add_hnsw_index_and_call_outcome.py` (combined — name reflects both changes)
 
 ```python
 op.add_column("chorus_calls", sa.Column("call_outcome", sa.String(64), nullable=True))
@@ -396,7 +409,7 @@ Algorithm: `HNSW`
 | `stage` | `list[str]` | Case-insensitive membership match against `chunk.metadata_json["stage"]`. |
 | `call_outcome` | `list[str]` | Case-insensitive membership match against `chunk.metadata_json["call_outcome"]`. |
 
-All new filters are additive (AND logic with existing filters). A filter key that is absent or `None` in the `filters` dict is ignored (the chunk passes). A filter key that is set but the chunk has no matching `metadata_json` key causes the chunk to be excluded.
+All new filters are additive (AND logic with existing filters). A filter key that is absent or `None` in the `filters` dict is ignored (the chunk passes). For the new filter keys (`rep_email`, `stage`, `call_outcome`): a filter that is set but the chunk has no matching `metadata_json` key causes the chunk to be excluded. The `account` filter is an exception — it retains a fallback to `doc.tags["account"]` for non-CHORUS and pre-migration chunks and does not exclude chunks on a missing `metadata_json["account"]` key.
 
 ---
 
@@ -408,9 +421,9 @@ File: `api/tests/ingest/test_transcript_ingestor.py` (or new `test_chunking_opti
 
 - Prefix is present in the returned string.
 - `chunk_text` is unchanged and present after the prefix.
-- Omits `stage` segment when `stage` is `None`.
-- Omits `stage` segment when `stage` is `""`.
-- Returns correct format when all fields are present.
+- Omits `stage` segment when `stage` is `None`: result starts with `"Acme Corp | 2026-03-15 | rep:alice@corp.com\n\n"`.
+- Omits `stage` segment when `stage` is `""`: same as `None` — three-part prefix, no stage.
+- Returns correct format when all fields are present: `"Acme Corp | Discovery | 2026-03-15 | rep:alice@corp.com\n\n{chunk_text}"`.
 
 ### 10.2 Unit tests — `_coerce_outcome`
 
@@ -419,6 +432,7 @@ File: `api/tests/ingest/test_transcript_ingestor.py` (or new `test_chunking_opti
 - `"Closed Lost"` (mixed case) → `"lost"`
 - `"no decision"` → `"no_decision"`
 - `"open"` → `"active"`
+- `"in progress"` → `"active"`
 - `None` → `None`
 - Unrecognized string → `None`
 
@@ -433,6 +447,8 @@ Test `_replace_chunks` with a minimal `ChorusCall` and `normalized` dict:
 - `call_outcome` key present with correct value when set.
 - `start_time_sec` / `end_time_sec` are preserved from the original chunk metadata.
 - `KBChunk.text` equals the raw transcript chunk text (not the prefixed embed text).
+- `KBChunk.text` does NOT start with the account name or any context prefix segment (i.e., does not match `r"^\S.*\|.*rep:"`).
+- A separate test case exercises the no-turns/summary fallback path: ingest a `normalized` dict with no turns (only a summary string). Assert that `KBChunk.text` is the summary text without any prefix, and that the embedder was called with the prefixed string. `_replace_chunks` calls `self.embedder.batch_embed(embed_texts)` with `embed_texts` passed as a positional argument (not a keyword argument). The assertion must check the first element of the list: `mock_embedder.batch_embed.call_args.args[0][0]` (`.args[0]` is the first positional argument, `[0]` is the first element of the list) must match `r"^\S.*\|.*rep:"`.
 
 ### 10.4 Unit tests — `_apply_filters` with chunk metadata
 
@@ -472,7 +488,7 @@ Using an in-memory SQLite test database:
 | `api/app/models/entities.py` | Add `call_outcome` field to `ChorusCall` |
 | `api/app/ingest/transcript_ingestor.py` | `_normalize`, `_upsert_call`, `_replace_chunks` (signature + body), new `_build_embed_text`, new `_coerce_outcome` |
 | `api/app/retrieval/service.py` | `_apply_filters` signature and body; all call sites in `search()` |
-| `api/alembic/versions/20260324_000001_add_kb_chunks_hnsw_index.py` | New migration: `call_outcome` column + HNSW index |
+| `api/alembic/versions/20260324_000001_add_hnsw_index_and_call_outcome.py` | New migration: `call_outcome` column + HNSW index |
 
 ---
 
