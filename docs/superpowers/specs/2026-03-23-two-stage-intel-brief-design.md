@@ -22,7 +22,10 @@ A new helper `_summarize_query_results()` receives the list of `(query_label, sn
 The 8 summary paragraphs (or raw fallbacks) are compiled into a structured markdown block that replaces the current raw-snippet input to the synthesis call. The synthesis call continues to use `_responses_text()` with streaming. Model and thinking level are now read from user preferences (`intel_brief_synthesis_model`, `intel_brief_synthesis_effort`) instead of hardcoded values.
 
 **Toggle**
-When `intel_brief_enabled` is `False`, the summarization step is skipped entirely and the existing raw-snippet assembly path runs unchanged.
+When `intel_brief_enabled` is `False`, the `_summarize_query_results()` call is skipped. Everything else in `_deep_research_pre_call()` — the Firecrawl loop, competitive-alert block construction, STRICT/ALLOWED grounding rules, verbatim-copy instructions in `synthesize_prompt`, and the `_responses_text()` synthesis call — runs exactly as it does today. Only the new summarization step and summary-block compilation are bypassed; the raw-snippet markdown block is used for the synthesis call as before.
+
+**Parameter threading**
+The 5 new intel-brief preference values are passed as explicit scalar kwargs through the call chain — matching the existing pattern for `model` and `reasoning_effort`. The orchestrator unpacks them from `user_prefs` and passes them to `answer_oracle()`, which passes them to `_deep_research_pre_call()`. No `user_pref` object is passed; only the resolved scalar values flow down. Specifically, `answer_oracle()` gains 5 new optional parameters: `intel_brief_enabled: bool = True`, `intel_brief_summarizer_model: str = "gpt-5.4-mini"`, `intel_brief_summarizer_effort: str | None = None`, `intel_brief_synthesis_model: str = "gpt-5.4"`, `intel_brief_synthesis_effort: str = "medium"`. These are forwarded to `_deep_research_pre_call()` with the same names.
 
 ---
 
@@ -40,8 +43,8 @@ Compile into structured markdown block
 _responses_text(
     system=resolve_for_section("pre_call"),
     user=brief_prompt + summaries_block,
-    model=intel_brief_synthesis_model,   ← from prefs
-    reasoning_effort=intel_brief_synthesis_effort  ← from prefs
+    model=intel_brief_synthesis_model,   ← scalar kwarg
+    reasoning_effort=intel_brief_synthesis_effort  ← scalar kwarg
 )  → streamed to client
 ```
 
@@ -63,13 +66,15 @@ Add 5 columns to `user_preferences` table:
 
 Migration file: `api/alembic/versions/20260323_000002_add_intel_brief_prefs.py`
 
+`down_revision` must be set to `"20260323_000001"` (the prompt studio migration). Before writing this migration, verify whether `retrieval_top_k` already exists in the live `user_preferences` table — it is present in `UserPreference` model but may be absent from the `20260316_000001` DDL. If missing, add it in this migration as well (`Integer, nullable=True, server_default=None`) to keep model and DB in sync.
+
 ### Model changes
 
 `UserPreference` in `api/app/models/entities.py` — add 5 `Mapped` fields with `server_default` values matching the table defaults above.
 
 ### Schema changes
 
-`IntelBriefPrefs` fields added to `UserPreferenceSchema` (and `UserPreferenceUpdate`) in `api/app/schemas/user_prefs.py`. All 5 fields optional in the update schema.
+5 new fields added to both `UserPrefRead` and `UserPrefUpdate` in `api/app/schemas/user_prefs.py`. All 5 fields optional in `UserPrefUpdate` (using `| None` with `None` default). `UserPrefRead` includes them as optional with `None` default so existing records without these values deserialise cleanly.
 
 ---
 
@@ -77,7 +82,7 @@ Migration file: `api/alembic/versions/20260323_000002_add_intel_brief_prefs.py`
 
 No new endpoints. The existing `GET /user/preferences` and `PUT /user/preferences` routes in `api/app/api/routes/user_prefs.py` pick up the new fields automatically via the updated Pydantic schemas.
 
-The `llm.py` pre-call function receives preferences via the existing `user_prefs` parameter already threaded through the call chain. The 5 new fields are read from this object.
+The 5 new intel-brief values are unpacked from `user_prefs` by the orchestrator and passed as scalar kwargs to `answer_oracle()`, which forwards them to `_deep_research_pre_call()`. See **Parameter threading** in the Architecture section for the full parameter names and defaults.
 
 ---
 
@@ -127,10 +132,10 @@ Search results:
 
 After collecting all 8 query results and before building the synthesis prompt:
 
-1. Check `user_prefs.intel_brief_enabled` (default `True`)
-2. If enabled: call `_summarize_query_results()` with `intel_brief_summarizer_model` and `intel_brief_summarizer_effort` from prefs
+1. Check the `intel_brief_enabled` scalar kwarg (default `True`)
+2. If enabled: call `_summarize_query_results()` passing the `intel_brief_summarizer_model` and `intel_brief_summarizer_effort` scalar kwargs
 3. Compile summaries into markdown block (replaces current raw-snippet assembly)
-4. Pass to synthesis call using `intel_brief_synthesis_model` + `intel_brief_synthesis_effort`
+4. Pass to synthesis call using the `intel_brief_synthesis_model` and `intel_brief_synthesis_effort` scalar kwargs
 
 ---
 
