@@ -880,11 +880,17 @@ Suggest a specific edit to reduce '{body.failure_category}' failures. Return JSO
             temperature=0.3,
         )
         raw = response.choices[0].message.content
-        parsed = json.loads(raw)
-        reasoning = parsed["reasoning"]
-        suggested_prompt = parsed["suggested_prompt"]
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"GPT-4 call failed: {exc}")
+
+    parsed = json.loads(raw)
+    reasoning = parsed.get("reasoning")
+    suggested_prompt = parsed.get("suggested_prompt")
+    if not reasoning or not suggested_prompt:
+        raise HTTPException(
+            status_code=502,
+            detail="GPT-4 returned incomplete JSON: missing 'reasoning' or 'suggested_prompt'",
+        )
 
     # 5. Save PromptSuggestion row
     suggestion = PromptSuggestion(

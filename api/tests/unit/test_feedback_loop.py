@@ -418,6 +418,41 @@ def test_feedback_suggestions_calls_gpt4_and_saves_row():
     assert added.prompt_type == "persona"
     assert added.reasoning == "The prompt lacks specificity about account context."
 
+    # Verify result shape
+    assert "id" in result
+    assert result["mode"] == "oracle"
+    assert result["failure_category"] == "too_generic"
+    assert result["reasoning"] == "The prompt lacks specificity about account context."
+    assert result["suggested_prompt"] == "You are a highly specific sales assistant..."
+    assert "created_at" in result
+
+
+def test_feedback_suggestions_builtin_unknown_mode_returns_400():
+    """create_feedback_suggestion must return 400 when builtin mode is not in BUILTIN_PROMPT_MAP."""
+    import pytest
+    from fastapi import HTTPException
+    from app.api.routes.admin import create_feedback_suggestion, FeedbackSuggestionRequest
+
+    mock_db = MagicMock()
+    ex1 = MagicMock()
+    ex1.query_text = "test"
+    ex1.original_response = "test"
+    mock_db.execute.return_value = MagicMock(all=MagicMock(return_value=[ex1]))
+
+    mock_request = MagicMock()
+    mock_request.headers.get.return_value = "test-token"
+
+    body = FeedbackSuggestionRequest(
+        mode="unknown_mode",
+        failure_category="too_generic",
+        prompt_type="builtin",
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        create_feedback_suggestion(body=body, request=mock_request, db=mock_db)
+
+    assert exc_info.value.status_code == 400
+
 
 def test_feedback_suggestions_returns_502_on_openai_failure():
     """create_feedback_suggestion must return 502 when GPT-4 call raises."""
