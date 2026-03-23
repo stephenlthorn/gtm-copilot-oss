@@ -21,6 +21,10 @@ export default function SEExecutionWidget() {
   const basePayload = { account: account.trim(), chorus_call_id: chorusCallId || null };
 
   const run = async (kind) => {
+    if (!basePayload.account && !basePayload.chorus_call_id) {
+      setError('Enter an account name or a Call ID first.');
+      return;
+    }
     let path = '';
     let payload = { ...basePayload };
 

@@ -43,6 +43,10 @@ export default function RepExecutionWidget() {
   );
 
   const run = async (action) => {
+    if (!basePayload.account && !basePayload.chorus_call_id) {
+      setError('Enter an account name or a Call ID first.');
+      return;
+    }
     setError('');
     setLoadingAction(action);
     try {
