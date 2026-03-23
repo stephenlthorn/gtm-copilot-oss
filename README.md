@@ -151,3 +151,23 @@ curl -X POST "http://localhost:8000/admin/sync/calls"
 ```
 
 No demo transcripts or documents are bundled. Use `data/fake_drive` and `data/fake_calls` only for local, non-sensitive fixtures.
+
+## Account Deal Memory
+
+Rolling per-account MEDDPICC state that aggregates all calls (Chorus + manual) and updates after each call.
+
+**Features:**
+- Auto-detects new business vs existing account (by Chorus stage → account history → manual override)
+- Extracts MEDDPICC delta from every call transcript via LLM after each sync
+- Pending-review diff UI: rep approves, edits, or dismisses proposed changes
+- Manual call logging — paste notes, transcript, or voice memo
+- Full account history injected into every post-call analysis
+
+**New endpoints:**
+- `POST /calls/manual` — log a call not recorded in Chorus
+- `GET /accounts/{account}/memory` — fetch current deal state
+- `POST /accounts/{account}/memory/approve` — approve AI-proposed update
+- `POST /accounts/{account}/memory/dismiss` — dismiss without applying
+- `PATCH /accounts/{account}/memory` — direct rep edit
+
+**UI:** `/accounts` page — MEDDPICC scorecard, contacts, open items, call history. "Log call manually" button in Settings → Knowledge Sources.
