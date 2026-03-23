@@ -411,7 +411,7 @@ class HybridRetriever:
 
         # Apply ChunkQualitySignal nudge for chunks with ≥10 signals
         if scored:
-            _chunk_ids = [str(chunk.id) for _, chunk, _ in scored]
+            _chunk_ids = [chunk.id for _, chunk, _ in scored]
             from app.models.feedback import ChunkQualitySignal
             from sqlalchemy import func as _func, case
             quality_rows = self.db.execute(
