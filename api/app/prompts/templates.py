@@ -184,3 +184,15 @@ TIDB_EXPERT_CONTEXT = """You are an expert on TiDB, a distributed SQL database b
 # Complete SYSTEM_SE_ANALYSIS now that TIDB_EXPERT_CONTEXT is defined
 SYSTEM_SE_ANALYSIS = SYSTEM_SE_ANALYSIS + "\n\n" + TIDB_EXPERT_CONTEXT
 
+
+
+# Map section key → specialized system prompt (used by llm.py and PromptService fallback)
+SECTION_SYSTEM_PROMPTS: dict[str, str] = {
+    "pre_call": SYSTEM_PRE_CALL_INTEL,
+    "tal": SYSTEM_PRE_CALL_INTEL,
+    "post_call": SYSTEM_POST_CALL_ANALYSIS,
+    "follow_up": SYSTEM_POST_CALL_ANALYSIS,
+    "se_poc_plan": SYSTEM_SE_ANALYSIS,
+    "se_arch_fit": SYSTEM_SE_ANALYSIS,
+    "se_competitor": SYSTEM_SE_ANALYSIS,
+}

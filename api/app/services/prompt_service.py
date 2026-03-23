@@ -7,6 +7,16 @@ from app.models.prompt_models import PromptRegistry, PromptVersion, PromptUserOv
 CACHE_TTL_SECONDS = 300  # 5 minutes
 _cache: dict[str, tuple[float, str]] = {}
 
+SECTION_TO_PROMPT_ID: dict[str, str] = {
+    "pre_call": "system_pre_call_intel",
+    "tal": "system_pre_call_intel",
+    "post_call": "system_post_call_analysis",
+    "follow_up": "system_post_call_analysis",
+    "se_poc_plan": "system_se_analysis",
+    "se_arch_fit": "system_se_analysis",
+    "se_competitor": "system_se_analysis",
+}
+
 
 def clear_cache() -> None:
     """Clear all cached prompt content. Intended for tests."""
@@ -46,6 +56,31 @@ class PromptService:
         # Cache and return
         _cache[cache_key] = (time.time(), prompt.current_content)
         return prompt.current_content
+
+    def resolve_for_section(
+        self,
+        section: str,
+        *,
+        user_email: str | None = None,
+        tidb_expert_enabled: bool = False,
+    ) -> str:
+        """Resolve the system prompt for a given section, with optional TiDB Expert injection."""
+        prompt_id = SECTION_TO_PROMPT_ID.get(section, "system_oracle")
+
+        content = self.resolve(prompt_id, user_email=user_email)
+        if content is None:
+            # Fall back to hardcoded
+            from app.prompts.templates import SECTION_SYSTEM_PROMPTS, SYSTEM_ORACLE
+            content = SECTION_SYSTEM_PROMPTS.get(section, SYSTEM_ORACLE)
+
+        if tidb_expert_enabled:
+            expert = self.resolve("tidb_expert")
+            if expert is None:
+                from app.prompts.templates import TIDB_EXPERT_CONTEXT
+                expert = TIDB_EXPERT_CONTEXT
+            content = content + "\n\n" + expert
+
+        return content
 
     # ── CRUD ──────────────────────────────────────────────────
 

@@ -19,7 +19,9 @@ from openai import OpenAI
 
 from app.core.settings import get_settings
 from app.prompts.personas import get_persona_label, normalize_persona
+from app.services.prompt_service import PromptService, SECTION_TO_PROMPT_ID
 from app.prompts.templates import (
+    SECTION_SYSTEM_PROMPTS,
     SYSTEM_CALL_COACH,
     SYSTEM_MARKETING_EXECUTION,
     SYSTEM_MARKET_RESEARCH,
@@ -30,17 +32,6 @@ from app.prompts.templates import (
     SYSTEM_SE_ANALYSIS,
     SYSTEM_SE_EXECUTION,
 )
-
-# Map section key → specialized system prompt
-SECTION_SYSTEM_PROMPTS: dict[str, str] = {
-    "pre_call": SYSTEM_PRE_CALL_INTEL,
-    "tal": SYSTEM_PRE_CALL_INTEL,
-    "post_call": SYSTEM_POST_CALL_ANALYSIS,
-    "follow_up": SYSTEM_POST_CALL_ANALYSIS,
-    "se_poc_plan": SYSTEM_SE_ANALYSIS,
-    "se_arch_fit": SYSTEM_SE_ANALYSIS,
-    "se_competitor": SYSTEM_SE_ANALYSIS,
-}
 from app.retrieval.types import RetrievedChunk
 from app.utils.redaction import redact_sensitive_text
 
@@ -1066,8 +1057,18 @@ class LLMService:
         reasoning_effort: str | None = None,
         source_instructions: str | None = None,
         section: str | None = None,
+        user_email: str | None = None,
+        tidb_expert_enabled: bool = False,
+        prompt_service: PromptService | None = None,
     ) -> dict[str, Any]:
-        base_prompt = SECTION_SYSTEM_PROMPTS.get(section or "", SYSTEM_ORACLE)
+        if prompt_service:
+            base_prompt = prompt_service.resolve_for_section(
+                section or "",
+                user_email=user_email,
+                tidb_expert_enabled=tidb_expert_enabled,
+            )
+        else:
+            base_prompt = SECTION_SYSTEM_PROMPTS.get(section or "", SYSTEM_ORACLE)
         system_prompt = self._compose_persona_system_prompt(base_prompt, persona_name, persona_prompt, source_instructions=source_instructions)
         if allow_ungrounded:
             # Pre-call intel uses two-pass deep research to force all searches and prevent hallucination.
