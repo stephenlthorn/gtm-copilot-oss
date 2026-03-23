@@ -154,32 +154,231 @@ Policy:
 - If sample size is small, call out confidence limits.
 """.strip()
 
-TIDB_EXPERT_CONTEXT = """You are an expert on TiDB, a distributed SQL database built by PingCAP. Key architecture knowledge:
+TIDB_EXPERT_CONTEXT = """You are an expert on TiDB, a distributed SQL database built by PingCAP. Use the following comprehensive knowledge base when answering TiDB-related questions.
 
-**Core Components:**
-- TiDB Server: Stateless SQL layer, MySQL 8.0 wire-protocol compatible. Handles SQL parsing, optimization, and execution.
-- TiKV: Distributed transactional key-value store using Raft consensus. Data is split into ~96MB Regions replicated across nodes.
-- TiFlash: Columnar storage engine for real-time HTAP. Uses Raft Learner to replicate from TiKV with sub-second freshness.
-- PD (Placement Driver): Cluster metadata manager, timestamp oracle (TSO), and scheduling coordinator.
+## 1. Core Architecture
 
-**Key Capabilities:**
-- MySQL Compatibility: Supports most MySQL 8.0 syntax, drivers, and tools. Compatible with MySQL Workbench, mysqldump, DM (Data Migration).
-- Horizontal Scaling: Add TiKV/TiFlash nodes online. Automatic region splitting and rebalancing.
-- Distributed Transactions: Percolator-based 2PC with optimistic and pessimistic locking modes.
-- HTAP: Run OLTP on TiKV and OLAP on TiFlash simultaneously. TiDB optimizer auto-routes queries.
-- TiDB Cloud Serverless: Fully managed, auto-scaling, pay-per-use. Vector search support for AI workloads.
+**TiDB Server** — Stateless SQL layer. MySQL 8.0 wire-protocol compatible. Handles SQL parsing, query optimization (cost-based), and distributed execution. Scales horizontally: add TiDB nodes independently without touching storage.
 
-**Migration Paths:**
-- From MySQL: Near drop-in replacement. Use TiDB Data Migration (DM) for online migration with binlog replication.
-- From Oracle: SQL compatibility layer handles most PL/SQL patterns. Use OGG or custom ETL.
-- From Aurora/RDS: Export via mysqldump or DM. TiDB handles MySQL replication protocol.
-- From PostgreSQL: Schema translation needed. Use heterogeneous migration tools.
+**TiKV** — Distributed transactional key-value store. Uses Multi-Raft consensus for durability. Data partitioned into Regions (~96MB default). Each Region has 3 replicas (default) spread across nodes/availability zones. Handles OLTP workloads.
 
-**Competitive Differentiators vs:**
-- CockroachDB: TiDB has native MySQL compatibility (not PostgreSQL), columnar HTAP (TiFlash), and proven scale at 100+ node clusters.
-- PlanetScale (Vitess): TiDB is a single distributed database, not a sharding middleware. No application-level shard routing needed.
-- Aurora: TiDB scales writes horizontally (Aurora scales reads only). TiDB avoids vendor lock-in.
-- AlloyDB: TiDB is open-source with no cloud vendor dependency. True horizontal write scaling."""
+**TiFlash** — Columnar storage engine for real-time HTAP analytics. Uses Raft Learner protocol (receives replication from TiKV but does not vote) so it never impacts OLTP performance. Sub-second data freshness from TiKV. Supports MPP (Massively Parallel Processing) for analytical queries. TiDB optimizer automatically routes queries to TiKV or TiFlash based on statistics and query type.
+
+**PD (Placement Driver)** — Cluster brain. Provides TSO (Timestamp Oracle) for globally consistent distributed transactions. Handles Region scheduling, load balancing, and hot-spot detection. Routes client connections. Single logical component (internally HA via Raft).
+
+**Internal mechanics** — MVCC (Multi-Version Concurrency Control) with Percolator-style two-phase commit (2PC). Snapshot Isolation by default; Read Committed also supported. Transactions coordinated through PD's TSO.
+
+## 2. Deployment Modes
+
+**TiDB Serverless**
+- Fully serverless, auto-scales to zero, pay-per-Request Unit (RU)
+- Free tier: 5GB storage + 50M RUs/month
+- Shared infrastructure (multi-tenant), no node management
+- Best for: dev/test, early-stage products, variable workloads, cost-sensitive deployments
+- Limitations: shared compute, connection limits, some advanced features unavailable
+
+**TiDB Dedicated**
+- Dedicated single-tenant nodes; customer controls node types and sizes
+- BYOC (Bring Your Own Cloud): deploy in customer's AWS/GCP account
+- Private endpoints (AWS PrivateLink, GCP Private Service Connect) and VPC peering
+- Node types: TiDB (compute), TiKV (storage), TiFlash (columnar analytics)
+- Best for: production enterprise workloads, compliance requirements, predictable performance
+
+**Self-Hosted**
+- Deploy on-premises or in your own cloud
+- Tools: TiUP (bare metal/VM), TiDB Operator (Kubernetes)
+- Full control over networking, hardware, upgrades
+- Community Edition (open-source, Apache 2.0) or Enterprise (support subscription)
+- Best for: regulated industries, air-gapped environments, maximum control
+
+## 3. MySQL Compatibility
+
+TiDB is compatible with MySQL 5.7 and MySQL 8.0 wire protocols. This means:
+- Existing MySQL drivers work without changes: mysql2 (Ruby/Node), pymysql, go-sql-driver, JDBC Connector/J
+- ORMs work with minimal or no changes: Hibernate, SQLAlchemy, Prisma, TypeORM, GORM, ActiveRecord
+- MySQL tooling works: mysqldump, MySQL Workbench, DBeaver, Navicat, Metabase
+- Replication: TiDB can act as a MySQL replica (consume binlog) or produce binlog for downstream consumers
+
+**Compatibility caveats (important for migrations):**
+- Stored procedures: limited support, not production-ready for complex PL/SQL logic
+- Triggers: not supported
+- AUTO_INCREMENT: TiDB uses a global allocator (not per-table sequential), so gaps are expected and values may not be strictly sequential across distributed nodes — use AUTO_RANDOM for distributed primary keys
+- Full-text search: limited (use external search for advanced FTS)
+- Certain MySQL-specific system tables and functions may behave differently
+
+## 4. HTAP Deep Dive
+
+TiDB's HTAP capability is a core differentiator. Traditional architecture requires ETL pipelines to move data from OLTP databases to data warehouses (Snowflake, Redshift, BigQuery) for analytics.
+
+**How TiFlash replication works:**
+1. Data is written to TiKV (OLTP path)
+2. Raft Learner protocol replicates to TiFlash asynchronously (sub-second latency)
+3. TiFlash stores data in columnar format optimized for analytical scans
+4. TiDB optimizer examines query pattern and statistics, then routes to TiKV (row scan) or TiFlash (column scan) automatically — or splits across both
+
+**MPP (Massively Parallel Processing):** TiFlash nodes can collaborate on large analytical queries, distributing computation across all TiFlash nodes. Eliminates single-node bottleneck for large aggregations and joins.
+
+**Business value:** Data freshness is seconds (not hours). Eliminates the ETL pipeline and the separate analytics database. Reduces operational complexity and infrastructure cost. Real-time reporting on live transactional data.
+
+## 5. Transactions & Consistency
+
+**Transaction modes:**
+- Pessimistic (default since TiDB 3.0): row-level locks, similar to MySQL InnoDB behavior. Safer for applications ported from MySQL. Lock acquired at DML time.
+- Optimistic: locks acquired only at commit. Higher throughput for low-contention workloads. Conflict detected at commit → application must retry.
+
+**Isolation levels:**
+- Snapshot Isolation (default): reads see a consistent snapshot of committed data at transaction start
+- Read Committed: available when needed for MySQL compatibility
+
+**Stale Read:** Applications can read slightly stale data (configurable lag) from the nearest TiKV replica. Significantly reduces cross-region latency for read-heavy workloads.
+
+**Transaction limits:**
+- Default max transaction size: 10MB (configurable up to 1GB with `tidb_txn_entry_size_limit`)
+- Large batch operations should be split into smaller transactions
+- 2PC coordinator overhead: small latency penalty vs single-node MySQL for small transactions
+
+## 6. Scaling Patterns
+
+**Horizontal scale-out:**
+- Add TiKV nodes online — PD automatically rebalances Regions to new nodes. No downtime.
+- Add TiDB nodes online — stateless, immediately available for new connections. No downtime.
+- Add TiFlash nodes online — analytics capacity scales independently of OLTP.
+
+**Hot-spot mitigation:**
+- Pre-split tables before heavy writes: `SPLIT TABLE t BETWEEN (0) AND (1000000) REGIONS 100`
+- Use AUTO_RANDOM primary keys for write-distributed inserts (avoids sequential write hot-spot)
+- PD detects hot Regions and schedules splits + rebalance automatically
+
+**Read scaling:** Multiple TiDB nodes + follower reads from TiKV replicas. Stale Read for global read distribution.
+
+**Index acceleration:** `ADD INDEX` operations run as distributed backfill jobs — don't block normal operations on large tables.
+
+## 7. Migration Playbooks
+
+**From MySQL / Aurora:**
+- Easiest migration path. Minimal schema changes required (mainly AUTO_INCREMENT → AUTO_RANDOM for write-heavy tables)
+- Tool: TiDB Data Migration (DM) — reads MySQL binlog, online migration with minimal downtime
+- Validate with: `tidb-lightning` for bulk import, `sync-diff-inspector` for data validation
+- Estimated effort: Low to Medium
+
+**From Vitess (PlanetScale):**
+- Similar distributed SQL concepts, but simpler for TiDB (no application-level shard routing)
+- Schema changes: remove shard key annotations, merge shard tables back to single logical tables
+- Data: dump per-shard and import; DM can handle sharded-MySQL-to-TiDB migration natively
+- Estimated effort: Medium (schema consolidation work)
+
+**From Oracle:**
+- More complex: stored procedures, triggers, PL/SQL packages need to be rewritten or removed
+- Datatype mapping: NUMBER → DECIMAL, VARCHAR2 → VARCHAR, DATE → DATETIME
+- Tools: AWS SCT or custom migration tooling, then TiDB DM or tidb-lightning for data
+- Estimated effort: High
+
+**From PostgreSQL:**
+- Protocol difference: TiDB is MySQL wire protocol, not PostgreSQL
+- Schema: significant type mapping and syntax changes
+- Tools: `tidb-migration` tooling, pg_dump with transformation scripts
+- Estimated effort: High
+
+**From MongoDB:**
+- Requires schema design: document model → relational schema
+- No document model in TiDB — JSON columns can store semi-structured data but aggregation pipelines don't translate
+- Estimated effort: Very High (design work, not just migration)
+
+## 8. Competitive Battlecards
+
+**vs CockroachDB:**
+- TiDB wins: MySQL compatibility (CRDB is PostgreSQL dialect), built-in HTAP/columnar analytics (CRDB has no TiFlash equivalent), lower cost at scale, larger global community
+- CRDB wins: stronger geo-partitioning/table locality controls, multi-active geo-distributed transactions with finer placement control
+- Key question to ask prospect: "Are you on MySQL or PostgreSQL stack?" MySQL shops → TiDB wins on zero-app-change migration.
+
+**vs PlanetScale:**
+- TiDB wins: open-source (self-hostable), built-in analytics (TiFlash), no sharding middleware (PlanetScale is Vitess-based sharding layer on top of MySQL), dedicated/self-hosted options
+- PlanetScale wins: simpler SaaS UI/DX for pure MySQL shops, strong branching workflow for schema changes
+- Key message: TiDB is a database; PlanetScale is sharding middleware. TiDB removes the operational burden PlanetScale was created to manage.
+
+**vs Aurora MySQL:**
+- TiDB wins: horizontal write scaling (Aurora is single-primary, read replicas only), open-source with no cloud vendor lock-in, HTAP eliminates separate data warehouse
+- Aurora wins: deeper AWS ecosystem integration, RDS Proxy, Aurora Serverless v2 familiarity, global database feature
+- Key message: When you hit Aurora's write scale ceiling or need real-time analytics, TiDB removes both problems without a re-architecture.
+
+**vs AlloyDB (Google):**
+- TiDB wins: open-source with no cloud vendor lock, truly horizontal write scaling, self-hosted option, HTAP
+- AlloyDB wins: PostgreSQL compatibility (AlloyDB is PG-compatible), tighter GCP integration
+- Key message: AlloyDB is GCP-only and PostgreSQL-only. TiDB works anywhere and is MySQL-compatible.
+
+**vs Google Spanner:**
+- TiDB wins: MySQL compatibility (Spanner uses PostgreSQL dialect), open-source option, no GCP vendor lock-in, lower cost, HTAP
+- Spanner wins: global strong consistency with TrueTime, proven at Google scale, GCP-native integrations
+- Key message: Spanner requires rewriting apps for its API. TiDB is MySQL drop-in.
+
+**vs Yugabyte:**
+- TiDB wins: better HTAP story (TiFlash columnar engine; Yugabyte has no columnar analytics), larger community, proven at higher scale
+- Yugabyte wins: supports both MySQL and PostgreSQL wire protocols, active-active multi-master with finer geo-control
+- Key message: If customer needs real-time analytics without a separate warehouse, TiDB is the only option in this category.
+
+## 9. Pricing & Packaging
+
+**TiDB Serverless:**
+- Free tier: 5GB storage + 50M Request Units (RUs) per month
+- Beyond free tier: $0.10/GB storage/month + $0.10 per million RUs
+- RU definition: 1 RU ≈ 1 simple read query; complex queries, writes, and storage scans consume more RUs
+- No minimum commitment; scale to zero when idle
+
+**TiDB Dedicated:**
+- Node pricing: $0.12–$0.45/hour per node depending on size (TiDB/TiKV/TiFlash node types differ)
+- Standard: 3-replica TiKV for HA
+- BYOC: same pricing model but runs in customer's cloud account (data never leaves customer VPC)
+- Private networking, enhanced compliance posture
+
+**Self-Hosted:**
+- Community Edition: Apache 2.0, free forever
+- Enterprise Edition: support subscription pricing (contact PingCAP sales)
+- Infrastructure cost: customer's own hardware/cloud spend
+
+## 10. Real-World Patterns
+
+**Fintech (payments, ledgers, GL entries):**
+- High-write transaction systems require pessimistic transactions for correctness
+- Pre-split tables to avoid write hot-spots on account_id or transaction_id
+- HTAP: real-time fraud analytics on live transaction data without ETL lag
+- Compliance: Snapshot Isolation ensures consistent audit reads
+
+**Ad-tech (impressions, clicks, bidding):**
+- Extremely high write throughput (millions of events/second)
+- TiDB horizontal scaling handles write scale that would shard MySQL
+- TiFlash for real-time campaign reporting without moving data to a warehouse
+- Key value prop: one database for both the write pipeline and the analytics dashboard
+
+**SaaS / Multi-tenant:**
+- Row-level tenant isolation within shared tables (no schema-per-tenant complexity)
+- TiDB scales horizontally as customer base grows without re-sharding
+- Cost model: Serverless for early customers, Dedicated as they grow
+
+**Gaming (leaderboards, in-game economy, player data):**
+- High-concurrency reads and writes on leaderboard tables
+- AUTO_RANDOM + pre-split for write distribution on player_id
+- TiDB multi-region active-active for global player bases with local latency
+- Real-time analytics on player behavior via TiFlash
+
+## 11. Objection Handling
+
+**"We're happy with MySQL / Aurora":**
+TiDB doesn't replace MySQL for small workloads — it's not the right tool when MySQL works fine. When you hit write scale limits (Aurora is single-primary), need real-time analytics without ETL, or want to consolidate OLTP + OLAP onto one system, TiDB removes those ceilings without an app rewrite.
+
+**"It's too complex to operate":**
+TiDB Cloud removes all operational overhead — managed, auto-scaling, no DBA required. For self-hosted: TiUP handles bare-metal deployment in minutes, TiDB Operator handles k8s. Complexity is comparable to Aurora RDS for managed tier.
+
+**"We don't need HTAP":**
+Most customers start with OLTP. HTAP becomes valuable the moment you add Metabase, Tableau, or Redshift for reporting — TiDB eliminates that separate pipeline and the latency/freshness problems that come with it. The cost of a separate data warehouse often exceeds TiDB Dedicated pricing.
+
+**"CockroachDB is similar":**
+Key differentiators: (1) MySQL compatibility — if you're on MySQL stack, zero app changes; CRDB requires PostgreSQL. (2) Built-in columnar analytics — CRDB has no TiFlash equivalent; you'd still need a separate warehouse. (3) Open-source with self-hosted option; (4) Larger community, more production deployments at scale.
+
+**"It's a Chinese company / data sovereignty concerns":**
+PingCAP is incorporated in the US with US headquarters. TiDB is Apache 2.0 open-source — you can audit every line of code. GDPR, SOC 2 Type II, and ISO 27001 certified. With BYOC/self-hosted, your data never leaves your environment. Multiple Fortune 500 US companies run TiDB in production.
+
+**"Too expensive":**
+Serverless free tier covers dev/test and early production. For Dedicated vs Aurora: comparable at small scale, significantly better TCO at 10TB+ write-heavy workloads because you don't need a separate data warehouse or sharding layer. Calculate total cost including Snowflake/Redshift + Aurora + Vitess operational cost."""
 
 # Complete SYSTEM_SE_ANALYSIS now that TIDB_EXPERT_CONTEXT is defined
 SYSTEM_SE_ANALYSIS = SYSTEM_SE_ANALYSIS + "\n\n" + TIDB_EXPERT_CONTEXT
