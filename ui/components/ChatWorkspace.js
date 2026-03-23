@@ -1,5 +1,5 @@
 'use client';
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import PersistentChat from './PersistentChat';
 import PreCallFields from './SectionFields/PreCallFields';
@@ -9,7 +9,17 @@ import TalFields from './SectionFields/TalFields';
 import SEPocPlanFields from './SectionFields/SEPocPlanFields';
 import SEArchFitFields from './SectionFields/SEArchFitFields';
 import SECompetitorFields from './SectionFields/SECompetitorFields';
-import ModelPickerDropdown from './ModelPickerDropdown';
+
+// SE sections auto-enable TiDB Expert mode
+const SE_SECTIONS = new Set(['se_poc_plan', 'se_arch_fit', 'se_competitor']);
+
+// Condensed TiDB context users can insert into visible prompt text
+const TIDB_CONTEXT_SNIPPET = `[TiDB Expert Context]
+- MySQL 8.0 wire-compatible: minimal migration from MySQL/Aurora/Vitess, no app rewrite
+- TiKV: distributed key-value store with Raft consensus, horizontal write scaling
+- TiFlash: columnar HTAP — real-time analytics on live OLTP data, no ETL
+- PD: TSO + scheduling coordinator; stateless TiDB SQL layer for unlimited read/write nodes
+- vs CockroachDB: MySQL-native (not PG), columnar HTAP; vs PlanetScale: no sharding middleware; vs Aurora: true horizontal write scaling`;
 
 const SECTIONS = [
   { key: 'pre_call', label: 'Pre-Call Intel' },
@@ -41,10 +51,29 @@ export default function ChatWorkspace() {
   const [populateSignal, setPopulateSignal] = useState(0); // increment to trigger populate
   const [ragEnabled, setRagEnabled] = useState(true);
   const [webSearchEnabled, setWebSearchEnabled] = useState(true);
-  const [tidbExpert, setTidbExpert] = useState(false);
+  const [tidbExpert, setTidbExpert] = useState(false); // auto-controlled by section
   const [topK, setTopK] = useState(8);
   const [chatModel, setChatModel] = useState('gpt-5.4');
   const [thinking, setThinking] = useState('medium');
+  const [apiTemplates, setApiTemplates] = useState({}); // { section_key: content } from Prompt Studio API
+
+  // Auto-enable TiDB Expert for SE sections
+  useEffect(() => {
+    setTidbExpert(SE_SECTIONS.has(section));
+  }, [section]);
+
+  // Load user preferences on mount
+  useEffect(() => {
+    fetch('/api/user/preferences')
+      .then(r => r.ok ? r.json() : null)
+      .then(data => {
+        if (!data) return;
+        if (data.llm_model)        setChatModel(data.llm_model);
+        if (data.reasoning_effort) setThinking(data.reasoning_effort);
+        if (data.retrieval_top_k)  setTopK(data.retrieval_top_k);
+      })
+      .catch(() => {});
+  }, []);
 
   // Fetch templates on mount
   useEffect(() => {
@@ -71,11 +100,38 @@ export default function ChatWorkspace() {
     loadTemplates();
   }, []);
 
+  // Fetch templates from Prompt Studio API on mount
+  useEffect(() => {
+    async function loadApiTemplates() {
+      try {
+        const listRes = await fetch('/api/prompts');
+        if (!listRes.ok) return;
+        const prompts = await listRes.json();
+        const templatePrompts = prompts.filter(p => p.category === 'template');
+        const results = await Promise.all(
+          templatePrompts.map(p =>
+            fetch(`/api/prompts/${p.id}`)
+              .then(r => r.ok ? r.json() : null)
+              .catch(() => null)
+          )
+        );
+        const map = {};
+        for (const prompt of results) {
+          if (!prompt) continue;
+          const sectionKey = prompt.id.replace(/^tpl_/, '');
+          if (prompt.current_content) map[sectionKey] = prompt.current_content;
+        }
+        setApiTemplates(map);
+      } catch { /* fall through to existing sources */ }
+    }
+    loadApiTemplates();
+  }, []);
+
   const updateField = (key, value) => setFieldValues(prev => ({ ...prev, [key]: value }));
 
   const getTemplate = () => {
     if (selectedTemplateUser === 'default') {
-      return templates[section]?.default || HARDCODED_DEFAULTS[section] || '';
+      return apiTemplates[section] || templates[section]?.default || HARDCODED_DEFAULTS[section] || '';
     }
     // Another user's template
     const found = allUserTemplates.find(t => t.section_key === section && t.user_email === selectedTemplateUser);
@@ -83,13 +139,13 @@ export default function ChatWorkspace() {
   };
 
   const handlePopulate = () => {
-    const account = fieldValues.account?.trim() || '';
-    if (!account) return; // account required
+    const selectedCalls = fieldValues.selectedCalls || [];
+    const account = fieldValues.account?.trim() || selectedCalls[0]?.account || '';
+    if (!account && selectedCalls.length === 0) return;
 
     let tpl = getTemplate();
 
     // Resolve {call_context} from selected calls
-    const selectedCalls = fieldValues.selectedCalls || [];
     const callContext = selectedCalls.length > 0
       ? selectedCalls.map(c => `${c.account || 'Unknown'} (${c.date ? new Date(c.date).toLocaleDateString() : '—'}${c.stage ? ', ' + c.stage : ''}${c.rep_email ? ', rep: ' + c.rep_email : ''})`).join('\n')
       : '[no call selected]';
@@ -132,7 +188,7 @@ export default function ChatWorkspace() {
       .map(t => ({ value: t.user_email, label: `${t.user_email.split('@')[0]} — ${t.template_name}` })),
   ];
 
-  const canPopulate = Boolean(fieldValues.account?.trim());
+  const canPopulate = Boolean(fieldValues.account?.trim()) || Boolean(fieldValues.selectedCalls?.length);
 
   const [loggingOut, setLoggingOut] = useState(false);
   const handleLogout = async () => {
@@ -144,33 +200,9 @@ export default function ChatWorkspace() {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100vh' }}>
       {/* Top bar */}
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0.45rem 1rem', borderBottom: '1px solid var(--border)', background: 'var(--bg-2)', flexShrink: 0, gap: '0.5rem' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-          <span style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--text)' }}>GTM Copilot</span>
-          <ModelPickerDropdown onTopKChange={setTopK} onModelChange={setChatModel} onThinkingChange={setThinking} />
-        </div>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0.45rem 1rem', borderBottom: '1px solid var(--border)', background: 'var(--bg-2)', flexShrink: 0 }}>
+        <span style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--text)' }}>GTM Copilot</span>
         <div style={{ display: 'flex', gap: '0.35rem', alignItems: 'center' }}>
-          <button
-            onClick={() => setRagEnabled(v => !v)}
-            title="Toggle knowledge base retrieval"
-            style={{ fontSize: '0.72rem', padding: '0.25rem 0.55rem', borderRadius: '4px', border: '1px solid var(--border)', cursor: 'pointer', background: ragEnabled ? 'var(--accent)' : 'transparent', color: ragEnabled ? '#fff' : 'var(--text-2)' }}
-          >
-            KB {ragEnabled ? 'On' : 'Off'}
-          </button>
-          <button
-            onClick={() => setWebSearchEnabled(v => !v)}
-            title="Toggle web search"
-            style={{ fontSize: '0.72rem', padding: '0.25rem 0.55rem', borderRadius: '4px', border: '1px solid var(--border)', cursor: 'pointer', background: webSearchEnabled ? 'var(--accent)' : 'transparent', color: webSearchEnabled ? '#fff' : 'var(--text-2)' }}
-          >
-            Web {webSearchEnabled ? 'On' : 'Off'}
-          </button>
-          <button
-            onClick={() => setTidbExpert(v => !v)}
-            title="Inject TiDB expert context into every response"
-            style={{ fontSize: '0.72rem', padding: '0.25rem 0.55rem', borderRadius: '4px', border: '1px solid var(--border)', cursor: 'pointer', background: tidbExpert ? '#7c3aed' : 'transparent', color: tidbExpert ? '#fff' : 'var(--text-2)' }}
-          >
-            TiDB Expert {tidbExpert ? 'On' : 'Off'}
-          </button>
           <Link href="/settings" style={{ fontSize: '0.78rem', color: 'var(--text-2)', padding: '0.3rem 0.6rem', borderRadius: '4px', textDecoration: 'none', border: '1px solid var(--border)' }}>⚙ Settings</Link>
           <button onClick={handleLogout} disabled={loggingOut} style={{ fontSize: '0.78rem', color: 'var(--text-2)', padding: '0.3rem 0.6rem', borderRadius: '4px', background: 'transparent', border: '1px solid var(--border)', cursor: 'pointer' }}>
             {loggingOut ? 'Signing out…' : '→ Sign out'}
@@ -203,6 +235,33 @@ export default function ChatWorkspace() {
           {/* Dynamic section fields */}
           <FieldComponent values={fieldValues} onChange={updateField} />
 
+          {/* TiDB Expert callout — shown for SE sections */}
+          {tidbExpert && (
+            <div style={{
+              borderRadius: '6px', border: '1px solid #7c3aed30',
+              background: '#7c3aed08', padding: '0.6rem 0.75rem',
+              display: 'grid', gap: '0.4rem',
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                <span style={{ fontSize: '0.6rem', color: '#7c3aed' }}>◎</span>
+                <span style={{ fontSize: '0.72rem', fontWeight: 600, color: '#7c3aed' }}>TiDB Expert Active</span>
+              </div>
+              <p style={{ margin: 0, fontSize: '0.7rem', color: 'var(--text-2)', lineHeight: 1.4 }}>
+                Full TiDB architecture context is automatically injected into every response — components, migration paths, competitive differentiators.
+              </p>
+              <button
+                onClick={() => { setChatDraft(d => d ? d + '\n\n' + TIDB_CONTEXT_SNIPPET : TIDB_CONTEXT_SNIPPET); setPopulateSignal(s => s + 1); }}
+                style={{
+                  fontSize: '0.7rem', padding: '0.25rem 0.6rem', borderRadius: '4px',
+                  border: '1px solid #7c3aed50', background: '#7c3aed15',
+                  color: '#7c3aed', cursor: 'pointer', fontWeight: 500, textAlign: 'left',
+                }}
+              >
+                + Insert TiDB context into prompt
+              </button>
+            </div>
+          )}
+
           {/* Populate button */}
           <button
             className="btn btn-primary"
@@ -216,7 +275,14 @@ export default function ChatWorkspace() {
       </div>
 
       {/* RIGHT */}
-      <PersistentChat draft={chatDraft} populateSignal={populateSignal} ragEnabled={ragEnabled} webSearchEnabled={webSearchEnabled} tidbExpert={tidbExpert} topK={topK} model={chatModel} thinking={thinking} section={section} />
+      <PersistentChat
+        draft={chatDraft} populateSignal={populateSignal}
+        ragEnabled={ragEnabled} webSearchEnabled={webSearchEnabled} tidbExpert={tidbExpert}
+        topK={topK} model={chatModel} thinking={thinking} section={section}
+        onModelChange={setChatModel} onThinkingChange={setThinking}
+        onRagChange={setRagEnabled} onWebSearchChange={setWebSearchEnabled}
+        onTopKChange={setTopK} onTidbExpertChange={setTidbExpert}
+      />
     </div>
     </div>
   );
