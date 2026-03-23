@@ -1163,24 +1163,25 @@ class LLMService:
         else:
             base_prompt = SECTION_SYSTEM_PROMPTS.get(section or "", SYSTEM_ORACLE)
         system_prompt = self._compose_persona_system_prompt(base_prompt, persona_name, persona_prompt, source_instructions=source_instructions)
+        # Pre-call intel always uses Firecrawl deep research regardless of whether RAG found hits.
+        if section in ("pre_call", "tal") and any(t.get("type") == "web_search_preview" for t in (tools or [])):
+            answer = self._deep_research_pre_call(
+                system_prompt,
+                message,
+                model=model,
+                tools=tools,
+                reasoning_effort=reasoning_effort,
+                intel_brief_enabled=intel_brief_enabled,
+                intel_brief_summarizer_model=intel_brief_summarizer_model,
+                intel_brief_summarizer_effort=intel_brief_summarizer_effort,
+                intel_brief_synthesis_model=intel_brief_synthesis_model,
+                intel_brief_synthesis_effort=intel_brief_synthesis_effort,
+            )
+            if answer:
+                return {"answer": answer, "follow_up_questions": self._fallback_followups("oracle")}
+
         if allow_ungrounded:
-            # Pre-call intel uses two-pass deep research to force all searches and prevent hallucination.
-            # All other sections use single-pass.
-            if section in ("pre_call", "tal") and any(t.get("type") == "web_search_preview" for t in (tools or [])):
-                answer = self._deep_research_pre_call(
-                    system_prompt,
-                    message,
-                    model=model,
-                    tools=tools,
-                    reasoning_effort=reasoning_effort,
-                    intel_brief_enabled=intel_brief_enabled,
-                    intel_brief_summarizer_model=intel_brief_summarizer_model,
-                    intel_brief_summarizer_effort=intel_brief_summarizer_effort,
-                    intel_brief_synthesis_model=intel_brief_synthesis_model,
-                    intel_brief_synthesis_effort=intel_brief_synthesis_effort,
-                )
-            else:
-                answer = self._responses_text(system_prompt, message, model=model, tools=tools, reasoning_effort=reasoning_effort)
+            answer = self._responses_text(system_prompt, message, model=model, tools=tools, reasoning_effort=reasoning_effort)
             if answer:
                 return {"answer": answer, "follow_up_questions": self._fallback_followups("oracle")}
             err = self.last_error or "No provider credentials configured."
