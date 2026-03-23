@@ -39,5 +39,6 @@ def test_migration_adds_call_outcome_column():
          patch("alembic.op.drop_column") as mock_drop:
         migration.upgrade()
         mock_add.assert_called_once()
+        assert mock_add.call_args[0][0] == "chorus_calls"
         migration.downgrade()
         mock_drop.assert_called_once_with("chorus_calls", "call_outcome")
