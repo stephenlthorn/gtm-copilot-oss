@@ -16,6 +16,24 @@ from app.utils.hashing import sha256_text
 logger = logging.getLogger(__name__)
 
 
+_OUTCOME_MAP: dict[str, str] = {
+    "won": "won",
+    "closed won": "won",
+    "loss": "lost",
+    "lost": "lost",
+    "closed lost": "lost",
+    "no decision": "no_decision",
+    "no_decision": "no_decision",
+    "active": "active",
+    "open": "active",
+    "in progress": "active",
+}
+
+
+def _coerce_outcome(raw: str | None) -> str | None:
+    return _OUTCOME_MAP.get((raw or "").strip().lower())
+
+
 class TranscriptIngestor:
     def __init__(self, db: Session) -> None:
         self.db = db

@@ -41,3 +41,40 @@ def test_migration_adds_call_outcome_column():
 
     migration.downgrade()
     mock_op.drop_column.assert_called_once_with("chorus_calls", "call_outcome")
+
+
+# ---------------------------------------------------------------------------
+# Task 2: _coerce_outcome
+# ---------------------------------------------------------------------------
+
+def test_coerce_outcome_won():
+    from app.ingest.transcript_ingestor import _coerce_outcome
+    assert _coerce_outcome("won") == "won"
+
+def test_coerce_outcome_closed_won():
+    from app.ingest.transcript_ingestor import _coerce_outcome
+    assert _coerce_outcome("closed won") == "won"
+
+def test_coerce_outcome_closed_lost_mixed_case():
+    from app.ingest.transcript_ingestor import _coerce_outcome
+    assert _coerce_outcome("Closed Lost") == "lost"
+
+def test_coerce_outcome_no_decision():
+    from app.ingest.transcript_ingestor import _coerce_outcome
+    assert _coerce_outcome("no decision") == "no_decision"
+
+def test_coerce_outcome_open_maps_to_active():
+    from app.ingest.transcript_ingestor import _coerce_outcome
+    assert _coerce_outcome("open") == "active"
+
+def test_coerce_outcome_in_progress_maps_to_active():
+    from app.ingest.transcript_ingestor import _coerce_outcome
+    assert _coerce_outcome("in progress") == "active"
+
+def test_coerce_outcome_none_returns_none():
+    from app.ingest.transcript_ingestor import _coerce_outcome
+    assert _coerce_outcome(None) is None
+
+def test_coerce_outcome_unrecognized_returns_none():
+    from app.ingest.transcript_ingestor import _coerce_outcome
+    assert _coerce_outcome("something_random") is None
