@@ -100,6 +100,9 @@ def test_normalize_extracts_call_outcome_from_top_level():
 
 def test_normalize_extracts_call_outcome_from_metadata_dict():
     from app.ingest.transcript_ingestor import TranscriptIngestor
+    # Payload has call_outcome in a nested metadata sub-dict.
+    # No top-level "turns" key — so the early-return guard is NOT triggered
+    # and the normalization path (lines 73-81) actually runs.
     payload = {
         "chorus_call_id": "abc",
         "metadata": {
@@ -108,7 +111,7 @@ def test_normalize_extracts_call_outcome_from_metadata_dict():
             "rep_email": "rep@corp.com",
             "call_outcome": "open",
         },
-        "turns": [],
+        # Note: no "turns" key — normalization runs instead of early-return
     }
     normalized = TranscriptIngestor._normalize(payload)
     assert normalized["metadata"]["call_outcome"] == "open"
