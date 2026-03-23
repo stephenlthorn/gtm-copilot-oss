@@ -131,3 +131,63 @@ def test_aifeedback_model_has_failure_category_column():
     from app.models.feedback import AIFeedback
     mapper = AIFeedback.__mapper__
     assert "failure_category" in [c.key for c in mapper.column_attrs]
+
+
+# ---------------------------------------------------------------------------
+# Task 2: PromptSuggestion model
+# ---------------------------------------------------------------------------
+
+def test_prompt_suggestion_model_has_correct_tablename():
+    """PromptSuggestion must use 'prompt_suggestions' table."""
+    from app.models.feedback import PromptSuggestion
+    assert PromptSuggestion.__tablename__ == "prompt_suggestions"
+
+
+def test_prompt_suggestion_model_has_required_fields():
+    """PromptSuggestion must expose all required mapped attributes."""
+    from app.models.feedback import PromptSuggestion
+    mapper = PromptSuggestion.__mapper__
+    column_keys = [c.key for c in mapper.column_attrs]
+    for field in ["id", "mode", "failure_category", "prompt_type",
+                  "reasoning", "current_prompt", "suggested_prompt",
+                  "applied_at", "dismissed_at", "created_at"]:
+        assert field in column_keys, f"Missing field: {field}"
+
+
+def test_prompt_suggestion_exported_from_models_init():
+    """PromptSuggestion must be importable from app.models."""
+    from app.models import PromptSuggestion
+    assert PromptSuggestion is not None
+
+
+def test_migration_003_upgrade_creates_prompt_suggestions_table():
+    """Migration 000003 upgrade must create prompt_suggestions and add failure_category."""
+    import importlib.util, sys
+    from pathlib import Path
+    migration_path = (
+        Path(__file__).parents[2]
+        / "alembic"
+        / "versions"
+        / "20260324_000003_add_failure_category_and_prompt_suggestions.py"
+    )
+    spec = importlib.util.spec_from_file_location("migration_000003", migration_path)
+    migration = importlib.util.module_from_spec(spec)
+    sys.modules["migration_000003"] = migration
+    spec.loader.exec_module(migration)
+
+    mock_op = MagicMock()
+    mock_op.get_bind.return_value.dialect.name = "sqlite"
+    migration.op = mock_op
+
+    migration.upgrade()
+    from unittest.mock import ANY
+    mock_op.add_column.assert_called_once_with(
+        "ai_feedback", ANY
+    )
+    mock_op.create_table.assert_called_once()
+    call_args = mock_op.create_table.call_args
+    assert call_args[0][0] == "prompt_suggestions"
+
+    migration.downgrade()
+    mock_op.drop_table.assert_called_once_with("prompt_suggestions")
+    mock_op.drop_column.assert_called_once_with("ai_feedback", "failure_category")

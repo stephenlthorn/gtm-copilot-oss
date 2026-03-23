@@ -28,9 +28,27 @@ def upgrade() -> None:
         sa.Column("failure_category", sa.String(64), nullable=True),
     )
 
-    # prompt_suggestions table added in Task 2 after model exists
+    op.create_table(
+        "prompt_suggestions",
+        sa.Column("id", uuid_col, primary_key=True),
+        sa.Column("mode", sa.String(64), nullable=False),
+        sa.Column("failure_category", sa.String(64), nullable=False),
+        sa.Column("prompt_type", sa.String(16), nullable=False),
+        sa.Column("reasoning", sa.Text, nullable=False),
+        sa.Column("current_prompt", sa.Text, nullable=False),
+        sa.Column("suggested_prompt", sa.Text, nullable=False),
+        sa.Column("applied_at", sa.DateTime(timezone=True), nullable=True),
+        sa.Column("dismissed_at", sa.DateTime(timezone=True), nullable=True),
+        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
+    )
+    op.create_index(
+        "ix_prompt_suggestions_mode_category",
+        "prompt_suggestions",
+        ["mode", "failure_category"],
+    )
 
 
 def downgrade() -> None:
-    # prompt_suggestions drop added in Task 2
+    op.drop_index("ix_prompt_suggestions_mode_category", table_name="prompt_suggestions")
+    op.drop_table("prompt_suggestions")
     op.drop_column("ai_feedback", "failure_category")
