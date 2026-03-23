@@ -917,3 +917,59 @@ Suggest a specific edit to reduce '{body.failure_category}' failures. Return JSO
         "dismissed_at": suggestion.dismissed_at,
         "created_at": suggestion.created_at.isoformat(),
     }
+
+
+@router.post("/feedback-suggestions/{id}/apply")
+def apply_feedback_suggestion(
+    id: uuid.UUID,
+    db: Session = Depends(db_session),
+):
+    """Apply a suggestion to the persona prompt (builtin suggestions return 400)."""
+    suggestion = db.get(PromptSuggestion, id)
+    if suggestion is None:
+        raise HTTPException(status_code=404, detail="Suggestion not found")
+
+    if suggestion.prompt_type == "builtin":
+        raise HTTPException(
+            status_code=400,
+            detail="Built-in prompts require a code change and cannot be applied via API",
+        )
+
+    # Update KBConfig.persona_prompt
+    kb_config = db.execute(select(KBConfig)).scalar_one_or_none()
+    if kb_config is None:
+        raise HTTPException(status_code=404, detail="KBConfig not found")
+
+    kb_config.persona_prompt = suggestion.suggested_prompt
+    suggestion.applied_at = datetime.now(timezone.utc)
+    db.commit()
+    db.refresh(suggestion)
+
+    return {
+        "id": str(suggestion.id),
+        "mode": suggestion.mode,
+        "failure_category": suggestion.failure_category,
+        "prompt_type": suggestion.prompt_type,
+        "reasoning": suggestion.reasoning,
+        "current_prompt": suggestion.current_prompt,
+        "suggested_prompt": suggestion.suggested_prompt,
+        "applied_at": suggestion.applied_at.isoformat() if suggestion.applied_at else None,
+        "dismissed_at": suggestion.dismissed_at,
+        "created_at": suggestion.created_at.isoformat(),
+    }
+
+
+@router.post("/feedback-suggestions/{id}/dismiss")
+def dismiss_feedback_suggestion(
+    id: uuid.UUID,
+    db: Session = Depends(db_session),
+):
+    """Dismiss a suggestion (resets the threshold counter via created_at anchor)."""
+    suggestion = db.get(PromptSuggestion, id)
+    if suggestion is None:
+        raise HTTPException(status_code=404, detail="Suggestion not found")
+
+    suggestion.dismissed_at = datetime.now(timezone.utc)
+    db.commit()
+
+    return {"status": "dismissed", "id": str(suggestion.id)}

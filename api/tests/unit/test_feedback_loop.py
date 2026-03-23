@@ -493,3 +493,103 @@ def test_feedback_suggestions_returns_502_on_openai_failure():
 
     assert exc_info.value.status_code == 502
     mock_db.commit.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# Task 6: apply and dismiss endpoints
+# ---------------------------------------------------------------------------
+
+def _make_suggestion(prompt_type="persona"):
+    """Helper: create a MagicMock PromptSuggestion."""
+    import datetime
+    s = MagicMock()
+    s.id = uuid.uuid4()
+    s.mode = "oracle"
+    s.failure_category = "too_generic"
+    s.prompt_type = prompt_type
+    s.reasoning = "The prompt is too vague."
+    s.current_prompt = "You are a sales assistant."
+    s.suggested_prompt = "You are a highly specific sales assistant."
+    s.applied_at = None
+    s.dismissed_at = None
+    s.created_at = datetime.datetime.now(datetime.timezone.utc)
+    return s
+
+
+def test_apply_suggestion_updates_kb_config():
+    """apply endpoint must update KBConfig.persona_prompt and set applied_at."""
+    from app.api.routes.admin import apply_feedback_suggestion
+
+    suggestion = _make_suggestion(prompt_type="persona")
+    mock_kb = MagicMock()
+    mock_db = MagicMock()
+    mock_db.get.return_value = suggestion
+    mock_db.execute.return_value = MagicMock(scalar_one_or_none=MagicMock(return_value=mock_kb))
+    mock_db.refresh.side_effect = lambda obj: None
+
+    result = apply_feedback_suggestion(id=suggestion.id, db=mock_db)
+
+    assert mock_kb.persona_prompt == suggestion.suggested_prompt
+    assert suggestion.applied_at is not None
+    mock_db.commit.assert_called_once()
+
+
+def test_apply_suggestion_returns_400_for_builtin():
+    """apply endpoint must return 400 when prompt_type is 'builtin'."""
+    from fastapi import HTTPException
+    from app.api.routes.admin import apply_feedback_suggestion
+    import pytest
+
+    suggestion = _make_suggestion(prompt_type="builtin")
+    mock_db = MagicMock()
+    mock_db.get.return_value = suggestion
+
+    with pytest.raises(HTTPException) as exc_info:
+        apply_feedback_suggestion(id=suggestion.id, db=mock_db)
+
+    assert exc_info.value.status_code == 400
+
+
+def test_apply_suggestion_returns_404_when_not_found():
+    """apply endpoint must return 404 when suggestion does not exist."""
+    from fastapi import HTTPException
+    from app.api.routes.admin import apply_feedback_suggestion
+    import pytest
+
+    mock_db = MagicMock()
+    mock_db.get.return_value = None
+
+    with pytest.raises(HTTPException) as exc_info:
+        apply_feedback_suggestion(id=uuid.uuid4(), db=mock_db)
+
+    assert exc_info.value.status_code == 404
+
+
+def test_dismiss_suggestion_sets_dismissed_at():
+    """dismiss endpoint must set dismissed_at and commit."""
+    from app.api.routes.admin import dismiss_feedback_suggestion
+
+    suggestion = _make_suggestion()
+    mock_db = MagicMock()
+    mock_db.get.return_value = suggestion
+
+    result = dismiss_feedback_suggestion(id=suggestion.id, db=mock_db)
+
+    assert suggestion.dismissed_at is not None
+    mock_db.commit.assert_called_once()
+    assert result["status"] == "dismissed"
+
+
+def test_dismiss_suggestion_returns_404_when_not_found():
+    """dismiss endpoint must return 404 when suggestion does not exist."""
+    from fastapi import HTTPException
+    from app.api.routes.admin import dismiss_feedback_suggestion
+    import pytest
+
+    mock_db = MagicMock()
+    mock_db.get.return_value = None
+
+    with pytest.raises(HTTPException) as exc_info:
+        dismiss_feedback_suggestion(id=uuid.uuid4(), db=mock_db)
+
+    assert exc_info.value.status_code == 404
