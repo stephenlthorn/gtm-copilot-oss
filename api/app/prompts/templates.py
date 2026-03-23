@@ -183,3 +183,4 @@ TIDB_EXPERT_CONTEXT = """You are an expert on TiDB, a distributed SQL database b
 
 # Complete SYSTEM_SE_ANALYSIS now that TIDB_EXPERT_CONTEXT is defined
 SYSTEM_SE_ANALYSIS = SYSTEM_SE_ANALYSIS + "\n\n" + TIDB_EXPERT_CONTEXT
+

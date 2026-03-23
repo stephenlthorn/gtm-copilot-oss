@@ -1,0 +1,192 @@
+from __future__ import annotations
+
+from app.prompts.personas import PERSONA_DEFAULT_PROMPTS
+from app.prompts.source_profiles import PRE_CALL_SOURCES, POST_CALL_SOURCES, POC_TECHNICAL_SOURCES
+from app.prompts.templates import (
+    SYSTEM_ORACLE,
+    SYSTEM_PRE_CALL_INTEL,
+    SYSTEM_POST_CALL_ANALYSIS,
+    SYSTEM_SE_ANALYSIS,
+    SYSTEM_CALL_COACH,
+    SYSTEM_MESSAGING_GUARDRAIL,
+    SYSTEM_MARKET_RESEARCH,
+    SYSTEM_REP_EXECUTION,
+    SYSTEM_SE_EXECUTION,
+    SYSTEM_MARKETING_EXECUTION,
+    TIDB_EXPERT_CONTEXT,
+)
+
+ALL_DEFAULTS: dict[str, dict] = {
+    # System prompts
+    "system_oracle": {
+        "category": "system_prompt",
+        "name": "Oracle",
+        "description": "Base system prompt for general chat and oracle queries",
+        "content": SYSTEM_ORACLE,
+        "variables": "[]",
+    },
+    "system_pre_call_intel": {
+        "category": "system_prompt",
+        "name": "Pre-Call Intel",
+        "description": "System prompt for pre-call research briefs with accuracy rules and deep research protocol",
+        "content": SYSTEM_PRE_CALL_INTEL,
+        "variables": "[]",
+    },
+    "system_post_call_analysis": {
+        "category": "system_prompt",
+        "name": "Post-Call Analysis",
+        "description": "System prompt for MEDDPICC post-call coaching briefs",
+        "content": SYSTEM_POST_CALL_ANALYSIS,
+        "variables": "[]",
+    },
+    "system_se_analysis": {
+        "category": "system_prompt",
+        "name": "SE Analysis",
+        "description": "System prompt for SE technical evaluations, POC plans, and competitor coaching",
+        "content": SYSTEM_SE_ANALYSIS,
+        "variables": "[]",
+    },
+    "system_call_coach": {
+        "category": "system_prompt",
+        "name": "Call Coach",
+        "description": "System prompt for call coaching recommendations",
+        "content": SYSTEM_CALL_COACH,
+        "variables": "[]",
+    },
+    "system_messaging_guardrail": {
+        "category": "system_prompt",
+        "name": "Messaging Guardrail",
+        "description": "Policy enforcement for outbound email send/draft",
+        "content": SYSTEM_MESSAGING_GUARDRAIL,
+        "variables": "[]",
+    },
+    "system_market_research": {
+        "category": "system_prompt",
+        "name": "Market Research",
+        "description": "System prompt for territory-specific strategic account planning",
+        "content": SYSTEM_MARKET_RESEARCH,
+        "variables": "[]",
+    },
+    "system_rep_execution": {
+        "category": "system_prompt",
+        "name": "Rep Execution",
+        "description": "System prompt for sales rep account briefs, discovery questions, deal risk, follow-up drafts",
+        "content": SYSTEM_REP_EXECUTION,
+        "variables": "[]",
+    },
+    "system_se_execution": {
+        "category": "system_prompt",
+        "name": "SE Execution",
+        "description": "System prompt for SE POC readiness, architecture fit, and competitor coaching",
+        "content": SYSTEM_SE_EXECUTION,
+        "variables": "[]",
+    },
+    "system_marketing_execution": {
+        "category": "system_prompt",
+        "name": "Marketing Execution",
+        "description": "System prompt for marketing intelligence and campaign analysis",
+        "content": SYSTEM_MARKETING_EXECUTION,
+        "variables": "[]",
+    },
+    "tidb_expert": {
+        "category": "system_prompt",
+        "name": "TiDB Expert Skill",
+        "description": "Complete TiDB knowledge base — injected when TiDB Expert toggle is on (Claude skill pattern)",
+        "content": TIDB_EXPERT_CONTEXT,
+        "variables": "[]",
+    },
+    # Section templates
+    "tpl_pre_call": {
+        "category": "template",
+        "name": "Pre-Call Intel",
+        "description": "User-facing template for pre-call research prompts",
+        "content": "",
+        "variables": '["{account}", "{website}", "{prospect_name}", "{prospect_linkedin}"]',
+    },
+    "tpl_post_call": {
+        "category": "template",
+        "name": "Post-Call Analysis",
+        "description": "User-facing template for post-call analysis prompts",
+        "content": "",
+        "variables": '["{account}", "{call_context}"]',
+    },
+    "tpl_follow_up": {
+        "category": "template",
+        "name": "Follow-Up Email",
+        "description": "User-facing template for follow-up email drafting",
+        "content": "",
+        "variables": '["{account}", "{call_context}", "{email_to}", "{email_cc}", "{email_tone}"]',
+    },
+    "tpl_tal": {
+        "category": "template",
+        "name": "Market Research / TAL",
+        "description": "User-facing template for target account list generation",
+        "content": "",
+        "variables": '["{account}", "{regions}", "{industry}", "{revenue_min}", "{revenue_max}", "{context}", "{top_n}"]',
+    },
+    "tpl_se_poc_plan": {
+        "category": "template",
+        "name": "SE: POC Plan",
+        "description": "User-facing template for SE POC planning",
+        "content": "",
+        "variables": '["{account}", "{target_offering}", "{call_context}"]',
+    },
+    "tpl_se_arch_fit": {
+        "category": "template",
+        "name": "SE: Architecture Fit",
+        "description": "User-facing template for SE architecture fit analysis",
+        "content": "",
+        "variables": '["{account}", "{call_context}"]',
+    },
+    "tpl_se_competitor": {
+        "category": "template",
+        "name": "SE: Competitor Coach",
+        "description": "User-facing template for SE competitive coaching briefs",
+        "content": "",
+        "variables": '["{account}", "{competitor}", "{call_context}"]',
+    },
+    # Personas
+    "persona_sales": {
+        "category": "persona",
+        "name": "Sales",
+        "description": "Persona prompt for sales representatives — deal progression, MEDDPICC, next-action bias",
+        "content": PERSONA_DEFAULT_PROMPTS.get("sales_representative", ""),
+        "variables": "[]",
+    },
+    "persona_se": {
+        "category": "persona",
+        "name": "SE",
+        "description": "Persona prompt for sales engineers — technical validation, migration risk, POC patterns",
+        "content": PERSONA_DEFAULT_PROMPTS.get("se", ""),
+        "variables": "[]",
+    },
+    "persona_marketing": {
+        "category": "persona",
+        "name": "Marketing",
+        "description": "Persona prompt for marketing — positioning, pipeline generation, campaign angles",
+        "content": PERSONA_DEFAULT_PROMPTS.get("marketing_specialist", ""),
+        "variables": "[]",
+    },
+    # Source profiles
+    "sources_pre_call": {
+        "category": "source_profile",
+        "name": "Pre-Call Sources",
+        "description": "Search source instructions for pre-call research (13 sources)",
+        "content": str(PRE_CALL_SOURCES),
+        "variables": "[]",
+    },
+    "sources_post_call": {
+        "category": "source_profile",
+        "name": "Post-Call Sources",
+        "description": "Search source instructions for post-call analysis",
+        "content": str(POST_CALL_SOURCES),
+        "variables": "[]",
+    },
+    "sources_poc_technical": {
+        "category": "source_profile",
+        "name": "POC Technical Sources",
+        "description": "Search source instructions for POC technical validation",
+        "content": str(POC_TECHNICAL_SOURCES),
+        "variables": "[]",
+    },
+}
