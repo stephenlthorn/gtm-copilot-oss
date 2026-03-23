@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+
 from app.prompts.personas import PERSONA_DEFAULT_PROMPTS
 from app.prompts.source_profiles import PRE_CALL_SOURCES, POST_CALL_SOURCES, POC_TECHNICAL_SOURCES
 from app.prompts.templates import (
@@ -172,21 +174,21 @@ ALL_DEFAULTS: dict[str, dict] = {
         "category": "source_profile",
         "name": "Pre-Call Sources",
         "description": "Search source instructions for pre-call research (13 sources)",
-        "content": str(PRE_CALL_SOURCES),
+        "content": json.dumps(PRE_CALL_SOURCES),
         "variables": "[]",
     },
     "sources_post_call": {
         "category": "source_profile",
         "name": "Post-Call Sources",
         "description": "Search source instructions for post-call analysis",
-        "content": str(POST_CALL_SOURCES),
+        "content": json.dumps(POST_CALL_SOURCES),
         "variables": "[]",
     },
     "sources_poc_technical": {
         "category": "source_profile",
         "name": "POC Technical Sources",
         "description": "Search source instructions for POC technical validation",
-        "content": str(POC_TECHNICAL_SOURCES),
+        "content": json.dumps(POC_TECHNICAL_SOURCES),
         "variables": "[]",
     },
 }
