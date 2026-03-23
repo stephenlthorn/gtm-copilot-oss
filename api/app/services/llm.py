@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import datetime, timezone
 import hashlib
@@ -926,6 +927,45 @@ class LLMService:
         except Exception as exc:
             self.logger.warning("Firecrawl search failed: %s", exc)
             return []
+
+    _SUMMARIZER_SYSTEM = (
+        "You are a B2B research analyst. Given a set of web search results for a specific "
+        "research query, extract and summarize the key findings into a single concise paragraph. "
+        "Focus on: company information, technical signals, pain points, business context, "
+        "and competitive indicators. Omit filler, ads, and irrelevant content. "
+        "Be specific — include company names, numbers, product names where present."
+    )
+
+    def _summarize_query_results(
+        self,
+        query_results: list[tuple[str, list[str]]],
+        *,
+        model: str = "gpt-5.4-mini",
+        reasoning_effort: str | None = None,
+    ) -> list[tuple[str, str]]:
+        """Summarize each query's search result snippets in parallel using a fast model.
+        Falls back to raw joined snippets on per-call failure or None response."""
+
+        def _summarize_one(item: tuple[str, list[str]]) -> tuple[str, str]:
+            label, snippets = item
+            if not snippets:
+                return label, "(no results)"
+            results_text = "\n---\n".join(snippets)
+            user_msg = f"Query: {label}\n\nSearch results:\n{results_text}"
+            try:
+                summary = self._responses_text(
+                    self._SUMMARIZER_SYSTEM,
+                    user_msg,
+                    model=model,
+                    reasoning_effort=reasoning_effort,
+                )
+                return label, summary if summary else "\n---\n".join(snippets)
+            except Exception as exc:
+                self.logger.warning("Summarizer call failed for '%s': %s", label, exc)
+                return label, "\n---\n".join(snippets)
+
+        with ThreadPoolExecutor(max_workers=8) as executor:
+            return list(executor.map(_summarize_one, query_results))
 
     def _deep_research_pre_call(
         self,
