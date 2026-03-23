@@ -407,3 +407,6 @@ class ChatMessage(Base):
     role: Mapped[str] = mapped_column(String(16), nullable=False)
     content: Mapped[str] = mapped_column(Text, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+from app.models.prompt_models import PromptRegistry, PromptVersion, PromptUserOverride  # noqa: F401, E402
