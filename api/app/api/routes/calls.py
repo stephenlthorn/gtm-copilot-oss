@@ -62,6 +62,7 @@ def log_manual_call(
     from app.utils.hashing import sha256_text
 
     rep_email = (request.headers.get("X-User-Email") or "").strip().lower() or "unknown"
+    openai_token = request.headers.get("X-OpenAI-Token")
     call_date = _date.fromisoformat(req.date) if req.date else _date.today()
     call_id = _uuid_mod.uuid4()
 
@@ -114,24 +115,28 @@ def log_manual_call(
         import logging
         logging.getLogger(__name__).warning("Failed to index manual call notes: %s", exc)
 
-    background_tasks.add_task(_run_delta_pipeline, str(call_id), req.notes, db)
+    background_tasks.add_task(_run_delta_pipeline, str(call_id), req.notes, openai_token)
 
     return {"id": str(call_id), "account": req.account, "date": call_date.isoformat(), "source_type": "manual"}
 
 
-def _run_delta_pipeline(call_id_str: str, notes: str, db: Session) -> None:
+def _run_delta_pipeline(call_id_str: str, notes: str, api_key: str | None = None) -> None:
+    from app.db.session import SessionLocal
     from app.services.account_memory import AccountMemoryService
     from app.services.llm import LLMService
+    import logging
+    db = SessionLocal()
     try:
         call = db.get(ChorusCall, _uuid_mod.UUID(call_id_str))
         if not call:
             return
         svc = AccountMemoryService(db)
-        llm = LLMService()
+        llm = LLMService(api_key=api_key)
         svc.run_delta_pipeline(call, notes, llm)
     except Exception as exc:
-        import logging
         logging.getLogger(__name__).warning("Delta pipeline failed for manual call %s: %s", call_id_str, exc)
+    finally:
+        db.close()
 
 
 @router.get("/{chorus_call_id}")
