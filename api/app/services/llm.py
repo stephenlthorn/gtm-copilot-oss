@@ -100,6 +100,18 @@ class LLMService:
         parts = token.split(".")
         return len(parts) == 3 and all(parts)
 
+    @staticmethod
+    def _assemble_context(hits: list[RetrievedChunk], token_budget: int) -> list[RetrievedChunk]:
+        """Select chunks greedily by token budget, highest score first."""
+        used = 0
+        selected = []
+        for chunk in hits:  # hits are already score-sorted descending
+            if used + chunk.token_count > token_budget:
+                break
+            selected.append(chunk)
+            used += chunk.token_count
+        return selected
+
     def _register_openai_client(self, key: str) -> None:
         normalized = key.strip()
         if not normalized:
@@ -1200,7 +1212,7 @@ class LLMService:
         context = "\n\n".join(
             [
                 f"[{h.source_id}:{h.chunk_id}] {h.text[:2000]}"
-                for h in hits[:20]
+                for h in self._assemble_context(hits, token_budget=6000)
             ]
         )
         prompt = (
@@ -1251,7 +1263,7 @@ class LLMService:
                 "questions_to_ask_next_call": self._fallback_followups("call_assistant"),
             }
 
-        context = "\n\n".join([f"[{h.source_id}:{h.chunk_id}] {h.text[:1500]}" for h in hits[:8]])
+        context = "\n\n".join([f"[{h.source_id}:{h.chunk_id}] {h.text[:1500]}" for h in self._assemble_context(hits, token_budget=10000)])
         prompt = (
             f"User request: {message}\n\n"
             "Transcript/Internal evidence:\n"
@@ -1414,7 +1426,7 @@ class LLMService:
         persona_prompt: str | None = None,
     ) -> dict[str, Any] | None:
         system_prompt = self._compose_persona_system_prompt(SYSTEM_REP_EXECUTION, persona_name, persona_prompt)
-        context = "\n\n".join([f"[{h.source_id}:{h.chunk_id}] {h.text[:1200]}" for h in hits[:8]])
+        context = "\n\n".join([f"[{h.source_id}:{h.chunk_id}] {h.text[:1200]}" for h in self._assemble_context(hits, token_budget=10000)])
         prompt = (
             f"Account: {account}\n"
             f"Request: {ask}\n"
@@ -1449,7 +1461,7 @@ class LLMService:
         persona_prompt: str | None = None,
     ) -> dict[str, Any] | None:
         system_prompt = self._compose_persona_system_prompt(SYSTEM_REP_EXECUTION, persona_name, persona_prompt)
-        context = "\n\n".join([f"[{h.source_id}:{h.chunk_id}] {h.text[:1200]}" for h in hits[:8]])
+        context = "\n\n".join([f"[{h.source_id}:{h.chunk_id}] {h.text[:1200]}" for h in self._assemble_context(hits, token_budget=10000)])
         prompt = (
             f"Account: {account}\n"
             f"Request: {ask}\n"
@@ -1484,7 +1496,7 @@ class LLMService:
         persona_prompt: str | None = None,
     ) -> dict[str, Any] | None:
         system_prompt = self._compose_persona_system_prompt(SYSTEM_REP_EXECUTION, persona_name, persona_prompt)
-        context = "\n\n".join([f"[{h.source_id}:{h.chunk_id}] {h.text[:1200]}" for h in hits[:8]])
+        context = "\n\n".join([f"[{h.source_id}:{h.chunk_id}] {h.text[:1200]}" for h in self._assemble_context(hits, token_budget=10000)])
         prompt = (
             f"Account: {account}\n"
             f"Request: {ask}\n"
@@ -1523,7 +1535,7 @@ class LLMService:
         persona_prompt: str | None = None,
     ) -> dict[str, Any] | None:
         system_prompt = self._compose_persona_system_prompt(SYSTEM_REP_EXECUTION, persona_name, persona_prompt)
-        context = "\n\n".join([f"[{h.source_id}:{h.chunk_id}] {h.text[:1200]}" for h in hits[:8]])
+        context = "\n\n".join([f"[{h.source_id}:{h.chunk_id}] {h.text[:1200]}" for h in self._assemble_context(hits, token_budget=10000)])
         prompt = (
             f"Account: {account}\n"
             f"Request: {ask}\n"
@@ -1560,7 +1572,7 @@ class LLMService:
         persona_prompt: str | None = None,
     ) -> dict[str, Any] | None:
         system_prompt = self._compose_persona_system_prompt(SYSTEM_SE_EXECUTION, persona_name, persona_prompt)
-        context = "\n\n".join([f"[{h.source_id}:{h.chunk_id}] {h.text[:1200]}" for h in hits[:8]])
+        context = "\n\n".join([f"[{h.source_id}:{h.chunk_id}] {h.text[:1200]}" for h in self._assemble_context(hits, token_budget=10000)])
         prompt = (
             f"Account: {account}\n"
             f"Target offering: {target_offering}\n"
@@ -1609,7 +1621,7 @@ class LLMService:
         persona_prompt: str | None = None,
     ) -> dict[str, Any] | None:
         system_prompt = self._compose_persona_system_prompt(SYSTEM_SE_EXECUTION, persona_name, persona_prompt)
-        context = "\n\n".join([f"[{h.source_id}:{h.chunk_id}] {h.text[:1200]}" for h in hits[:8]])
+        context = "\n\n".join([f"[{h.source_id}:{h.chunk_id}] {h.text[:1200]}" for h in self._assemble_context(hits, token_budget=10000)])
         prompt = (
             f"Account: {account}\n"
             f"Request: {ask}\n"
@@ -1653,7 +1665,7 @@ class LLMService:
         persona_prompt: str | None = None,
     ) -> dict[str, Any] | None:
         system_prompt = self._compose_persona_system_prompt(SYSTEM_SE_EXECUTION, persona_name, persona_prompt)
-        context = "\n\n".join([f"[{h.source_id}:{h.chunk_id}] {h.text[:1200]}" for h in hits[:8]])
+        context = "\n\n".join([f"[{h.source_id}:{h.chunk_id}] {h.text[:1200]}" for h in self._assemble_context(hits, token_budget=10000)])
         prompt = (
             f"Account: {account}\n"
             f"Request: {ask}\n"
@@ -1689,7 +1701,7 @@ class LLMService:
         persona_prompt: str | None = None,
     ) -> dict[str, Any] | None:
         system_prompt = self._compose_persona_system_prompt(SYSTEM_SE_EXECUTION, persona_name, persona_prompt)
-        context = "\n\n".join([f"[{h.source_id}:{h.chunk_id}] {h.text[:1200]}" for h in hits[:8]])
+        context = "\n\n".join([f"[{h.source_id}:{h.chunk_id}] {h.text[:1200]}" for h in self._assemble_context(hits, token_budget=10000)])
         prompt = (
             f"Account: {account}\n"
             f"Competitor: {competitor}\n"
@@ -1726,7 +1738,7 @@ class LLMService:
         persona_prompt: str | None = None,
     ) -> dict[str, Any] | None:
         system_prompt = self._compose_persona_system_prompt(SYSTEM_MARKETING_EXECUTION, persona_name, persona_prompt)
-        context = "\n\n".join([f"[{h.source_id}:{h.chunk_id}] {h.text[:1200]}" for h in hits[:10]])
+        context = "\n\n".join([f"[{h.source_id}:{h.chunk_id}] {h.text[:1200]}" for h in self._assemble_context(hits, token_budget=10000)])
         prompt = (
             f"Request: {ask}\n"
             f"Regions: {regions}\n"
