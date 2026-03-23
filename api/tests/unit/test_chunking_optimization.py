@@ -393,3 +393,103 @@ def test_replace_chunks_preserves_time_window_keys():
     for chunk in added_chunks:
         assert "start_time_sec" in chunk.metadata_json
         assert "end_time_sec" in chunk.metadata_json
+
+
+# ---------------------------------------------------------------------------
+# Task 6: _apply_filters chunk-level filters
+# ---------------------------------------------------------------------------
+
+def _make_doc(source_type="chorus"):
+    from app.models.entities import KBDocument, SourceType
+    from unittest.mock import MagicMock
+    doc = MagicMock(spec=KBDocument)
+    doc.source_type = MagicMock()
+    doc.source_type.value = source_type
+    doc.tags = {"account": "Acme Corp"}
+    return doc
+
+
+def _make_chunk(metadata_json=None):
+    from app.models.entities import KBChunk
+    from unittest.mock import MagicMock
+    chunk = MagicMock(spec=KBChunk)
+    chunk.metadata_json = metadata_json or {}
+    return chunk
+
+
+def test_apply_filters_rep_email_match():
+    from app.retrieval.service import HybridRetriever
+    doc = _make_doc()
+    chunk = _make_chunk({"rep_email": "alice@corp.com"})
+    assert HybridRetriever._apply_filters(doc, {"rep_email": "alice@corp.com"}, chunk) is True
+
+
+def test_apply_filters_rep_email_case_insensitive():
+    from app.retrieval.service import HybridRetriever
+    doc = _make_doc()
+    chunk = _make_chunk({"rep_email": "Alice@Corp.Com"})
+    assert HybridRetriever._apply_filters(doc, {"rep_email": "alice@corp.com"}, chunk) is True
+
+
+def test_apply_filters_rep_email_mismatch_excluded():
+    from app.retrieval.service import HybridRetriever
+    doc = _make_doc()
+    chunk = _make_chunk({"rep_email": "bob@corp.com"})
+    assert HybridRetriever._apply_filters(doc, {"rep_email": "alice@corp.com"}, chunk) is False
+
+
+def test_apply_filters_rep_email_missing_key_excluded():
+    from app.retrieval.service import HybridRetriever
+    doc = _make_doc()
+    chunk = _make_chunk({})  # no rep_email key
+    assert HybridRetriever._apply_filters(doc, {"rep_email": "alice@corp.com"}, chunk) is False
+
+
+def test_apply_filters_rep_email_noop_for_non_chorus():
+    from app.retrieval.service import HybridRetriever
+    doc = _make_doc(source_type="google_drive")
+    chunk = _make_chunk({})  # no rep_email, but not CHORUS
+    assert HybridRetriever._apply_filters(doc, {"rep_email": "alice@corp.com"}, chunk) is True
+
+
+def test_apply_filters_stage_match():
+    from app.retrieval.service import HybridRetriever
+    doc = _make_doc()
+    chunk = _make_chunk({"stage": "Discovery"})
+    assert HybridRetriever._apply_filters(doc, {"stage": ["discovery", "Demo"]}, chunk) is True
+
+
+def test_apply_filters_stage_mismatch():
+    from app.retrieval.service import HybridRetriever
+    doc = _make_doc()
+    chunk = _make_chunk({"stage": "Closed"})
+    assert HybridRetriever._apply_filters(doc, {"stage": ["discovery"]}, chunk) is False
+
+
+def test_apply_filters_call_outcome_match():
+    from app.retrieval.service import HybridRetriever
+    doc = _make_doc()
+    chunk = _make_chunk({"call_outcome": "won"})
+    assert HybridRetriever._apply_filters(doc, {"call_outcome": ["won"]}, chunk) is True
+
+
+def test_apply_filters_call_outcome_mismatch():
+    from app.retrieval.service import HybridRetriever
+    doc = _make_doc()
+    chunk = _make_chunk({"call_outcome": "lost"})
+    assert HybridRetriever._apply_filters(doc, {"call_outcome": ["won"]}, chunk) is False
+
+
+def test_apply_filters_no_filters_all_pass():
+    from app.retrieval.service import HybridRetriever
+    doc = _make_doc()
+    chunk = _make_chunk({})
+    assert HybridRetriever._apply_filters(doc, {}, chunk) is True
+
+
+def test_apply_filters_account_still_uses_doc_tags_for_non_chorus():
+    from app.retrieval.service import HybridRetriever
+    doc = _make_doc(source_type="google_drive")
+    doc.tags = {"account": "acme corp"}
+    chunk = _make_chunk({})
+    assert HybridRetriever._apply_filters(doc, {"account": ["Acme Corp"]}, chunk) is True

@@ -101,7 +101,8 @@ class HybridRetriever:
         return min(1.0, weighted_hits / denom)
 
     @staticmethod
-    def _apply_filters(doc: KBDocument, filters: dict) -> bool:
+    def _apply_filters(doc: KBDocument, filters: dict, chunk: "KBChunk | None" = None) -> bool:
+        from app.models.entities import SourceType
         source_filter = {s.lower() for s in (filters.get("source_type") or [])}
         if source_filter and doc.source_type.value.lower() not in source_filter:
             return False
@@ -130,6 +131,29 @@ class HybridRetriever:
             account = str(tags.get("account", "")).lower()
             if account not in account_filter:
                 return False
+
+        # Chunk-level filters — CHORUS source only
+        if chunk is not None and doc.source_type.value == SourceType.CHORUS.value:
+            chunk_meta = chunk.metadata_json if isinstance(chunk.metadata_json, dict) else {}
+
+            rep_email_filter = str(filters.get("rep_email") or "").strip().lower()
+            if rep_email_filter:
+                chunk_rep = str(chunk_meta.get("rep_email", "")).strip().lower()
+                if not chunk_rep or chunk_rep != rep_email_filter:
+                    return False
+
+            stage_filter = {s.lower() for s in (filters.get("stage") or [])}
+            if stage_filter:
+                chunk_stage = str(chunk_meta.get("stage", "")).strip().lower()
+                if not chunk_stage or chunk_stage not in stage_filter:
+                    return False
+
+            outcome_filter = {o.lower() for o in (filters.get("call_outcome") or [])}
+            if outcome_filter:
+                chunk_outcome = str(chunk_meta.get("call_outcome", "")).strip().lower()
+                if not chunk_outcome or chunk_outcome not in outcome_filter:
+                    return False
+
         return True
 
     @staticmethod
@@ -358,9 +382,10 @@ class HybridRetriever:
 
         scored: list[tuple[float, KBChunk, KBDocument]] = []
         for chunk, doc in deduped.values():
-            if not self._apply_filters(doc, filters):
+            if not self._apply_filters(doc, filters, chunk):
                 continue
             # Force call-focused primary chunks to score near 1.0 in order
+            # Note: _apply_filters (with chunk) was already applied above.
             chunk_doc_id = str(doc.id)
             if call_focused_primary_doc_id and chunk_doc_id == call_focused_primary_doc_id:
                 chunk_idx = getattr(chunk, 'chunk_index', 0) or 0
