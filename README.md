@@ -154,20 +154,37 @@ No demo transcripts or documents are bundled. Use `data/fake_drive` and `data/fa
 
 ## Account Deal Memory
 
-Rolling per-account MEDDPICC state that aggregates all calls (Chorus + manual) and updates after each call.
+Rolling per-account MEDDPICC state that aggregates all calls (Chorus + manual) and keeps building after every interaction.
+
+**How it works:**
+
+After each call sync or manual call log, a background pipeline extracts a MEDDPICC delta using the LLM and writes it to `pending_delta`. The rep sees a yellow review banner, can expand the diff, approve (with optional edits), or dismiss. Approved deltas merge into the live account state. Every post-call analysis automatically receives the full account history as context.
 
 **Features:**
-- Auto-detects new business vs existing account (by Chorus stage → account history → manual override)
-- Extracts MEDDPICC delta from every call transcript via LLM after each sync
-- Pending-review diff UI: rep approves, edits, or dismisses proposed changes
-- Manual call logging — paste notes, transcript, or voice memo
-- Full account history injected into every post-call analysis
+- Auto-detects new business vs. existing (Chorus stage → prior call history → manual override)
+- LLM-extracts MEDDPICC delta (scores 1–5 with evidence + missing) after every call
+- Pending-review banner: rep approves, edits, or dismisses proposed changes before they land
+- Manual call logging — paste notes, transcript, or voice memo; AI extracts MEDDPICC automatically
+- Full account history (MEDDPICC scores, contacts, tech stack, open items, summary) injected into post-call and follow-up analysis prompts
+- Direct rep override via PATCH for any field
 
-**New endpoints:**
-- `POST /calls/manual` — log a call not recorded in Chorus
-- `GET /accounts/{account}/memory` — fetch current deal state
-- `POST /accounts/{account}/memory/approve` — approve AI-proposed update
-- `POST /accounts/{account}/memory/dismiss` — dismiss without applying
-- `PATCH /accounts/{account}/memory` — direct rep edit
+**Endpoints:**
+```
+POST   /calls/manual                          Log a call not recorded in Chorus
+GET    /accounts/{account}/memory             Current deal state
+POST   /accounts/{account}/memory/approve     Approve AI-proposed update (optional edits)
+POST   /accounts/{account}/memory/dismiss     Dismiss without applying
+PATCH  /accounts/{account}/memory             Direct rep edit
+```
 
-**UI:** `/accounts` page — MEDDPICC scorecard, contacts, open items, call history. "Log call manually" button in Settings → Knowledge Sources.
+**UI:** `/accounts` page — MEDDPICC scorecard with evidence, key contacts, open items, call history. "Log call manually" button in Settings → Knowledge Sources.
+
+**Schema (account_deal_memory):**
+- `account` (PK, VARCHAR 255, canonicalized lowercase)
+- `meddpicc` JSON — one entry per element: `{score, evidence, missing}`
+- `key_contacts` JSON array — `{name, title, role, linkedin}`
+- `tech_stack` JSON — `{confirmed, likely, possible, unknown}` lists
+- `open_items` JSON array — `{item, owner, due_date, priority}`
+- `pending_delta` JSON — AI-proposed update awaiting rep review
+- `pending_review` BOOL — true when a delta is waiting
+- `call_count`, `last_call_date`, `deal_stage`, `is_new_business`, `status`
