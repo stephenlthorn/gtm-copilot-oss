@@ -197,20 +197,6 @@ def test_migration_003_upgrade_creates_prompt_suggestions_table():
 # Task 3: GET /admin/feedback-patterns
 # ---------------------------------------------------------------------------
 
-def _make_db_feedback_row(mode="oracle", failure_category="too_generic",
-                           rating="negative", query_text="test query",
-                           days_ago=1):
-    """Helper: create a MagicMock row mimicking AIFeedback query result."""
-    import datetime
-    row = MagicMock()
-    row.mode = mode
-    row.failure_category = failure_category
-    row.rating = rating
-    row.query_text = query_text
-    row.count = 3
-    row.last_seen = datetime.datetime.now(datetime.timezone.utc)
-    return row
-
 
 def test_feedback_patterns_endpoint_exists():
     """GET /admin/feedback-patterns route must be registered."""
