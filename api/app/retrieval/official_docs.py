@@ -185,6 +185,7 @@ class OfficialDocsRetriever:
             chunk_id=uuid4(),
             document_id=uuid4(),
             score=_ONLINE_SCORE,
+            token_count=len(text.split()),
             text=text,
             metadata={"source": SourceType.OFFICIAL_DOCS_ONLINE.value, "url": url},
             source_type=SourceType.OFFICIAL_DOCS_ONLINE.value,

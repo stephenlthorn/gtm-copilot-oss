@@ -20,10 +20,11 @@ from app.models.entities import (
     SourceType,
     UserPreference,
 )
-from app.models.feedback import AIFeedback
+from app.models.feedback import AIFeedback, ChunkQualitySignal
 
 __all__ = [
     "AIFeedback",
+    "ChunkQualitySignal",
     "AuditLog",
     "AuditStatus",
     "CallArtifact",

@@ -427,6 +427,7 @@ class HybridRetriever:
                     chunk_id=chunk.id,
                     document_id=doc.id,
                     score=round(float(score), 4),
+                    token_count=chunk.token_count,
                     text=chunk.text,
                     metadata=metadata,
                     source_type=doc.source_type.value,
