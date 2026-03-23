@@ -575,7 +575,10 @@ class LLMService:
         }
 
         if tools:
-            payload["tools"] = tools
+            # web_search_preview is built into Codex models — passing it explicitly causes errors
+            codex_tools = [t for t in tools if t.get("type") != "web_search_preview"]
+            if codex_tools:
+                payload["tools"] = codex_tools
 
         if reasoning_effort and reasoning_effort in ("low", "medium", "high"):
             payload["reasoning"] = {"effort": reasoning_effort}
@@ -1194,12 +1197,11 @@ class LLMService:
             }
 
         if not hits:
-            # If web search is available, let the LLM proceed — it can search the web.
-            has_web_search = any(t.get("type") == "web_search_preview" for t in (tools or []))
-            if has_web_search:
-                answer = self._responses_text(system_prompt, message, model=model, tools=tools, reasoning_effort=reasoning_effort)
-                if answer:
-                    return {"answer": answer, "citations": [], "follow_up_questions": self._fallback_followups("oracle")}
+            # No KB hits — let the LLM answer from its own knowledge/built-in web search.
+            # Codex models have web search built in; standard models use web_search_preview if present.
+            answer = self._responses_text(system_prompt, message, model=model, tools=tools, reasoning_effort=reasoning_effort)
+            if answer:
+                return {"answer": answer, "citations": [], "follow_up_questions": self._fallback_followups("oracle")}
             return {
                 "answer": (
                     "No relevant content found in the knowledge base for this query. "
