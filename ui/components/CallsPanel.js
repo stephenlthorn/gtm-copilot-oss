@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import ManualCallModal from './ManualCallModal';
 
 export default function CallsPanel() {
   const [config, setConfig] = useState(null);
@@ -9,6 +10,7 @@ export default function CallsPanel() {
   const [message, setMessage] = useState('');
   const [fullSyncDate, setFullSyncDate] = useState('2023-01-01');
   const [showFullSync, setShowFullSync] = useState(false);
+  const [showManualModal, setShowManualModal] = useState(false);
 
   useEffect(() => {
     fetch('/api/admin/kb-config')
@@ -116,6 +118,19 @@ export default function CallsPanel() {
           >
             Full Sync…
           </button>
+          <button
+            className="btn"
+            style={{ fontSize: '0.78rem' }}
+            onClick={() => setShowManualModal(true)}
+          >
+            + Log call manually
+          </button>
+          {showManualModal && (
+            <ManualCallModal
+              onClose={() => setShowManualModal(false)}
+              onSuccess={() => setMessage('Manual call logged and queued for analysis.')}
+            />
+          )}
         </div>
 
         {showFullSync && (
