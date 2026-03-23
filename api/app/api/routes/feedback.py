@@ -11,6 +11,11 @@ from app.services.embedding import EmbeddingService
 
 router = APIRouter()
 
+VALID_CATEGORIES = {
+    "wrong_info", "missing_info", "wrong_context",
+    "outdated_info", "too_generic", "wrong_tone", "incomplete",
+}
+
 
 @router.post("", response_model=FeedbackRead, status_code=201)
 def create_feedback(
@@ -22,6 +27,7 @@ def create_feedback(
         raise HTTPException(status_code=422, detail="rating must be 'positive' or 'negative'")
 
     email = x_user_email.strip().lower()
+    category = body.failure_category if body.failure_category in VALID_CATEGORIES else None
     text_to_embed = body.correction.strip() if body.correction and body.correction.strip() else body.original_response
     embedding = None
     try:
@@ -37,6 +43,7 @@ def create_feedback(
         original_response=body.original_response,
         rating=body.rating,
         correction=body.correction,
+        failure_category=category,
         embedding=embedding,
     )
     db.add(fb)

@@ -12,6 +12,7 @@ class FeedbackCreate(BaseModel):
     original_response: str
     rating: str  # "positive" or "negative"
     correction: str | None = None
+    failure_category: str | None = None
     citations: list[str] | None = None   # chunk UUIDs cited in the response
     audit_id: str | None = None          # UUID of the AuditLog row for this query
 
@@ -22,6 +23,7 @@ class FeedbackRead(BaseModel):
     mode: str
     rating: str
     correction: str | None
+    failure_category: str | None = None
     created_at: datetime
 
     model_config = {"from_attributes": True}
