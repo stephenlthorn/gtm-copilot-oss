@@ -112,6 +112,7 @@ class ChorusCall(Base):
     stage: Mapped[str | None] = mapped_column(String(255))
     rep_email: Mapped[str] = mapped_column(String(255), nullable=False)
     se_email: Mapped[str | None] = mapped_column(String(255))
+    call_outcome: Mapped[str | None] = mapped_column(String(64), nullable=True)
     participants: Mapped[list[dict]] = mapped_column(JSON_TYPE, default=list, nullable=False)
     engagement_type: Mapped[str] = mapped_column(String(64), nullable=False, server_default="call", index=True)
     meeting_summary: Mapped[str | None] = mapped_column(Text)
