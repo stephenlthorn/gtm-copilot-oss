@@ -390,9 +390,9 @@
   import os
   import uuid
   from datetime import datetime, timedelta, timezone
-
-  from sqlalchemy import and_, func as sqlfunc, text
   ```
+
+  `func` and `select` are already imported from `sqlalchemy` in `admin.py` — do not re-import or alias them. The implementation below uses `func` directly (same name as the existing import).
 
   Also add to the existing model imports:
   ```python
@@ -415,14 +415,14 @@
           select(
               AIFeedback.mode,
               AIFeedback.failure_category,
-              sqlfunc.count(AIFeedback.id).label("count"),
-              sqlfunc.max(AIFeedback.created_at).label("last_seen"),
+              func.count(AIFeedback.id).label("count"),
+              func.max(AIFeedback.created_at).label("last_seen"),
           )
           .where(AIFeedback.rating == "negative")
           .where(AIFeedback.failure_category.isnot(None))
           .where(AIFeedback.created_at >= cutoff)
           .group_by(AIFeedback.mode, AIFeedback.failure_category)
-          .order_by(sqlfunc.count(AIFeedback.id).desc())
+          .order_by(func.count(AIFeedback.id).desc())
           .limit(20)
       ).all()
 
@@ -571,7 +571,7 @@
 
           # Find most recent PromptSuggestion for this combo
           last_suggestion = db.execute(
-              select(sqlfunc.max(PromptSuggestion.created_at))
+              select(func.max(PromptSuggestion.created_at))
               .where(PromptSuggestion.mode == mode)
               .where(PromptSuggestion.failure_category == category)
           ).scalar()
@@ -580,7 +580,7 @@
           since = max(last_suggestion, window_floor) if last_suggestion else window_floor
 
           count = db.execute(
-              select(sqlfunc.count(AIFeedback.id))
+              select(func.count(AIFeedback.id))
               .where(AIFeedback.rating == "negative")
               .where(AIFeedback.failure_category == category)
               .where(AIFeedback.mode == mode)
@@ -1955,7 +1955,7 @@ from app.prompts.templates import (
 )
 ```
 
-Note: `func` from `sqlalchemy` is already imported as `func` in `admin.py`. Use `sqlfunc` alias only if needed to avoid name collision with the existing `func` import. Check the existing import before adding.
+Note: `func` and `select` are already imported from `sqlalchemy` in `admin.py` (`from sqlalchemy import case, func, select`). Do not re-import or alias them — the endpoint implementations above use `func` directly.
 
 ### Test file header
 
