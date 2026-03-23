@@ -836,7 +836,7 @@ def create_feedback_suggestion(
 
     # 2. Load current prompt
     if body.prompt_type == "persona":
-        kb_config = db.execute(select(KBConfig)).scalar_one_or_none()
+        kb_config = db.get(KBConfig, 1)
         current_prompt = (kb_config.persona_prompt if kb_config else None) or ""
         if not current_prompt:
             raise HTTPException(status_code=404, detail="No persona prompt configured")
@@ -913,8 +913,8 @@ Suggest a specific edit to reduce '{body.failure_category}' failures. Return JSO
         "reasoning": suggestion.reasoning,
         "current_prompt": suggestion.current_prompt,
         "suggested_prompt": suggestion.suggested_prompt,
-        "applied_at": suggestion.applied_at,
-        "dismissed_at": suggestion.dismissed_at,
+        "applied_at": suggestion.applied_at.isoformat() if suggestion.applied_at else None,
+        "dismissed_at": suggestion.dismissed_at.isoformat() if suggestion.dismissed_at else None,
         "created_at": suggestion.created_at.isoformat(),
     }
 
@@ -936,7 +936,7 @@ def apply_feedback_suggestion(
         )
 
     # Update KBConfig.persona_prompt
-    kb_config = db.execute(select(KBConfig)).scalar_one_or_none()
+    kb_config = db.get(KBConfig, 1)
     if kb_config is None:
         raise HTTPException(status_code=404, detail="KBConfig not found")
 
@@ -954,7 +954,7 @@ def apply_feedback_suggestion(
         "current_prompt": suggestion.current_prompt,
         "suggested_prompt": suggestion.suggested_prompt,
         "applied_at": suggestion.applied_at.isoformat() if suggestion.applied_at else None,
-        "dismissed_at": suggestion.dismissed_at,
+        "dismissed_at": suggestion.dismissed_at.isoformat() if suggestion.dismissed_at else None,
         "created_at": suggestion.created_at.isoformat(),
     }
 

@@ -366,10 +366,8 @@ def test_feedback_suggestions_calls_gpt4_and_saves_row():
     mock_kb = MagicMock()
     mock_kb.persona_prompt = "You are a helpful sales assistant."
 
-    mock_db.execute.side_effect = [
-        MagicMock(all=MagicMock(return_value=[ex1, ex2])),
-        MagicMock(scalar_one_or_none=MagicMock(return_value=mock_kb)),
-    ]
+    mock_db.execute.return_value = MagicMock(all=MagicMock(return_value=[ex1, ex2]))
+    mock_db.get.return_value = mock_kb
 
     gpt_response_content = json.dumps({
         "reasoning": "The prompt lacks specificity about account context.",
@@ -468,10 +466,8 @@ def test_feedback_suggestions_returns_502_on_openai_failure():
     mock_kb = MagicMock()
     mock_kb.persona_prompt = "You are a sales assistant."
 
-    mock_db.execute.side_effect = [
-        MagicMock(all=MagicMock(return_value=[ex1])),
-        MagicMock(scalar_one_or_none=MagicMock(return_value=mock_kb)),
-    ]
+    mock_db.execute.return_value = MagicMock(all=MagicMock(return_value=[ex1]))
+    mock_db.get.return_value = mock_kb
 
     mock_request = MagicMock()
     mock_request.headers.get.return_value = "test-token"
@@ -523,8 +519,9 @@ def test_apply_suggestion_updates_kb_config():
     suggestion = _make_suggestion(prompt_type="persona")
     mock_kb = MagicMock()
     mock_db = MagicMock()
-    mock_db.get.return_value = suggestion
-    mock_db.execute.return_value = MagicMock(scalar_one_or_none=MagicMock(return_value=mock_kb))
+    # First db.get call (PromptSuggestion, id) returns suggestion
+    # Second db.get call (KBConfig, 1) returns mock_kb
+    mock_db.get.side_effect = [suggestion, mock_kb]
     mock_db.refresh.side_effect = lambda obj: None
 
     result = apply_feedback_suggestion(id=suggestion.id, db=mock_db)
@@ -532,6 +529,12 @@ def test_apply_suggestion_updates_kb_config():
     assert mock_kb.persona_prompt == suggestion.suggested_prompt
     assert suggestion.applied_at is not None
     mock_db.commit.assert_called_once()
+
+    # Verify return shape
+    assert result["id"] == str(suggestion.id)
+    assert result["applied_at"] is not None
+    assert "mode" in result
+    assert "suggested_prompt" in result
 
 
 def test_apply_suggestion_returns_400_for_builtin():
@@ -561,6 +564,24 @@ def test_apply_suggestion_returns_404_when_not_found():
 
     with pytest.raises(HTTPException) as exc_info:
         apply_feedback_suggestion(id=uuid.uuid4(), db=mock_db)
+
+    assert exc_info.value.status_code == 404
+
+
+def test_apply_suggestion_returns_404_when_kb_config_missing():
+    """apply endpoint must return 404 when KBConfig does not exist."""
+    from fastapi import HTTPException
+    from app.api.routes.admin import apply_feedback_suggestion
+    import pytest
+
+    suggestion = _make_suggestion(prompt_type="persona")
+    mock_db = MagicMock()
+    # First db.get call (PromptSuggestion) returns the suggestion
+    # Second db.get call (KBConfig, 1) returns None
+    mock_db.get.side_effect = [suggestion, None]
+
+    with pytest.raises(HTTPException) as exc_info:
+        apply_feedback_suggestion(id=suggestion.id, db=mock_db)
 
     assert exc_info.value.status_code == 404
 
