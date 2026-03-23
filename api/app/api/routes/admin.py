@@ -650,6 +650,56 @@ def sync_feishu(request: Request, db: Session = Depends(db_session)) -> dict:
     return {"status": status_value, "message": message, **result}
 
 
+SUGGESTION_THRESHOLD_DEFAULT = 3
+
+
+@router.get("/feedback-alerts")
+def get_feedback_alerts(db: Session = Depends(db_session)):
+    """Return (mode, failure_category) combos where failure count >= threshold since last suggestion."""
+    threshold = int(os.environ.get("SUGGESTION_THRESHOLD", SUGGESTION_THRESHOLD_DEFAULT))
+    window_floor = datetime.now(timezone.utc) - timedelta(days=7)
+
+    # All distinct (mode, failure_category) combos with any negative feedback
+    combos = db.execute(
+        select(AIFeedback.mode, AIFeedback.failure_category)
+        .where(AIFeedback.rating == "negative")
+        .where(AIFeedback.failure_category.isnot(None))
+        .distinct()
+    ).all()
+
+    alerts = []
+    for combo in combos:
+        mode, category = combo.mode, combo.failure_category
+
+        # Find most recent PromptSuggestion for this combo
+        last_suggestion = db.execute(
+            select(func.max(PromptSuggestion.created_at))
+            .where(PromptSuggestion.mode == mode)
+            .where(PromptSuggestion.failure_category == category)
+        ).scalar()
+
+        # Count failures since max(last_suggestion.created_at, now()-7days)
+        since = max(last_suggestion, window_floor) if last_suggestion else window_floor
+
+        count = db.execute(
+            select(func.count(AIFeedback.id))
+            .where(AIFeedback.rating == "negative")
+            .where(AIFeedback.failure_category == category)
+            .where(AIFeedback.mode == mode)
+            .where(AIFeedback.created_at >= since)
+        ).scalar()
+
+        if count >= threshold:
+            alerts.append({
+                "mode": mode,
+                "failure_category": category,
+                "count": count,
+                "threshold": threshold,
+            })
+
+    return alerts
+
+
 @router.get("/feedback-patterns")
 def get_feedback_patterns(
     days: int = Query(default=7, ge=1, le=90),

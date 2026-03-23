@@ -244,3 +244,95 @@ def test_feedback_patterns_returns_empty_when_no_data():
 
     result = get_feedback_patterns(days=7, db=mock_db)
     assert result == []
+
+
+# ---------------------------------------------------------------------------
+# Task 4: GET /admin/feedback-alerts
+# ---------------------------------------------------------------------------
+
+def test_feedback_alerts_endpoint_exists():
+    """GET /admin/feedback-alerts route must be registered."""
+    from app.api.routes.admin import router
+    route_paths = [r.path for r in router.routes]
+    assert "/feedback-alerts" in route_paths
+
+
+def test_feedback_alerts_returns_combo_above_threshold():
+    """feedback-alerts must return combos where count >= threshold."""
+    import os
+    import datetime
+    from app.api.routes.admin import get_feedback_alerts
+
+    mock_db = MagicMock()
+
+    combo = MagicMock()
+    combo.mode = "oracle"
+    combo.failure_category = "too_generic"
+
+    # combos query
+    # last_suggestion query: returns None (no prior suggestion)
+    # count query: returns 5 (above default threshold of 3)
+    mock_db.execute.side_effect = [
+        MagicMock(all=MagicMock(return_value=[combo])),
+        MagicMock(scalar=MagicMock(return_value=None)),
+        MagicMock(scalar=MagicMock(return_value=5)),
+    ]
+
+    with patch.dict(os.environ, {"SUGGESTION_THRESHOLD": "3"}):
+        result = get_feedback_alerts(db=mock_db)
+
+    assert len(result) == 1
+    assert result[0]["mode"] == "oracle"
+    assert result[0]["failure_category"] == "too_generic"
+    assert result[0]["count"] == 5
+    assert result[0]["threshold"] == 3
+
+
+def test_feedback_alerts_returns_empty_below_threshold():
+    """feedback-alerts must return empty list when count < threshold."""
+    import os
+    from app.api.routes.admin import get_feedback_alerts
+
+    mock_db = MagicMock()
+
+    combo = MagicMock()
+    combo.mode = "oracle"
+    combo.failure_category = "too_generic"
+
+    mock_db.execute.side_effect = [
+        MagicMock(all=MagicMock(return_value=[combo])),
+        MagicMock(scalar=MagicMock(return_value=None)),
+        MagicMock(scalar=MagicMock(return_value=2)),  # below threshold
+    ]
+
+    with patch.dict(os.environ, {"SUGGESTION_THRESHOLD": "3"}):
+        result = get_feedback_alerts(db=mock_db)
+
+    assert result == []
+
+
+def test_feedback_alerts_resets_window_from_last_suggestion():
+    """feedback-alerts count window starts from last PromptSuggestion.created_at."""
+    import os
+    import datetime
+    from app.api.routes.admin import get_feedback_alerts
+
+    mock_db = MagicMock()
+
+    combo = MagicMock()
+    combo.mode = "rep"
+    combo.failure_category = "wrong_tone"
+
+    recent_suggestion_time = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(hours=12)
+
+    mock_db.execute.side_effect = [
+        MagicMock(all=MagicMock(return_value=[combo])),
+        MagicMock(scalar=MagicMock(return_value=recent_suggestion_time)),
+        MagicMock(scalar=MagicMock(return_value=4)),
+    ]
+
+    with patch.dict(os.environ, {"SUGGESTION_THRESHOLD": "3"}):
+        result = get_feedback_alerts(db=mock_db)
+
+    assert len(result) == 1
+    assert result[0]["mode"] == "rep"
