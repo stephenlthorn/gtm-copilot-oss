@@ -1,4 +1,5 @@
 from app.models.entities import (
+    AccountDealMemory,
     AuditLog,
     AuditStatus,
     CallArtifact,
@@ -20,10 +21,13 @@ from app.models.entities import (
     SourceType,
     UserPreference,
 )
-from app.models.feedback import AIFeedback
+from app.models.feedback import AIFeedback, ChunkQualitySignal, PromptSuggestion
 
 __all__ = [
+    "AccountDealMemory",
     "AIFeedback",
+    "ChunkQualitySignal",
+    "PromptSuggestion",
     "AuditLog",
     "AuditStatus",
     "CallArtifact",

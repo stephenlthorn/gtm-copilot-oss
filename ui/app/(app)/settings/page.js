@@ -1,13 +1,20 @@
+import Link from 'next/link';
 import { getSession } from '../../../lib/session';
 import { apiGet } from '../../../lib/api';
-import GoogleDrivePanel from '../../../components/GoogleDrivePanel';
-import FeishuPanel from '../../../components/FeishuPanel';
-import PersonaPromptPanel from '../../../components/PersonaPromptPanel';
 import GTMFeaturePanel from '../../../components/GTMFeaturePanel';
-import KBConfigPanel from '../../../components/KBConfigPanel';
 import KnowledgeSourcesPanel from '../../../components/KnowledgeSourcesPanel';
 import CallsPanel from '../../../components/CallsPanel';
 import SourceProfilesPanel from '../../../components/SourceProfilesPanel';
+import PromptStudio from '../../../components/PromptStudio';
+import IntelBriefSettingsPanel from '../../../components/IntelBriefSettingsPanel';
+
+const NAV = [
+  ['#account', 'Account'],
+  ['#knowledge', 'Knowledge'],
+  ['#ai', 'AI Behavior'],
+  ['#prompts', 'Prompt Studio'],
+  ['#data', 'Data'],
+];
 
 const SectionLabel = ({ id, children, first = false }) => (
   <div
@@ -34,48 +41,46 @@ export default async function SettingsPage() {
     ? Math.max(0, Math.round((session.expires_at - Date.now()) / 1000 / 60))
     : 0;
 
-  let liveModel = 'gpt-4o';
-  let personaName = 'sales_representative';
-  let personaPrompt = '';
   let sePocKitUrl = '';
   let featureFlags = {};
   let sourceProfiles = {};
   try {
     const cfg = await apiGet('/admin/kb-config');
-    if (cfg?.llm_model) liveModel = cfg.llm_model;
-    if (cfg?.persona_name) personaName = cfg.persona_name;
-    if (cfg?.persona_prompt) personaPrompt = cfg.persona_prompt;
     if (cfg?.se_poc_kit_url) sePocKitUrl = cfg.se_poc_kit_url;
     if (cfg?.feature_flags_json && typeof cfg.feature_flags_json === 'object') featureFlags = cfg.feature_flags_json;
     if (cfg?.source_profiles_json && typeof cfg.source_profiles_json === 'object') sourceProfiles = cfg.source_profiles_json;
   } catch { /* use defaults */ }
 
-  const [docsCountRaw, docsRaw, auditsRaw, callsRaw] = await Promise.all([
-    apiGet('/kb/documents/count').catch(() => ({ count: 0 })),
-    apiGet('/kb/documents?limit=50').catch(() => []),
+  const [docsRaw, allDocsRaw, auditsRaw, callsRaw, tidbExpertPrompt] = await Promise.all([
+    apiGet('/kb/documents?limit=300').catch(() => []),
+    apiGet('/kb/documents?limit=5000').catch(() => []),
     apiGet('/admin/audit?limit=30').catch(() => []),
-    apiGet('/calls?limit=300').catch(() => []),
+    apiGet('/calls?limit=1000').catch(() => []),
+    apiGet('/prompts/tidb_expert').catch(() => null),
   ]);
 
   const docsCount = docsCountRaw?.count ?? 0;
   const docs = docsRaw || [];
+  const allDocs = allDocsRaw || docs;
   const audits = auditsRaw || [];
   const calls = callsRaw || [];
-  const liveMode = docsCount > 0 || audits.length > 0 || calls.length > 0;
+
+  const driveCount = allDocs.filter(d => d.source_type === 'google_drive').length;
+  const chorusCount = allDocs.filter(d => d.source_type === 'chorus').length;
 
   return (
     <>
       <div className="topbar">
         <div>
           <div className="topbar-title">Settings</div>
-          <div className="topbar-meta">Account · knowledge · AI · data</div>
+          <div className="topbar-meta">Account · knowledge · AI behavior · data</div>
         </div>
-        <div className="topbar-right">
-          <span className={`tag ${liveMode ? 'tag-green' : ''}`}>{liveMode ? 'Live data' : 'No data yet'}</span>
-        </div>
+        <Link href="/chat" style={{ fontSize: '0.78rem', color: 'var(--text-2)', padding: '0.3rem 0.6rem', borderRadius: '4px', textDecoration: 'none', border: '1px solid var(--border)' }}>
+          ← Back to Chat
+        </Link>
       </div>
 
-      {/* Section jump nav */}
+      {/* Jump nav */}
       <div style={{
         display: 'flex',
         gap: '0.25rem',
@@ -85,42 +90,32 @@ export default async function SettingsPage() {
         position: 'sticky',
         top: 0,
         zIndex: 10,
-        flexWrap: 'wrap',
       }}>
-        {[
-          ['#account', 'Account'],
-          ['#knowledge', 'Knowledge & Integrations'],
-          ['#model', 'Model & Retrieval'],
-          ['#persona', 'AI Persona'],
-          ['#data', 'Data & Sync'],
-          ['#system', 'System'],
-        ].map(([href, label]) => (
+        {NAV.map(([href, label]) => (
           <a key={href} href={href} className="settings-nav-link">{label}</a>
         ))}
       </div>
 
       <div className="content">
 
-        {/* ── Account ─────────────────────────────── */}
+        {/* ── Account ──────────────────────────────────────── */}
         <SectionLabel id="account" first>Account</SectionLabel>
 
         <div className="panel">
           <div className="panel-header">
-            <span className="panel-title">ChatGPT Account</span>
+            <span className="panel-title">ChatGPT</span>
             <span className={`tag ${hasSession ? 'tag-green' : ''}`}>{hasSession ? 'Connected' : 'Not connected'}</span>
           </div>
-          <div className="panel-body" style={{ display: 'grid', gap: '0.5rem' }}>
-            <div style={{ display: 'grid', gridTemplateColumns: '130px 1fr', gap: '0.35rem 1rem', fontSize: '0.8rem' }}>
+          <div className="panel-body" style={{ display: 'grid', gap: '0.75rem' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '120px 1fr', gap: '0.35rem 1rem', fontSize: '0.8rem' }}>
               <span style={{ color: 'var(--text-3)' }}>Email</span>
               <span>{session?.email || '—'}</span>
               <span style={{ color: 'var(--text-3)' }}>Token expires</span>
               <span style={{ color: expiresIn < 10 ? 'var(--danger)' : 'var(--success)' }}>
                 {expiresIn > 0 ? `~${expiresIn} min` : 'Expired'}
               </span>
-              <span style={{ color: 'var(--text-3)' }}>LLM model</span>
-              <span>{liveModel}</span>
             </div>
-            <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.25rem' }}>
+            <div>
               {hasSession ? (
                 <form action="/api/auth/logout" method="POST">
                   <button type="submit" className="btn btn-danger">Sign out</button>
@@ -132,29 +127,103 @@ export default async function SettingsPage() {
           </div>
         </div>
 
-        {/* ── Knowledge Sources ───────────────────── */}
+        {/* ── Knowledge Sources ─────────────────────────────── */}
         <SectionLabel id="knowledge">Knowledge Sources</SectionLabel>
-        <GoogleDrivePanel />
-        <FeishuPanel />
+
         <CallsPanel />
 
-        {/* ── Model & Retrieval ────────────────────── */}
-        <SectionLabel id="model">Model &amp; Retrieval</SectionLabel>
-        <KBConfigPanel />
+        {/* ── AI Behavior ───────────────────────────────────── */}
+        <SectionLabel id="ai">AI Behavior</SectionLabel>
 
-        {/* ── AI Persona ───────────────────────────── */}
-        <SectionLabel id="persona">AI Persona</SectionLabel>
-        <PersonaPromptPanel initialPersona={personaName} initialPrompt={personaPrompt} />
-        <GTMFeaturePanel initialPocKitUrl={sePocKitUrl} initialFeatureFlags={featureFlags} />
-        <SourceProfilesPanel initialProfiles={sourceProfiles} />
+        <div className="panel">
+          <div className="panel-header">
+            <span className="panel-title">Intelligence Search Profiles</span>
+          </div>
+          <div className="panel-body">
+            <SourceProfilesPanel initialProfiles={sourceProfiles} />
+          </div>
+        </div>
 
-        {/* ── Data & Sync ──────────────────────────── */}
-        <SectionLabel id="data">Data &amp; Sync</SectionLabel>
+        {/* TiDB Expert Mode panel */}
+        <div className="panel" style={{ marginTop: '0.75rem' }}>
+          <div className="panel-header">
+            <span className="panel-title" style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+              <span style={{ color: '#7c3aed' }}>◎</span> TiDB Expert Mode
+            </span>
+            <span className="tag" style={{ background: '#7c3aed15', color: '#7c3aed', border: '1px solid #7c3aed30' }}>Auto</span>
+          </div>
+          <div className="panel-body" style={{ display: 'grid', gap: '0.75rem' }}>
+            <p style={{ margin: 0, fontSize: '0.8rem', color: 'var(--text-2)', lineHeight: 1.5 }}>
+              TiDB Expert mode injects a comprehensive technical context block into every AI response, covering TiDB architecture, migration paths, and competitive differentiators. It is <strong>automatically activated</strong> when you switch to an SE section and deactivated for sales sections.
+            </p>
+
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem', fontSize: '0.78rem' }}>
+              <div style={{ padding: '0.5rem 0.75rem', borderRadius: '6px', background: '#7c3aed10', border: '1px solid #7c3aed25' }}>
+                <div style={{ fontWeight: 600, color: '#7c3aed', marginBottom: '0.3rem', fontSize: '0.7rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Auto-On (SE sections)</div>
+                <div style={{ color: 'var(--text-2)', lineHeight: 1.5 }}>SE: POC Plan<br />SE: Architecture Fit<br />SE: Competitor Coach</div>
+              </div>
+              <div style={{ padding: '0.5rem 0.75rem', borderRadius: '6px', background: 'var(--bg-2)', border: '1px solid var(--border)' }}>
+                <div style={{ fontWeight: 600, color: 'var(--text-2)', marginBottom: '0.3rem', fontSize: '0.7rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Off (Sales sections)</div>
+                <div style={{ color: 'var(--text-3)', lineHeight: 1.5 }}>Pre-Call Intel<br />Post-Call Analysis<br />Follow-Up / TAL</div>
+              </div>
+            </div>
+
+            <details>
+              <summary style={{ fontSize: '0.75rem', color: 'var(--text-3)', cursor: 'pointer', padding: '0.2rem 0', listStyle: 'none', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                <span style={{ fontSize: '0.65rem' }}>▶</span> View injected expert context
+              </summary>
+              <pre style={{
+                marginTop: '0.6rem', padding: '0.75rem', borderRadius: '6px',
+                background: 'var(--bg-2)', border: '1px solid var(--border)',
+                fontSize: '0.72rem', lineHeight: 1.6, whiteSpace: 'pre-wrap',
+                color: 'var(--text-2)', overflowY: 'auto', maxHeight: '340px',
+              }}>{tidbExpertPrompt?.current_content || tidbExpertPrompt?.default_content || 'Loading...'}</pre>
+            </details>
+          </div>
+        </div>
+
+        {/* Intelligence Brief panel */}
+        <div className="panel" style={{ marginTop: '0.75rem' }}>
+          <div className="panel-header">
+            <span className="panel-title">Intelligence Brief</span>
+            <span className="tag">Pre-Call Intel</span>
+          </div>
+          <div className="panel-body">
+            <IntelBriefSettingsPanel />
+          </div>
+        </div>
+
+        <details style={{ marginTop: '0.5rem' }}>
+          <summary style={{
+            fontSize: '0.78rem',
+            color: 'var(--text-3)',
+            cursor: 'pointer',
+            padding: '0.4rem 0',
+            listStyle: 'none',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '0.4rem',
+          }}>
+            <span style={{ fontSize: '0.7rem' }}>▶</span>
+            Advanced / Developer Settings
+          </summary>
+          <div style={{ marginTop: '0.5rem' }}>
+            <GTMFeaturePanel initialPocKitUrl={sePocKitUrl} initialFeatureFlags={featureFlags} />
+          </div>
+        </details>
+
+        {/* ── Prompt Studio ─────────────────────────────────── */}
+        <SectionLabel id="prompts">Prompt Studio</SectionLabel>
+
+        <PromptStudio />
+
+        {/* ── Data ─────────────────────────────────────────── */}
+        <SectionLabel id="data">Data</SectionLabel>
 
         <div className="kpi-row">
           {[
-            { label: 'Docs Indexed', value: docsCount.toLocaleString(), sub: docs[0]?.title || '—' },
-            { label: 'Calls Indexed', value: calls.length, sub: calls[0]?.account || '—' },
+            { label: 'Drive Docs', value: driveCount, sub: 'Google Drive indexed' },
+            { label: 'Call Transcripts', value: chorusCount, sub: `${calls.length} calls total` },
             { label: 'Audit Events', value: audits.length, sub: 'Last 30 days' },
           ].map((k) => (
             <div className="kpi-card" key={k.label}>
@@ -194,24 +263,10 @@ export default async function SettingsPage() {
           </div>
         </div>
 
-        {/* ── System ──────────────────────────────── */}
-        <SectionLabel id="system">System</SectionLabel>
-
-        <div className="panel">
-          <div className="panel-header">
-            <span className="panel-title">Guardrails</span>
-          </div>
-          <div className="panel-body" style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem 1.5rem', fontSize: '0.78rem' }}>
-            {[
-              'Internal-only messaging (domain allowlist)',
-              'All generation events audit-logged',
-              'Email mode: draft only, no auto-send',
-            ].map((item) => (
-              <span key={item} style={{ color: 'var(--text-2)' }}>
-                <span style={{ color: 'var(--success)', marginRight: '0.3rem' }}>✓</span>{item}
-              </span>
-            ))}
-          </div>
+        <div style={{ marginTop: '2rem', paddingTop: '1rem', borderTop: '1px solid var(--border)', display: 'flex', gap: '1.5rem', flexWrap: 'wrap', fontSize: '0.74rem', color: 'var(--text-3)' }}>
+          {['Internal-only messaging enforced', 'All generation events audit-logged', 'Email: draft only, no auto-send'].map(item => (
+            <span key={item}><span style={{ color: 'var(--success)', marginRight: '0.3rem' }}>✓</span>{item}</span>
+          ))}
         </div>
 
       </div>

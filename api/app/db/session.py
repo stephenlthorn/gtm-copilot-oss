@@ -27,10 +27,10 @@ def _build_connect_args(url: str) -> dict:
     """Build SSL and connection args for TiDB Cloud Serverless."""
     args: dict = {}
     if "tidbcloud.com" in url or "tidbserverless" in url:
-        # Prevent pymysql from hanging indefinitely if TiDB drops the TCP connection.
-        args["read_timeout"] = 30
-        args["write_timeout"] = 30
-        args["connect_timeout"] = 10
+        # TiDB Serverless auto-pauses; allow up to 120s for cold-start wakeup.
+        args["read_timeout"] = 120
+        args["write_timeout"] = 120
+        args["connect_timeout"] = 60
         import ssl as _ssl
 
         ssl_ca = os.environ.get("TIDB_SSL_CA")

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import datetime, timezone
 import hashlib
@@ -20,12 +21,17 @@ from openai import OpenAI
 
 from app.core.settings import get_settings
 from app.prompts.personas import get_persona_label, normalize_persona
+from app.services.prompt_service import PromptService, SECTION_TO_PROMPT_ID
 from app.prompts.templates import (
+    SECTION_SYSTEM_PROMPTS,
     SYSTEM_CALL_COACH,
     SYSTEM_MARKETING_EXECUTION,
     SYSTEM_MARKET_RESEARCH,
     SYSTEM_ORACLE,
+    SYSTEM_POST_CALL_ANALYSIS,
+    SYSTEM_PRE_CALL_INTEL,
     SYSTEM_REP_EXECUTION,
+    SYSTEM_SE_ANALYSIS,
     SYSTEM_SE_EXECUTION,
 )
 from app.retrieval.types import RetrievedChunk
@@ -104,6 +110,18 @@ class LLMService:
         token = value.strip()
         parts = token.split(".")
         return len(parts) == 3 and all(parts)
+
+    @staticmethod
+    def _assemble_context(hits: list[RetrievedChunk], token_budget: int) -> list[RetrievedChunk]:
+        """Select chunks greedily by token budget, highest score first."""
+        used = 0
+        selected = []
+        for chunk in hits:  # hits are already score-sorted descending
+            if used + chunk.token_count > token_budget:
+                break
+            selected.append(chunk)
+            used += chunk.token_count
+        return selected
 
     def _register_openai_client(self, key: str) -> None:
         normalized = key.strip()
@@ -606,6 +624,12 @@ class LLMService:
             "include": ["reasoning.encrypted_content"],
         }
 
+        if tools:
+            # web_search_preview is built into Codex models — passing it explicitly causes errors
+            codex_tools = [t for t in tools if t.get("type") != "web_search_preview"]
+            if codex_tools:
+                payload["tools"] = codex_tools
+
         if reasoning_effort and reasoning_effort in ("low", "medium", "high"):
             payload["reasoning"] = {"effort": reasoning_effort}
 
@@ -915,6 +939,283 @@ class LLMService:
             f"Based on this evidence, a practical next step is to validate this against the exact ask: \"{message}\"."
         )
 
+    def _extract_company_contact(self, message: str) -> tuple[str, str]:
+        """Use LLM to reliably extract company and contact name from a pre-call request."""
+        try:
+            result = self._responses_json(
+                "Extract the company name and contact person's full name from the user's request. "
+                "Return ONLY valid JSON with keys 'company' and 'contact'. "
+                "If either is not present, use an empty string.",
+                f"Request: {message}",
+            )
+            if isinstance(result, dict):
+                company = (result.get("company") or "").strip()
+                contact = (result.get("contact") or "").strip()
+                if company and contact:
+                    return company, contact
+        except Exception:
+            pass
+        # Fallback: simple regex for "Name at Company" pattern
+        m = re.search(r'([A-Z][a-z]+(?: [A-Z][a-z]+)+)\b.{0,60}?\bat\s+([A-Z][A-Za-z0-9& ]{2,30})', message)
+        if m:
+            return m.group(2).strip(), m.group(1).strip()
+        return "unknown company", "unknown contact"
+
+    @staticmethod
+    def _get_firecrawl_api_key() -> str | None:
+        """Read Firecrawl API key from env or the CLI credentials file."""
+        key = os.environ.get("FIRECRAWL_API_KEY") or get_settings().firecrawl_api_key
+        if key:
+            return key
+        creds_path = Path.home() / "Library" / "Application Support" / "firecrawl-cli" / "credentials.json"
+        if creds_path.exists():
+            try:
+                data = json.loads(creds_path.read_text())
+                return data.get("apiKey") or None
+            except Exception:
+                pass
+        return None
+
+    def _firecrawl_search(self, query: str, limit: int = 5) -> list[dict]:
+        """Run a single Firecrawl search and return result dicts with url/title/snippet."""
+        api_key = self._get_firecrawl_api_key()
+        if not api_key:
+            return []
+        try:
+            resp = httpx.post(
+                "https://api.firecrawl.dev/v1/search",
+                headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+                json={"query": query, "limit": limit},
+                timeout=15,
+            )
+            if resp.status_code != 200:
+                return []
+            data = resp.json()
+            items = data.get("data") or []
+            return [
+                {
+                    "url": r.get("url", ""),
+                    "title": r.get("title", ""),
+                    "snippet": (r.get("description") or r.get("markdown") or "")[:600],
+                }
+                for r in items
+            ]
+        except Exception as exc:
+            self.logger.warning("Firecrawl search failed: %s", exc)
+            return []
+
+    _SUMMARIZER_SYSTEM = (
+        "You are a B2B research analyst. Given a set of web search results for a specific "
+        "research query, extract and summarize the key findings into a single concise paragraph. "
+        "Focus on: company information, technical signals, pain points, business context, "
+        "and competitive indicators. Omit filler, ads, and irrelevant content. "
+        "Be specific — include company names, numbers, product names where present."
+    )
+
+    def _summarize_query_results(
+        self,
+        query_results: list[tuple[str, list[str]]],
+        *,
+        model: str = "gpt-5.4-mini",
+        reasoning_effort: str | None = None,
+    ) -> list[tuple[str, str]]:
+        """Summarize each query's search result snippets in parallel using a fast model.
+        Falls back to raw joined snippets on per-call failure or None response."""
+
+        def _summarize_one(item: tuple[str, list[str]]) -> tuple[str, str]:
+            label, snippets = item
+            if not snippets:
+                return label, "(no results)"
+            results_text = "\n---\n".join(snippets)
+            user_msg = f"Query: {label}\n\nSearch results:\n{results_text}"
+            try:
+                summary = self._responses_text(
+                    self._SUMMARIZER_SYSTEM,
+                    user_msg,
+                    model=model,
+                    reasoning_effort=reasoning_effort,
+                )
+                return label, summary if summary else "\n---\n".join(snippets)
+            except Exception as exc:
+                self.logger.warning("Summarizer call failed for '%s': %s", label, exc)
+                return label, "\n---\n".join(snippets)
+
+        with ThreadPoolExecutor(max_workers=8) as executor:
+            return list(executor.map(_summarize_one, query_results))
+
+    def _deep_research_pre_call(
+        self,
+        system_prompt: str,
+        message: str,
+        model: str | None,
+        tools: list[dict] | None,
+        reasoning_effort: str | None,
+        *,
+        intel_brief_enabled: bool = True,
+        intel_brief_summarizer_model: str = "gpt-5.4-mini",
+        intel_brief_summarizer_effort: str | None = None,
+        intel_brief_synthesis_model: str = "gpt-5.4",
+        intel_brief_synthesis_effort: str = "medium",
+    ) -> str | None:
+        """Backend-driven deep research: run searches via Firecrawl directly,
+        compile findings, pass grounded results to LLM for synthesis only."""
+        company, contact = self._extract_company_contact(message)
+
+        queries = [
+            (f"{contact} {company} site:linkedin.com", "Contact background"),
+            (f"{company} YugabyteDB", "YugabyteDB competitive signal"),
+            (f"{company} CockroachDB OR PlanetScale OR distributed SQL migration 2025 2026", "Other competitive DB moves"),
+            (f"{company} database migration infrastructure 2025 2026", "DB migration news"),
+            (f"{company} revenue 2025", "Recent financials"),
+            (f"{company} Vitess MySQL database engineering", "DB tech stack — Vitess/MySQL"),
+            (f"site:shopify.engineering database OR MySQL OR distributed", "Engineering blog DB posts"),
+            (f"{company} GCP cloud infrastructure", "Cloud provider"),
+        ]
+
+        COMPETITORS = ["yugabytedb", "cockroachdb", "planetscale", "google spanner", "alloydb", "aurora dsql"]
+        competitive_hits: list[dict] = []
+
+        query_raw_results: list[tuple[str, list[str]]] = []
+        research_sections: list[str] = [f"## Research findings for: {contact} at {company}\n"]
+        for query, label in queries:
+            results = self._firecrawl_search(query, limit=4)
+            research_sections.append(f"### {label}\nQuery: `{query}`")
+            if results:
+                snippets_for_query: list[str] = []
+                for r in results:
+                    snippets_for_query.append(r["snippet"])
+                    research_sections.append(f"- [{r['title']}]({r['url']})\n  {r['snippet']}")
+                    # Detect company-specific competitive signal.
+                    # Exclude generic docs/reference pages (they match company terms incidentally).
+                    DOCS_PATTERNS = ["/docs/", "/documentation/", "/reference/", "/stable/", "/api/", "/faq/"]
+                    is_generic_docs = any(p in r["url"].lower() for p in DOCS_PATTERNS)
+                    combined = f"{r['title']} {r['snippet']}".lower()
+                    is_company_specific = company.lower() in combined
+                    matched_competitor = next((c for c in COMPETITORS if c in combined), None)
+                    if is_company_specific and matched_competitor and not is_generic_docs:
+                        competitive_hits.append({
+                            "competitor": matched_competitor,
+                            "title": r["title"],
+                            "url": r["url"],
+                            "snippet": r["snippet"],
+                        })
+                query_raw_results.append((label, snippets_for_query))
+            else:
+                research_sections.append("- No results returned")
+                query_raw_results.append((label, []))
+
+        # Correct capitalization for known competitors
+        COMPETITOR_DISPLAY = {
+            "yugabytedb": "YugabyteDB", "cockroachdb": "CockroachDB",
+            "planetscale": "PlanetScale", "google spanner": "Google Spanner",
+            "alloydb": "AlloyDB", "aurora dsql": "Aurora DSQL",
+        }
+
+        # Prepend a pre-formatted competitive alert block when company-specific signals found.
+        # The LLM must copy this verbatim — do not let it reconstruct it from memory.
+        if competitive_hits:
+            seen_competitors: set[str] = set()
+            # Deduplicate by URL
+            seen_urls: set[str] = set()
+            sources_md = []
+            for hit in competitive_hits:
+                if hit["url"] in seen_urls:
+                    continue
+                seen_urls.add(hit["url"])
+                sources_md.append(f'  - [{hit["title"]}]({hit["url"]})\n    > {hit["snippet"][:200]}')
+                display = COMPETITOR_DISPLAY.get(hit["competitor"], hit["competitor"].title())
+                seen_competitors.add(display)
+            competitors_str = ", ".join(sorted(seen_competitors))
+            pre_formatted_alert = (
+                f"⚠️ COMPETITIVE ALERT — {company.upper()} + {competitors_str.upper()} CONFIRMED\n\n"
+                f"Research found {len(competitive_hits)} result(s) explicitly linking {company} to {competitors_str}.\n\n"
+                "Sources (copy these URLs exactly — do not substitute):\n"
+                + "\n".join(sources_md) + "\n\n"
+                f"Sales implication: {company} has evaluated or is migrating to {competitors_str}. "
+                "Reframe meeting goal as competitive displacement. Lead with TiDB's MySQL wire compatibility "
+                "as the lower-risk path vs PostgreSQL-based alternatives."
+            )
+            instruction = (
+                "INSTRUCTION: The section below is a PRE-FORMATTED COMPETITIVE ALERT. "
+                "Copy it VERBATIM at the top of your brief output (before Section 1). "
+                "Do NOT rewrite it. Do NOT change the URLs. Do NOT add new URLs.\n\n"
+                + pre_formatted_alert
+            )
+            research_sections.insert(1, instruction)
+
+        # Two-stage: replace raw-snippet sections with Mini summaries
+        if intel_brief_enabled:
+            summaries = self._summarize_query_results(
+                query_raw_results,
+                model=intel_brief_summarizer_model,
+                reasoning_effort=intel_brief_summarizer_effort,
+            )
+            summary_body = [f"### {lbl}\n{para}" for lbl, para in summaries]
+            if competitive_hits:
+                # keep header (index 0) + competitive alert (index 1), replace rest
+                research_sections = research_sections[:2] + summary_body
+            else:
+                # keep header (index 0) only, replace rest
+                research_sections = research_sections[:1] + summary_body
+
+        research_notes = "\n".join(research_sections)
+
+        synthesize_prompt = (
+            f"Original request: {message}\n\n"
+            "=== WEB RESEARCH FINDINGS (retrieved via Firecrawl) ===\n"
+            f"{research_notes}\n"
+            "=== END RESEARCH FINDINGS ===\n\n"
+            "Write a tight, operator-level pre-call intelligence brief a sales rep can use in the field.\n\n"
+            "COMPETITIVE ALERT RULE:\n"
+            "If the research contains a PRE-FORMATTED COMPETITIVE ALERT marked "
+            "'INSTRUCTION: Copy it VERBATIM', output that exact block first, unchanged, "
+            "with the exact URLs as written. Do not rewrite it.\n\n"
+            "CONTENT RULES:\n"
+            "- Data confirmed in research findings: state confidently, no inline source annotations.\n"
+            "- Data not in findings but inferable from market/industry patterns: state as hypothesis, "
+            "mark with *(hypothesis)*.\n"
+            "- Data not found and not inferable: omit entirely. Never write 'Not found in research'.\n"
+            "- Never fabricate revenue figures, contact tenure, or specific DB tech stack details.\n\n"
+            "REQUIRED OUTPUT FORMAT — use these sections in order:\n\n"
+            "## 1. Company Snapshot\n"
+            "3-4 bullets: what they do, scale/growth signals from research, 1-2 key competitors.\n\n"
+            "## 2. Contact Background\n"
+            "Name, role, seniority signal. Infer influence on DB/platform decisions from the role title — "
+            "state it confidently (e.g. 'owns platform architecture decisions', not 'likely influences'). "
+            "Only include fields present in research.\n\n"
+            "## 3. Stack Hypothesis\n"
+            "Name specific technologies, not categories. 'Aurora MySQL' not 'MySQL-compatible'. "
+            "'Snowflake' not 'analytics system'. Use tiers — only include tiers with content:\n"
+            "**Likely:** (supported by job postings, engineering blog, or research findings — name the actual system)\n"
+            "**Possible:** (common for this industry/scale — name the actual system, mark with *(hypothesis)*)\n"
+            "**Need to confirm on call:** (the one unknown that most changes your pitch if wrong)\n\n"
+            "## 4. Pain Hypotheses\n"
+            "2-3 pains. For each:\n"
+            "- One sentence: what the pain is and why it applies here\n"
+            "- **Signal:** what from research supports it\n"
+            "- **🎧 Listen for:** 1-2 specific phrases the prospect might say that confirm this pain\n\n"
+            "## 5. TiDB Value Props\n"
+            "One pain → one TiDB response. One line each. Be specific to this company.\n\n"
+            "## 6. Discovery Questions\n"
+            "4-5 questions tagged with MEDDPICC element (Metrics / Economic Buyer / Decision Criteria / "
+            "Decision Process / Identify Pain / Champion / Competition / Paper Process).\n\n"
+            "## 7. ⚠️ Landmines — What NOT to Say\n"
+            "2-3 bullets: specific statements that will lose the room, each with a one-line reframe.\n\n"
+            "## 8. Your One-Liner\n"
+            "Maximum 15 words. A single punchy sentence the rep can anchor the whole meeting on. "
+            "Make it specific to this company's situation — not a generic TiDB tagline.\n\n"
+            "## 9. Next Action\n"
+            "Single concrete step with owner and timing."
+        )
+        # Synthesis pass: no web search tools needed — LLM just writes from the grounded notes
+        return self._responses_text(
+            system_prompt,
+            synthesize_prompt,
+            model=intel_brief_synthesis_model if intel_brief_enabled else model,
+            tools=None,
+            reasoning_effort=intel_brief_synthesis_effort if intel_brief_enabled else reasoning_effort,
+        )
+
     def answer_oracle(
         self,
         message: str,
@@ -927,11 +1228,44 @@ class LLMService:
         persona_prompt: str | None = None,
         reasoning_effort: str | None = None,
         source_instructions: str | None = None,
+        section: str | None = None,
+        user_email: str | None = None,
+        tidb_expert_enabled: bool = False,
+        prompt_service: PromptService | None = None,
+        intel_brief_enabled: bool = True,
+        intel_brief_summarizer_model: str = "gpt-5.4-mini",
+        intel_brief_summarizer_effort: str | None = None,
+        intel_brief_synthesis_model: str = "gpt-5.4",
+        intel_brief_synthesis_effort: str = "medium",
     ) -> dict[str, Any]:
-        system_prompt = self._compose_persona_system_prompt(SYSTEM_ORACLE, persona_name, persona_prompt, source_instructions=source_instructions)
+        if prompt_service:
+            base_prompt = prompt_service.resolve_for_section(
+                section or "",
+                user_email=user_email,
+                tidb_expert_enabled=tidb_expert_enabled,
+            )
+        else:
+            base_prompt = SECTION_SYSTEM_PROMPTS.get(section or "", SYSTEM_ORACLE)
+        system_prompt = self._compose_persona_system_prompt(base_prompt, persona_name, persona_prompt, source_instructions=source_instructions)
+        # Pre-call intel always uses Firecrawl deep research regardless of whether RAG found hits.
+        if section in ("pre_call", "tal") and any(t.get("type") == "web_search_preview" for t in (tools or [])):
+            answer = self._deep_research_pre_call(
+                system_prompt,
+                message,
+                model=model,
+                tools=tools,
+                reasoning_effort=reasoning_effort,
+                intel_brief_enabled=intel_brief_enabled,
+                intel_brief_summarizer_model=intel_brief_summarizer_model,
+                intel_brief_summarizer_effort=intel_brief_summarizer_effort,
+                intel_brief_synthesis_model=intel_brief_synthesis_model,
+                intel_brief_synthesis_effort=intel_brief_synthesis_effort,
+            )
+            if answer:
+                return {"answer": answer, "follow_up_questions": self._fallback_followups("oracle")}
+
         if allow_ungrounded:
-            prompt = f"User question:\n{message}\n\nProvide a concise, high-quality answer."
-            answer = self._responses_text(system_prompt, prompt, model=model, tools=tools, reasoning_effort=reasoning_effort)
+            answer = self._responses_text(system_prompt, message, model=model, tools=tools, reasoning_effort=reasoning_effort)
             if answer:
                 return {"answer": answer, "follow_up_questions": self._fallback_followups("oracle")}
             err = self.last_error or "No provider credentials configured."
@@ -948,23 +1282,27 @@ class LLMService:
             }
 
         if not hits:
+            # No KB hits — let the LLM answer from its own knowledge/built-in web search.
+            # Codex models have web search built in; standard models use web_search_preview if present.
+            answer = self._responses_text(system_prompt, message, model=model, tools=tools, reasoning_effort=reasoning_effort)
+            if answer:
+                return {"answer": answer, "citations": [], "follow_up_questions": self._fallback_followups("oracle")}
             return {
                 "answer": (
-                    "I don't have enough context to answer this question. "
-                    "Make sure Google Drive and Feishu are synced in Admin settings. "
-                    "You can also try rephrasing your question."
+                    "No relevant content found in the knowledge base for this query. "
+                    "Make sure your call transcripts are synced and try specifying the account name."
                 ),
                 "citations": [],
                 "follow_up_questions": [
-                    "Is Google Drive synced? (Admin -> Sync Google Drive)",
-                    "Is Feishu configured with a folder token?",
+                    "Try: 'Summarize the Airbnb call from March 20'",
+                    "Is the Chorus sync configured and running?",
                 ],
             }
 
         context = "\n\n".join(
             [
-                f"[{h.source_id}:{h.chunk_id}] {h.text[:1200]}"
-                for h in hits[:8]
+                f"[{h.source_id}:{h.chunk_id}] {h.text[:2000]}"
+                for h in self._assemble_context(hits, token_budget=6000)
             ]
         )
         prompt = (
@@ -1015,7 +1353,7 @@ class LLMService:
                 "questions_to_ask_next_call": self._fallback_followups("call_assistant"),
             }
 
-        context = "\n\n".join([f"[{h.source_id}:{h.chunk_id}] {h.text[:1500]}" for h in hits[:8]])
+        context = "\n\n".join([f"[{h.source_id}:{h.chunk_id}] {h.text[:1500]}" for h in self._assemble_context(hits, token_budget=10000)])
         prompt = (
             f"User request: {message}\n\n"
             "Transcript/Internal evidence:\n"
@@ -1182,34 +1520,18 @@ class LLMService:
         account_industry: str | None = None,
         account_employee_count: int | None = None,
     ) -> dict[str, Any] | None:
-        system_prompt = (
-            "You are a world-class pre-call research analyst for enterprise B2B sales at TiDB.\n"
-            "Generate a comprehensive 7-section account brief to prepare a sales rep for their next meeting.\n\n"
-            "Sections:\n"
-            "1. prospect_information – Name, role/title, time at company, relevant previous role\n"
-            "2. company_context – Employee count, revenue, industry, product/service, key competitors\n"
-            "3. architecture_hypothesis – Databases, apps/microservices, cloud/infrastructure\n"
-            "4. pain_hypothesis – At least 2 pains with evidence from call transcripts or web research\n"
-            "5. tidb_value_propositions – Map each pain to a specific TiDB value prop\n"
-            "6. meeting_goal – Desired outcome of the next meeting\n"
-            "7. meeting_flow – Agenda and time allocation\n\n"
-            "Respond ONLY with valid JSON:\n"
-            '{\n'
-            '  "summary": "2-3 sentence executive summary",\n'
-            '  "prospect_information": {"name": "", "title": "", "time_at_company": "", "previous_role": ""},\n'
-            '  "company_context": {"employee_count": null, "revenue": "", "industry": "", "product_service": "", "competitors": []},\n'
-            '  "architecture_hypothesis": {"databases": [], "apps_microservices": "", "cloud_infrastructure": ""},\n'
-            '  "pain_hypothesis": [{"pain": "", "evidence": ""}],\n'
-            '  "tidb_value_propositions": [{"pain": "", "value_prop": ""}],\n'
-            '  "meeting_goal": "",\n'
-            '  "meeting_flow": {"agenda": [], "time_allocation": {}},\n'
-            '  "business_context": [],\n'
-            '  "decision_criteria": [],\n'
-            '  "recommended_assets": [],\n'
-            '  "next_meeting_agenda": []\n'
-            "}\n\n"
-            "Use all available evidence. Where source data is sparse, draw on your knowledge of "
-            "this company and industry. If you have web access, use it to fill gaps."
+        system_prompt = self._compose_persona_system_prompt(SYSTEM_REP_EXECUTION, persona_name, persona_prompt)
+        context = "\n\n".join([f"[{h.source_id}:{h.chunk_id}] {h.text[:1200]}" for h in self._assemble_context(hits, token_budget=10000)])
+        prompt = (
+            f"Account: {account}\n"
+            f"Request: {ask}\n"
+            f"Evidence:\n{context}\n\n"
+            "Return strict JSON with keys:\n"
+            "- summary (string)\n"
+            "- business_context (array of strings)\n"
+            "- decision_criteria (array of strings)\n"
+            "- recommended_assets (array of strings)\n"
+            "- next_meeting_agenda (array of strings)\n"
         )
         if persona_prompt:
             system_prompt += f"\n\nAdditional instructions:\n{persona_prompt}"
@@ -1308,7 +1630,7 @@ class LLMService:
         tools: list[dict] | None = None,
     ) -> dict[str, Any] | None:
         system_prompt = self._compose_persona_system_prompt(SYSTEM_REP_EXECUTION, persona_name, persona_prompt)
-        context = "\n\n".join([f"[{h.source_id}:{h.chunk_id}] {h.text[:1200]}" for h in hits[:8]])
+        context = "\n\n".join([f"[{h.source_id}:{h.chunk_id}] {h.text[:1200]}" for h in self._assemble_context(hits, token_budget=10000)])
         prompt = (
             f"Account: {account}\n"
             f"Request: {ask}\n"
@@ -1344,7 +1666,7 @@ class LLMService:
         tools: list[dict] | None = None,
     ) -> dict[str, Any] | None:
         system_prompt = self._compose_persona_system_prompt(SYSTEM_REP_EXECUTION, persona_name, persona_prompt)
-        context = "\n\n".join([f"[{h.source_id}:{h.chunk_id}] {h.text[:1200]}" for h in hits[:8]])
+        context = "\n\n".join([f"[{h.source_id}:{h.chunk_id}] {h.text[:1200]}" for h in self._assemble_context(hits, token_budget=10000)])
         prompt = (
             f"Account: {account}\n"
             f"Request: {ask}\n"
@@ -1384,7 +1706,7 @@ class LLMService:
         tools: list[dict] | None = None,
     ) -> dict[str, Any] | None:
         system_prompt = self._compose_persona_system_prompt(SYSTEM_REP_EXECUTION, persona_name, persona_prompt)
-        context = "\n\n".join([f"[{h.source_id}:{h.chunk_id}] {h.text[:1200]}" for h in hits[:8]])
+        context = "\n\n".join([f"[{h.source_id}:{h.chunk_id}] {h.text[:1200]}" for h in self._assemble_context(hits, token_budget=10000)])
         prompt = (
             f"Account: {account}\n"
             f"Request: {ask}\n"
@@ -1421,7 +1743,7 @@ class LLMService:
         persona_prompt: str | None = None,
     ) -> dict[str, Any] | None:
         system_prompt = self._compose_persona_system_prompt(SYSTEM_SE_EXECUTION, persona_name, persona_prompt)
-        context = "\n\n".join([f"[{h.source_id}:{h.chunk_id}] {h.text[:1200]}" for h in hits[:8]])
+        context = "\n\n".join([f"[{h.source_id}:{h.chunk_id}] {h.text[:1200]}" for h in self._assemble_context(hits, token_budget=10000)])
         prompt = (
             f"Account: {account}\n"
             f"Target offering: {target_offering}\n"
@@ -1470,7 +1792,7 @@ class LLMService:
         persona_prompt: str | None = None,
     ) -> dict[str, Any] | None:
         system_prompt = self._compose_persona_system_prompt(SYSTEM_SE_EXECUTION, persona_name, persona_prompt)
-        context = "\n\n".join([f"[{h.source_id}:{h.chunk_id}] {h.text[:1200]}" for h in hits[:8]])
+        context = "\n\n".join([f"[{h.source_id}:{h.chunk_id}] {h.text[:1200]}" for h in self._assemble_context(hits, token_budget=10000)])
         prompt = (
             f"Account: {account}\n"
             f"Request: {ask}\n"
@@ -1514,7 +1836,7 @@ class LLMService:
         persona_prompt: str | None = None,
     ) -> dict[str, Any] | None:
         system_prompt = self._compose_persona_system_prompt(SYSTEM_SE_EXECUTION, persona_name, persona_prompt)
-        context = "\n\n".join([f"[{h.source_id}:{h.chunk_id}] {h.text[:1200]}" for h in hits[:8]])
+        context = "\n\n".join([f"[{h.source_id}:{h.chunk_id}] {h.text[:1200]}" for h in self._assemble_context(hits, token_budget=10000)])
         prompt = (
             f"Account: {account}\n"
             f"Request: {ask}\n"
@@ -1550,7 +1872,7 @@ class LLMService:
         persona_prompt: str | None = None,
     ) -> dict[str, Any] | None:
         system_prompt = self._compose_persona_system_prompt(SYSTEM_SE_EXECUTION, persona_name, persona_prompt)
-        context = "\n\n".join([f"[{h.source_id}:{h.chunk_id}] {h.text[:1200]}" for h in hits[:8]])
+        context = "\n\n".join([f"[{h.source_id}:{h.chunk_id}] {h.text[:1200]}" for h in self._assemble_context(hits, token_budget=10000)])
         prompt = (
             f"Account: {account}\n"
             f"Competitor: {competitor}\n"
@@ -1587,7 +1909,7 @@ class LLMService:
         persona_prompt: str | None = None,
     ) -> dict[str, Any] | None:
         system_prompt = self._compose_persona_system_prompt(SYSTEM_MARKETING_EXECUTION, persona_name, persona_prompt)
-        context = "\n\n".join([f"[{h.source_id}:{h.chunk_id}] {h.text[:1200]}" for h in hits[:10]])
+        context = "\n\n".join([f"[{h.source_id}:{h.chunk_id}] {h.text[:1200]}" for h in self._assemble_context(hits, token_budget=10000)])
         prompt = (
             f"Request: {ask}\n"
             f"Regions: {regions}\n"

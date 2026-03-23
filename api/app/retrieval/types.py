@@ -9,6 +9,7 @@ class RetrievedChunk:
     chunk_id: UUID
     document_id: UUID
     score: float
+    token_count: int
     text: str
     metadata: dict
     source_type: str

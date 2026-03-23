@@ -51,7 +51,7 @@ export async function GET(request) {
     name: claims.name || email,
   };
 
-  const res = NextResponse.redirect(new URL('/rep', request.url));
+  const res = NextResponse.redirect(new URL('/chat', request.url));
   res.cookies.set('oracle_session', JSON.stringify(session), {
     httpOnly: true,
     sameSite: 'lax',
@@ -59,5 +59,10 @@ export async function GET(request) {
     maxAge: 60 * 60 * 8,
   });
   res.cookies.set('oracle_pkce', '', { httpOnly: true, path: '/', maxAge: 0 });
+
+  // Fire-and-forget incremental Chorus sync — crowd-sources new calls from every rep who logs in
+  const origin = new URL(request.url).origin;
+  fetch(`${origin}/api/admin/sync/calls/background`, { method: 'POST' }).catch(() => {});
+
   return res;
 }

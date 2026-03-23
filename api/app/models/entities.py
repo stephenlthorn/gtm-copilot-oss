@@ -4,11 +4,14 @@ import enum
 import uuid
 from datetime import date, datetime
 
-from sqlalchemy import JSON, Date, DateTime, Enum, ForeignKey, Index, Integer, String, Text, UniqueConstraint, Uuid, func
+import sqlalchemy as sa
+from pgvector.sqlalchemy import Vector
+from sqlalchemy import Boolean, JSON, Date, DateTime, Enum, ForeignKey, Index, Integer, String, Text, UniqueConstraint, Uuid, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.constants import DEFAULT_EMBEDDING_DIMENSIONS
 from app.db.base import Base
+from app.models.prompt_models import PromptRegistry, PromptVersion, PromptUserOverride  # noqa: F401
 from app.db.tidb_vector import TiDBVector
 
 UUID_TYPE = Uuid(as_uuid=True)
@@ -102,17 +105,26 @@ class ChorusCall(Base):
     __tablename__ = "chorus_calls"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID_TYPE, primary_key=True, default=_uuid)
-    chorus_call_id: Mapped[str] = mapped_column(String(255), unique=True, nullable=False, index=True)
+    chorus_call_id: Mapped[str | None] = mapped_column(String(255), unique=True, nullable=True, index=True)
+    source_type: Mapped[str] = mapped_column(String(32), nullable=False, default="chorus", server_default="chorus")
     date: Mapped[date] = mapped_column(Date, nullable=False, index=True)
     account: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
     opportunity: Mapped[str | None] = mapped_column(String(512))
     stage: Mapped[str | None] = mapped_column(String(255))
     rep_email: Mapped[str] = mapped_column(String(255), nullable=False)
     se_email: Mapped[str | None] = mapped_column(String(255))
+    call_outcome: Mapped[str | None] = mapped_column(String(64), nullable=True)
     participants: Mapped[list[dict]] = mapped_column(JSON_TYPE, default=list, nullable=False)
+    engagement_type: Mapped[str] = mapped_column(String(64), nullable=False, server_default="call", index=True)
+    meeting_summary: Mapped[str | None] = mapped_column(Text)
+    action_items: Mapped[list[str]] = mapped_column(JSON_TYPE, default=list, nullable=False)
     recording_url: Mapped[str | None] = mapped_column(Text)
     transcript_url: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    def __init__(self, **kwargs):
+        kwargs.setdefault("source_type", "chorus")
+        super().__init__(**kwargs)
 
 
 class CallArtifact(Base):
@@ -374,6 +386,64 @@ class UserPreference(Base):
     user_email: Mapped[str] = mapped_column(String(255), primary_key=True)
     llm_model: Mapped[str | None] = mapped_column(String(64))
     reasoning_effort: Mapped[str | None] = mapped_column(String(16))
+    retrieval_top_k: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    intel_brief_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default=sa.true())
+    intel_brief_summarizer_model: Mapped[str | None] = mapped_column(String(64), nullable=True, server_default="gpt-5.4-mini")
+    intel_brief_summarizer_effort: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    intel_brief_synthesis_model: Mapped[str | None] = mapped_column(String(64), nullable=True, server_default="gpt-5.4")
+    intel_brief_synthesis_effort: Mapped[str] = mapped_column(String(16), nullable=False, server_default="medium")
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
     )
+
+
+class UserTemplate(Base):
+    __tablename__ = "user_templates"
+    __table_args__ = (UniqueConstraint("user_email", "section_key", name="uq_user_section"),)
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    user_email: Mapped[str] = mapped_column(String(255), nullable=False)
+    section_key: Mapped[str] = mapped_column(String(64), nullable=False)
+    template_name: Mapped[str] = mapped_column(String(128), nullable=False)
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    is_default: Mapped[bool] = mapped_column(default=False, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+
+class ChatMessage(Base):
+    __tablename__ = "chat_messages"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    user_email: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
+    role: Mapped[str] = mapped_column(String(16), nullable=False)
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class AccountDealMemory(Base):
+    __tablename__ = "account_deal_memory"
+
+    account: Mapped[str] = mapped_column(String(255), primary_key=True)
+    deal_stage: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    is_new_business: Mapped[bool] = mapped_column(Boolean(), nullable=False, default=True)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="active")
+    meddpicc: Mapped[dict | None] = mapped_column(JSON_TYPE, nullable=True, default=None)
+    key_contacts: Mapped[list | None] = mapped_column(JSON_TYPE, nullable=True, default=None)
+    tech_stack: Mapped[dict | None] = mapped_column(JSON_TYPE, nullable=True, default=None)
+    open_items: Mapped[list | None] = mapped_column(JSON_TYPE, nullable=True, default=None)
+    summary: Mapped[str | None] = mapped_column(Text, nullable=True)
+    call_count: Mapped[int] = mapped_column(Integer(), nullable=False, default=0)
+    last_call_date: Mapped[date | None] = mapped_column(Date(), nullable=True)
+    pending_review: Mapped[bool] = mapped_column(Boolean(), nullable=False, default=False)
+    pending_delta: Mapped[dict | None] = mapped_column(JSON_TYPE, nullable=True, default=None)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+    def __init__(self, **kwargs):
+        kwargs.setdefault("is_new_business", True)
+        kwargs.setdefault("status", "active")
+        kwargs.setdefault("pending_review", False)
+        kwargs.setdefault("call_count", 0)
+        super().__init__(**kwargs)

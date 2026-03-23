@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import json
 import math
+import os
 import re
 from collections import Counter
 from dataclasses import asdict
+from datetime import datetime
 
 from sqlalchemy import literal, or_, select
 from sqlalchemy.orm import Session
@@ -104,7 +106,8 @@ class HybridRetriever:
         return min(1.0, weighted_hits / denom)
 
     @staticmethod
-    def _apply_filters(doc: KBDocument, filters: dict) -> bool:
+    def _apply_filters(doc: KBDocument, filters: dict, chunk: "KBChunk | None" = None) -> bool:
+        from app.models.entities import SourceType
         source_filter = {s.lower() for s in (filters.get("source_type") or [])}
         if source_filter and doc.source_type.value.lower() not in source_filter:
             return False
@@ -133,6 +136,29 @@ class HybridRetriever:
             account = str(tags.get("account", "")).lower()
             if account not in account_filter:
                 return False
+
+        # Chunk-level filters — CHORUS source only
+        if chunk is not None and doc.source_type.value == SourceType.CHORUS.value:
+            chunk_meta = chunk.metadata_json if isinstance(chunk.metadata_json, dict) else {}
+
+            rep_email_filter = str(filters.get("rep_email") or "").strip().lower()
+            if rep_email_filter:
+                chunk_rep = str(chunk_meta.get("rep_email", "")).strip().lower()
+                if not chunk_rep or chunk_rep != rep_email_filter:
+                    return False
+
+            stage_filter = {s.lower() for s in (filters.get("stage") or [])}
+            if stage_filter:
+                chunk_stage = str(chunk_meta.get("stage", "")).strip().lower()
+                if not chunk_stage or chunk_stage not in stage_filter:
+                    return False
+
+            outcome_filter = {o.lower() for o in (filters.get("call_outcome") or [])}
+            if outcome_filter:
+                chunk_outcome = str(chunk_meta.get("call_outcome", "")).strip().lower()
+                if not chunk_outcome or chunk_outcome not in outcome_filter:
+                    return False
+
         return True
 
     @staticmethod
@@ -182,16 +208,118 @@ class HybridRetriever:
         matched = sum(1 for term in terms if HybridRetriever._contains_term(haystack, term))
         return min(0.24, matched * 0.07)
 
-    def _fetch_candidates(
-        self,
-        query_vectors: list[list[float]],
-        base_stmt,
-        candidate_limit: int,
-        terms: list[str],
-        dialect: str,
-        semantic_available: bool,
-    ) -> list[tuple[KBChunk, KBDocument]]:
-        """Fetch candidate chunks from TiDB using all query vectors + keyword search.
+    @staticmethod
+    def _parse_call_date(message: str) -> str | None:
+        """Extract a YYYY-MM-DD date string from patterns like '3/19/2026' or '2026-03-19'."""
+        # ISO format: 2026-03-19
+        iso_match = re.search(r"\b(\d{4}-\d{2}-\d{2})\b", message)
+        if iso_match:
+            return iso_match.group(1)
+        # US format: 3/19/2026
+        us_match = re.search(r"\b(\d{1,2})/(\d{1,2})/(\d{4})\b", message)
+        if us_match:
+            m, d, y = us_match.group(1), us_match.group(2), us_match.group(3)
+            try:
+                return datetime(int(y), int(m), int(d)).strftime("%Y-%m-%d")
+            except ValueError:
+                pass
+        return None
+
+    def _get_call_focused_rows(self, account_filter_set: set, query_date: str | None) -> tuple[list[tuple], str | None]:
+        """Fetch chorus chunks for matching accounts and return (rows, primary_doc_id).
+
+        Returns all chunks from the primary (date-closest) doc plus the first 3 chunks
+        from every other doc. primary_doc_id is the str(doc.id) of the primary doc.
+        """
+        try:
+            acct_stmt = (
+                select(KBChunk, KBDocument)
+                .join(KBDocument, KBChunk.document_id == KBDocument.id)
+                .where(KBDocument.source_type.in_(["chorus"]))
+                .order_by(KBDocument.id, KBChunk.chunk_index)
+            )
+            acct_rows = self.db.execute(acct_stmt).all()
+
+            # Group by document, keeping only rows for matching accounts
+            docs: dict[str, list[tuple]] = {}
+            doc_objects: dict[str, KBDocument] = {}
+            for chunk, doc in acct_rows:
+                tags = doc.tags if isinstance(doc.tags, dict) else {}
+                if str(tags.get("account", "")).lower() not in account_filter_set:
+                    continue
+                doc_id = str(doc.id)
+                if doc_id not in docs:
+                    docs[doc_id] = []
+                    doc_objects[doc_id] = doc
+                docs[doc_id].append((chunk, doc))
+
+            if not docs:
+                return [], None
+
+            # Find primary doc: closest date to query_date, else most recent
+            primary_doc_id: str | None = None
+            if query_date:
+                try:
+                    target_dt = datetime.strptime(query_date, "%Y-%m-%d")
+                    best_delta: float | None = None
+                    for doc_id, doc in doc_objects.items():
+                        tags = doc.tags if isinstance(doc.tags, dict) else {}
+                        date_str = tags.get("date", "")
+                        if not date_str:
+                            continue
+                        try:
+                            doc_dt = datetime.strptime(str(date_str), "%Y-%m-%d")
+                            delta = abs((doc_dt - target_dt).total_seconds())
+                            if best_delta is None or delta < best_delta:
+                                best_delta = delta
+                                primary_doc_id = doc_id
+                        except ValueError:
+                            continue
+                except ValueError:
+                    pass
+
+            if primary_doc_id is None:
+                # Use most recent doc (highest id as proxy, or latest date tag)
+                best_dt: datetime | None = None
+                for doc_id, doc in doc_objects.items():
+                    tags = doc.tags if isinstance(doc.tags, dict) else {}
+                    date_str = tags.get("date", "")
+                    if date_str:
+                        try:
+                            doc_dt = datetime.strptime(str(date_str), "%Y-%m-%d")
+                            if best_dt is None or doc_dt > best_dt:
+                                best_dt = doc_dt
+                                primary_doc_id = doc_id
+                        except ValueError:
+                            continue
+                if primary_doc_id is None:
+                    # Fall back to largest doc id
+                    primary_doc_id = max(doc_objects.keys())
+
+            result_rows: list[tuple] = []
+            for doc_id, chunk_rows in docs.items():
+                if doc_id == primary_doc_id:
+                    result_rows.extend(chunk_rows)
+                else:
+                    result_rows.extend(chunk_rows[:3])
+
+            return result_rows, primary_doc_id
+        except Exception:
+            return [], None
+
+    def search(self, query: str, *, top_k: int = 8, filters: dict | None = None) -> list[RetrievedChunk]:
+        filters = filters or {}
+        terms = self._query_terms(query)
+        semantic_available = bool(getattr(self.embedder, "client", None))
+        q_vec = self.embedder.embed(query)
+        dialect = (self.db.bind.dialect.name if self.db.bind is not None else "").lower()
+
+        source_filter = {s.lower() for s in (filters.get("source_type") or [])}
+        candidate_limit = max(200, top_k * 40)
+
+        base_stmt = select(KBChunk, KBDocument).join(KBDocument, KBChunk.document_id == KBDocument.id)
+        if source_filter:
+            base_stmt = base_stmt.where(KBDocument.source_type.in_(sorted(source_filter)))
 
         Runs one KNN query per vector (multi-query fusion) then unions results.
         """
@@ -231,76 +359,29 @@ class HybridRetriever:
                 ).all()
                 rows.extend(keyword_rows)
 
-        return rows
+        # If an account filter is set, use smart call-focused retrieval
+        call_focused_primary_doc_id: str | None = None
+        account_filter_set = {a.lower() for a in (filters.get("account") or [])}
+        if account_filter_set:
+            call_date = self._parse_call_date(query)
+            call_rows, call_focused_primary_doc_id = self._get_call_focused_rows(account_filter_set, call_date)
+            rows.extend(call_rows)
 
-    def search(
-        self,
-        query: str,
-        *,
-        top_k: int = 20,
-        filters: dict | None = None,
-        mode: str = "oracle",
-    ) -> list[RetrievedChunk]:
-        """Premium retrieval pipeline:
-        1. GPT-4o-mini query expansion → 3 variants + 1 HyDE passage
-        2. Embed original + all variants + HyDE (up to 5 vectors)
-        3. Multi-query KNN fusion against TiDB — unions all candidate sets
-        4. Keyword search union
-        5. Python hybrid re-scoring on deduped candidates
-        6. GPT-4o-mini reranker on top 100 candidates → final top_k
-        """
-        filters = filters or {}
-        terms = self._query_terms(query)
-        semantic_available = bool(getattr(self.embedder, "client", None))
-        dialect = (self.db.bind.dialect.name if self.db.bind is not None else "").lower()
-
-        source_filter = {s.lower() for s in (filters.get("source_type") or [])}
-        # Wider candidate net — cost doesn't matter, quality does
-        candidate_limit = max(500, top_k * 50)
-
-        base_stmt = select(KBChunk, KBDocument).join(KBDocument, KBChunk.document_id == KBDocument.id)
-        if source_filter:
-            base_stmt = base_stmt.where(KBDocument.source_type.in_(sorted(source_filter)))
-
-        # ── Step 1: Query expansion (variants + HyDE) ──────────────────────────
-        expanded = self.rewriter.expand(query, mode)
-        all_queries = [query] + expanded["variants"]
-        hyde = expanded["hyde"]
-        if hyde and hyde != query:
-            all_queries.append(hyde)
-        # Deduplicate while preserving order (original query always first)
-        seen_q: set[str] = set()
-        unique_queries: list[str] = []
-        for q in all_queries:
-            if q not in seen_q:
-                unique_queries.append(q)
-                seen_q.add(q)
-
-        # ── Step 2: Embed all query variants ───────────────────────────────────
-        query_vectors: list[list[float]] = []
-        if semantic_available:
-            for q in unique_queries:
-                try:
-                    query_vectors.append(self.embedder.embed(q))
-                except Exception as exc:
-                    import logging
-                    logging.getLogger(__name__).warning("Embed failed for variant: %s", exc)
-        # Primary query vector for re-scoring
-        q_vec = query_vectors[0] if query_vectors else []
-
-        # ── Step 3+4: Multi-query KNN + keyword fetch ──────────────────────────
-        rows = self._fetch_candidates(
-            query_vectors, base_stmt, candidate_limit, terms, dialect, semantic_available
-        )
-
-        # ── Step 5: Deduplicate and hybrid re-score ────────────────────────────
         deduped: dict[str, tuple[KBChunk, KBDocument]] = {}
         for chunk, doc in rows:
             deduped[str(chunk.id)] = (chunk, doc)
 
         scored: list[tuple[float, KBChunk, KBDocument]] = []
         for chunk, doc in deduped.values():
-            if not self._apply_filters(doc, filters):
+            if not self._apply_filters(doc, filters, chunk):
+                continue
+            # Force call-focused primary chunks to score near 1.0 in order
+            # Note: _apply_filters (with chunk) was already applied above.
+            chunk_doc_id = str(doc.id)
+            if call_focused_primary_doc_id and chunk_doc_id == call_focused_primary_doc_id:
+                chunk_idx = getattr(chunk, 'chunk_index', 0) or 0
+                score = 1.0 - (chunk_idx * 0.0001)
+                scored.append((score, chunk, doc))
                 continue
             vec_score = (self._cosine(chunk.embedding, q_vec) + 1) / 2 if q_vec else 0.5
             kw_score = self._keyword_score(chunk.text, terms)
@@ -317,7 +398,45 @@ class HybridRetriever:
                 continue
             scored.append((score, chunk, doc))
 
+        # Apply ChunkQualitySignal nudge for chunks with ≥10 signals
+        if scored:
+            _chunk_ids = [chunk.id for _, chunk, _ in scored]
+            from app.models.feedback import ChunkQualitySignal
+            from sqlalchemy import func as _func, case
+            quality_rows = self.db.execute(
+                select(
+                    ChunkQualitySignal.chunk_id,
+                    _func.sum(case((ChunkQualitySignal.signal == "cited_positive", 1), else_=0)).label("pos"),
+                    _func.sum(case((ChunkQualitySignal.signal == "cited_negative", 1), else_=0)).label("neg"),
+                )
+                .where(ChunkQualitySignal.chunk_id.in_(_chunk_ids))
+                .group_by(ChunkQualitySignal.chunk_id)
+            ).all()
+            quality_map: dict[str, tuple[int, int]] = {
+                str(row.chunk_id): (int(row.pos), int(row.neg)) for row in quality_rows
+                if int(row.pos) + int(row.neg) >= 10
+            }
+            if quality_map:
+                new_scored = []
+                for score, chunk, doc in scored:
+                    cid = str(chunk.id)
+                    if cid in quality_map:
+                        pos, neg = quality_map[cid]
+                        positive_rate = pos / (pos + neg)
+                        score = max(0.0, min(1.0, score + 0.05 * (positive_rate - 0.5)))
+                    new_scored.append((score, chunk, doc))
+                scored = new_scored
+
         scored.sort(key=lambda item: item[0], reverse=True)
+        _min_score = float(os.getenv("RAG_MIN_SCORE", "0.12"))
+        # Call-focused primary chunks always score ≥ 0.9999 and are never filtered.
+        scored = [(s, c, d) for s, c, d in scored if s >= _min_score]
+        # If call-focused primary doc is set, return all scored chunks (no top_k cap)
+        # so that all primary call chunks reach the LLM.
+        if call_focused_primary_doc_id:
+            top = scored
+        else:
+            top = scored[:top_k]
 
         # Build RetrievedChunk objects from top 100 candidates for reranking
         rerank_pool_size = min(100, len(scored))
@@ -329,6 +448,7 @@ class HybridRetriever:
                     chunk_id=chunk.id,
                     document_id=doc.id,
                     score=round(float(score), 4),
+                    token_count=chunk.token_count,
                     text=chunk.text,
                     metadata=metadata,
                     source_type=doc.source_type.value,

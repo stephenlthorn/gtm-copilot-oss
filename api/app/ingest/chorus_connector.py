@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 import logging
-import time
 from dataclasses import dataclass
 from datetime import date, datetime
 from pathlib import Path
@@ -14,7 +13,7 @@ from app.core.settings import get_settings
 logger = logging.getLogger(__name__)
 
 _CHORUS_BASE = "https://chorus.ai"
-# No fields param — default response includes all fields including recording.utterances
+_MAX_PAGES = 500  # ~8 months of history at 90% content_viewed noise density
 
 
 def _project_root() -> Path:
@@ -39,17 +38,20 @@ class ChorusConnector:
         self.fake_dir = base / "fake_calls"
         self.legacy_fake_dir = base / "fake_chorus"
         self.api_key = self.settings.call_api_key or self.settings.chorus_api_key
-        # Base URL is always chorus.ai; chorus_base_url only used for testing overrides
-        self.base_url = (
-            self.settings.call_base_url
-            or self.settings.chorus_base_url
-            or _CHORUS_BASE
-        ).rstrip("/")
+        # Default to chorus.ai when only the key is set (CALL_BASE_URL not required)
+        self.base_url = (self.settings.call_base_url or self.settings.chorus_base_url or _CHORUS_BASE).rstrip("/")
 
     def fetch_calls(self, since: date | None = None) -> list[ChorusCallRaw]:
         if self.api_key:
             return self._fetch_calls_api(since)
         return self._fetch_calls_fake(since)
+
+    def fetch_calls_pages(self, since: date | None = None):
+        """Yield one page of ChorusCallRaw at a time — keeps DB connections alive during fetch."""
+        if not self.api_key:
+            yield self._fetch_calls_fake(since)
+            return
+        yield from self._fetch_calls_api_pages(since)
 
     def _fetch_calls_fake(self, since: date | None = None) -> list[ChorusCallRaw]:
         out: list[ChorusCallRaw] = []
@@ -73,152 +75,93 @@ class ChorusConnector:
         return out
 
     def _fetch_calls_api(self, since: date | None = None) -> list[ChorusCallRaw]:
-        """Fetch engagements from Chorus v3 API with pagination.
-
-        Defaults to last 90 days to avoid a full history crawl on initial sync.
-        Pass `since` explicitly to override.
-        """
-        from datetime import timedelta
-
-        # Default to last 90 days so the initial sync doesn't pull all history
-        if since is None:
-            since = (datetime.utcnow() - timedelta(days=90)).date()
-
-        # Chorus uses the plain token — NOT "Bearer <token>"
-        headers = {
-            "Authorization": self.api_key,
-            "Accept": "application/json",
-        }
-
-        params: dict[str, str] = {}
-        if since:
-            params["min_date"] = datetime.combine(since, datetime.min.time()).strftime(
-                "%Y-%m-%dT%H:%M:%S.000Z"
-            )
-
+        """Fetch all calls from Chorus v3/engagements API with continuation_key pagination."""
         out: list[ChorusCallRaw] = []
-        max_pages = 5  # 5 pages × 100 calls = 500 calls per sync run
+        for page in self._fetch_calls_api_pages(since):
+            out.extend(page)
+        return out
 
+    def _fetch_calls_api_pages(self, since: date | None = None):
+        """Yield one page (list[ChorusCallRaw]) at a time."""
+        headers = {"Authorization": f"Bearer {self.api_key}"}
+        params: dict = {}
+        if since:
+            params["min_date"] = since.strftime("%Y-%m-%dT%H:%M:%S.000Z")
+
+        pages = 0
         with httpx.Client(timeout=30.0) as client:
-            for page in range(max_pages):
-                url = f"{self.base_url}/v3/engagements"
-                logger.info("Fetching Chorus engagements page %d", page)
-                resp = _http_get_with_retry(client, url, headers=headers, params=params)
+            while pages < _MAX_PAGES:
+                resp = client.get(f"{self.base_url}/v3/engagements", headers=headers, params=params)
+                resp.raise_for_status()
                 data = resp.json()
 
                 records = data.get("engagements") or []
                 if not records:
                     break
 
-                for eng in records:
-                    call_id = str(eng.get("engagement_id") or eng.get("id") or "")
+                logger.info("Chorus page %d: %d engagements", pages, len(records))
+                page_out = []
+                for record in records:
+                    call_id = str(record.get("engagement_id") or record.get("id") or "")
                     if not call_id:
                         continue
-                    # Only fetch full transcripts for recorded meetings — skip emails/content_viewed
-                    eng_type = eng.get("engagement_type") or ""
-                    if eng_type in ("meeting",):
-                        full_payload = self._fetch_conversation(client, headers, call_id, eng)
-                    else:
-                        full_payload = eng
-                    out.append(ChorusCallRaw(chorus_call_id=call_id, payload=full_payload))
+                    # Skip link-tracking events — not communications, just analytics noise
+                    if (record.get("type") or record.get("engagement_type")) == "content_viewed":
+                        continue
+                    page_out.append(ChorusCallRaw(chorus_call_id=call_id, payload=self._to_ingestor_payload(call_id, record)))
+
+                if page_out:
+                    yield page_out
 
                 continuation_key = data.get("continuation_key")
                 if not continuation_key:
                     break
+
                 params = {"continuation_key": continuation_key}
+                pages += 1
 
-        logger.info("Fetched %d calls from Chorus", len(out))
-        return out
+        logger.info("Chorus fetch complete: %d pages", pages + 1)
 
-    def _fetch_conversation(
-        self,
-        client: httpx.Client,
-        headers: dict,
-        call_id: str,
-        engagement: dict,
-    ) -> dict:
-        """Fetch full conversation (with utterance transcript) from /api/v1/conversations/:id.
-
-        Retries up to 3 times on transient errors. Full utterance-level transcript is
-        always preferred; meeting_summary is only used as a last resort when no utterances
-        are available at all.
-        """
-        url = f"{self.base_url}/api/v1/conversations/{call_id}"
-        conv_headers = {**headers, "Accept": "application/vnd.api+json"}
-
-        for attempt in range(3):
+    @staticmethod
+    def _to_ingestor_payload(call_id: str, record: dict) -> dict:
+        """Convert a /v3/engagements record to the shape TranscriptIngestor._normalize expects."""
+        raw_date = record.get("date_time") or record.get("start_time") or record.get("date")
+        date_str = date.today().isoformat()
+        if raw_date is not None:
             try:
-                resp = client.get(url, headers=conv_headers, timeout=30.0)
-                if resp.status_code == 404:
-                    logger.debug("Conversation %s not found (attempt %d)", call_id, attempt + 1)
-                    return engagement
-                if resp.status_code == 429 or resp.status_code >= 500:
-                    wait = 2 ** attempt
-                    logger.warning("Chorus %d for %s, retrying in %ds", resp.status_code, call_id, wait)
-                    time.sleep(wait)
-                    continue
-                resp.raise_for_status()
-                conv_data = resp.json()
-
-                # Merge engagement metadata into conversation payload
-                attrs = (conv_data.get("data") or {}).get("attributes") or {}
-                result = dict(engagement)
-                result["_conversation"] = attrs
-
-                # Build utterance transcript — this is the primary content source
-                utterances = (attrs.get("recording") or {}).get("utterances") or []
-                if utterances:
-                    result["transcript"] = _build_transcript(utterances)
-                    logger.info("Call %s: %d utterances", call_id, len(utterances))
+                from datetime import datetime as _dt, timezone as _tz
+                if isinstance(raw_date, (int, float)):
+                    date_str = _dt.fromtimestamp(raw_date / 1000 if raw_date > 1e10 else raw_date, tz=_tz.utc).strftime("%Y-%m-%d")
                 else:
-                    logger.warning("Call %s: no utterances returned (will use summary fallback)", call_id)
+                    date_str = _dt.fromisoformat(str(raw_date).replace("Z", "+00:00")).strftime("%Y-%m-%d")
+            except Exception:
+                pass
 
-                result["meeting_summary"] = attrs.get("summary") or engagement.get("meeting_summary")
-                result["action_items"] = attrs.get("action_items") or []
-                return result
+        participants = record.get("participants") or []
+        speaker_map = {}
+        for idx, p in enumerate(participants, start=1):
+            name = p.get("name") or p.get("email") or f"Speaker {idx}"
+            speaker_map[f"S{idx}"] = {
+                "name": name,
+                "role": p.get("role") or "other",
+                "email": p.get("email"),
+            }
 
-            except httpx.TimeoutException:
-                wait = 2 ** attempt
-                logger.warning("Timeout fetching conversation %s (attempt %d), retrying in %ds", call_id, attempt + 1, wait)
-                time.sleep(wait)
-            except Exception as exc:
-                logger.warning("Error fetching conversation %s (attempt %d): %s", call_id, attempt + 1, exc)
-                if attempt == 2:
-                    return engagement
-                time.sleep(2 ** attempt)
-
-        logger.error("All retries failed for conversation %s, using engagement data only", call_id)
-        return engagement
-
-
-def _build_transcript(utterances: list[dict]) -> str:
-    """Convert utterances to speaker-attributed transcript text."""
-    lines: list[str] = []
-    for utt in utterances:
-        speaker = utt.get("speaker_name") or utt.get("speaker_type") or "Unknown"
-        text = utt.get("snippet") or ""
-        if text:
-            lines.append(f"{speaker}: {text}")
-    return "\n".join(lines)
-
-
-def _http_get_with_retry(
-    client: httpx.Client,
-    url: str,
-    *,
-    headers: dict,
-    params: dict | None = None,
-    max_attempts: int = 3,
-) -> httpx.Response:
-    """GET with exponential backoff for rate limits and server errors."""
-    for attempt in range(max_attempts):
-        resp = client.get(url, headers=headers, params=params)
-        if resp.status_code == 429 or resp.status_code >= 500:
-            wait = 2 ** attempt
-            logger.warning("HTTP %d from %s (attempt %d), retrying in %ds", resp.status_code, url, attempt + 1, wait)
-            time.sleep(wait)
-            continue
-        resp.raise_for_status()
-        return resp
-    resp.raise_for_status()
-    return resp
+        return {
+            "chorus_call_id": call_id,
+            "engagement_type": record.get("type") or record.get("engagement_type") or "call",
+            "meeting_summary": record.get("meeting_summary"),
+            "action_items": record.get("action_items") or [],
+            "metadata": {
+                "date": date_str,
+                "account": record.get("account_name") or "Unknown",
+                "opportunity": record.get("opportunity_name"),
+                "stage": None,
+                "rep_email": record.get("user_email") or "unknown@example.com",
+                "se_email": None,
+            },
+            "speaker_map": speaker_map,
+            "turns": [],  # engagement list has no transcript; full transcript fetched separately if needed
+            "recording_url": record.get("url"),
+            "transcript_url": record.get("url"),
+        }

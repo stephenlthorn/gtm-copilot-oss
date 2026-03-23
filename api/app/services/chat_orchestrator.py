@@ -10,6 +10,7 @@ from app.core.settings import Settings, get_settings
 from app.models import ChorusCall, KBConfig, SourceType, UserPreference
 from app.models.feedback import AIFeedback
 from app.prompts.personas import DEFAULT_PERSONA, get_default_persona_prompt, normalize_persona
+from app.prompts.templates import TIDB_EXPERT_CONTEXT
 from app.prompts.source_profiles import get_source_profile, format_source_instructions
 from app.retrieval.service import HybridRetriever
 from app.services.llm import LLMService
@@ -288,7 +289,7 @@ class ChatOrchestrator:
         except Exception:
             return []
 
-    def run(self, *, mode: str, user: str, message: str, top_k: int, filters: dict, context: dict) -> tuple[dict, dict]:
+    def run(self, *, mode: str, user: str, message: str, top_k: int, filters: dict, context: dict, rag_enabled: bool = True, web_search_enabled: bool = True, section: str | None = None, tidb_expert: bool = False) -> tuple[dict, dict]:
         blocked = self._guardrail_external_messaging(message)
         if blocked:
             payload = {
@@ -333,7 +334,17 @@ class ChatOrchestrator:
         persona_name, persona_prompt = self._resolve_persona_config(kb_config)
 
         custom_profiles = getattr(kb_config, 'source_profiles_json', None) if kb_config else None
-        source_profile = get_source_profile(mode, custom_profiles if custom_profiles else None)
+        SECTION_TO_PROFILE = {
+            "pre_call": "pre_call",
+            "post_call": "post_call",
+            "follow_up": "post_call",
+            "se_poc_plan": "poc_technical",
+            "se_arch_fit": "poc_technical",
+            "se_competitor": "poc_technical",
+            "tal": "pre_call",
+        }
+        profile_mode = SECTION_TO_PROFILE.get(section or "", None) or mode
+        source_profile = get_source_profile(profile_mode, custom_profiles if custom_profiles else None)
         source_instructions = format_source_instructions(source_profile)
 
         user_pref: UserPreference | None = None
@@ -348,6 +359,25 @@ class ChatOrchestrator:
                 resolved_model = user_pref.llm_model
             if user_pref.reasoning_effort:
                 resolved_reasoning = user_pref.reasoning_effort
+            if getattr(user_pref, "retrieval_top_k", None):
+                resolved_top_k = user_pref.retrieval_top_k
+
+        intel_brief_enabled: bool = True
+        intel_brief_summarizer_model: str = "gpt-5.4-mini"
+        intel_brief_summarizer_effort: str | None = None
+        intel_brief_synthesis_model: str = "gpt-5.4"
+        intel_brief_synthesis_effort: str = "medium"
+        if user_pref:
+            if getattr(user_pref, "intel_brief_enabled", None) is not None:
+                intel_brief_enabled = user_pref.intel_brief_enabled
+            if getattr(user_pref, "intel_brief_summarizer_model", None):
+                intel_brief_summarizer_model = user_pref.intel_brief_summarizer_model
+            if getattr(user_pref, "intel_brief_summarizer_effort", None):
+                intel_brief_summarizer_effort = user_pref.intel_brief_summarizer_effort
+            if getattr(user_pref, "intel_brief_synthesis_model", None):
+                intel_brief_synthesis_model = user_pref.intel_brief_synthesis_model
+            if getattr(user_pref, "intel_brief_synthesis_effort", None):
+                intel_brief_synthesis_effort = user_pref.intel_brief_synthesis_effort
 
         mode_filters = dict(filters or {})
         mode_filters["viewer_email"] = (user or "").strip().lower()
@@ -370,22 +400,82 @@ class ChatOrchestrator:
         elif mode == "call_assistant":
             mode_filters["source_type"] = allowed_sources or [SourceType.CHORUS.value]
 
-        rewritten = self.rewriter.rewrite(message, mode)
-        hits = self.retriever.search(rewritten, top_k=resolved_top_k, filters=mode_filters, mode=mode)
+        # Disable web search if user toggled it off
+        if not web_search_enabled:
+            llm_tools = [t for t in llm_tools if t.get("type") != "web_search_preview"]
+
+        # Skip retrieval + web search for short conversational messages (greetings, thanks, etc.)
+        query_terms = self._query_terms(message)
+        is_conversational = len(message.split()) <= 5 and len(query_terms) == 0
+        skip_rag = not rag_enabled or is_conversational
+        if is_conversational:
+            llm_tools = [t for t in llm_tools if t.get("type") != "web_search_preview"]
+            source_instructions = None
+
+        if skip_rag:
+            hits = []
+        else:
+            rewritten = self.rewriter.rewrite(message, mode)
+            hits = self.retriever.search(rewritten, top_k=resolved_top_k, filters=mode_filters)
 
         # Feedback RAG injection
         feedback_corrections: list[str] = []
-        try:
-            from app.services.embedding import EmbeddingService
-            emb_svc = EmbeddingService()
-            q_embedding = emb_svc.embed(message)
-            feedback_corrections = self._retrieve_feedback_corrections(q_embedding, mode)
-        except Exception:
-            pass
+        if not skip_rag:
+            try:
+                from app.services.embedding import EmbeddingService
+                emb_svc = EmbeddingService()
+                q_embedding = emb_svc.embed(message)
+                feedback_corrections = self._retrieve_feedback_corrections(q_embedding, mode)
+            except Exception:
+                pass
 
         if feedback_corrections:
             corrections_text = "\n".join(f"- {c}" for c in feedback_corrections)
             persona_prompt = (persona_prompt or "") + f"\n\nPast corrections from user feedback:\n{corrections_text}"
+
+        if tidb_expert:
+            persona_prompt = (persona_prompt or "") + "\n\n" + TIDB_EXPERT_CONTEXT
+
+        # Inject account deal memory for post-call and follow-up sections
+        if section in ("post_call", "follow_up"):
+            try:
+                from app.services.account_memory import canonicalize_account
+                from app.models import AccountDealMemory
+                import json as _json
+
+                # Resolve account name from mode_filters or call context
+                account_name = None
+                if mode_filters and mode_filters.get("account"):
+                    acct_val = mode_filters["account"]
+                    account_name = acct_val[0] if isinstance(acct_val, list) else acct_val
+
+                if account_name and self.db is not None:
+                    memory = self.db.get(AccountDealMemory, canonicalize_account(account_name))
+                    if memory and (memory.meddpicc or memory.summary):
+                        memory_context = (
+                            f"\n\n=== ACCOUNT HISTORY: {account_name} ===\n"
+                            f"Deal stage: {memory.deal_stage or 'Unknown'} | "
+                            f"Status: {memory.status} | "
+                            f"Calls to date: {memory.call_count}\n"
+                        )
+                        if memory.summary:
+                            memory_context += f"Summary: {memory.summary}\n"
+                        if memory.meddpicc:
+                            scored = {k: v for k, v in memory.meddpicc.items() if v.get("score", 0) > 0}
+                            if scored:
+                                memory_context += f"MEDDPICC (current state):\n{_json.dumps(scored, indent=2)}\n"
+                        if memory.key_contacts:
+                            memory_context += f"Key contacts: {_json.dumps(memory.key_contacts)}\n"
+                        if memory.tech_stack:
+                            confirmed = memory.tech_stack.get("confirmed", [])
+                            likely = memory.tech_stack.get("likely", [])
+                            if confirmed or likely:
+                                memory_context += f"Tech stack — confirmed: {confirmed}, likely: {likely}\n"
+                        memory_context += "=== END ACCOUNT HISTORY ===\n"
+                        persona_prompt = (persona_prompt or "") + memory_context
+            except Exception as exc:
+                import logging
+                logging.getLogger(__name__).warning("Failed to inject account memory: %s", exc)
 
         citations = [
             {
@@ -420,10 +510,17 @@ class ChatOrchestrator:
             hits,
             model=resolved_model,
             tools=llm_tools,
+            allow_ungrounded=skip_rag,
             persona_name=persona_name,
             persona_prompt=persona_prompt,
             reasoning_effort=resolved_reasoning,
             source_instructions=source_instructions or None,
+            section=section,
+            intel_brief_enabled=intel_brief_enabled,
+            intel_brief_summarizer_model=intel_brief_summarizer_model,
+            intel_brief_summarizer_effort=intel_brief_summarizer_effort,
+            intel_brief_synthesis_model=intel_brief_synthesis_model,
+            intel_brief_synthesis_effort=intel_brief_synthesis_effort,
         )
         data["citations"] = citations
         return data, self.retriever.retrieval_payload(hits, resolved_top_k)

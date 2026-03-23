@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import logging
-import time
 from datetime import date
 
 from sqlalchemy import delete, select
@@ -12,10 +11,39 @@ from app.ingest.chorus_connector import ChorusConnector
 from app.models import CallArtifact, ChorusCall, KBDocument, KBChunk, SourceType
 from app.services.artifact_generator import ArtifactGenerator
 from app.services.embedding import EmbeddingService
-from app.utils.chunking import chunk_transcript_turns
+from app.utils.chunking import TextChunk, chunk_transcript_turns
 from app.utils.hashing import sha256_text
 
 logger = logging.getLogger(__name__)
+
+
+_OUTCOME_MAP: dict[str, str] = {
+    "won": "won",
+    "closed won": "won",
+    "loss": "lost",
+    "lost": "lost",
+    "closed lost": "lost",
+    "no decision": "no_decision",
+    "no_decision": "no_decision",
+    "active": "active",
+    "open": "active",
+    "in progress": "active",
+}
+
+
+def _coerce_outcome(raw: str | None) -> str | None:
+    return _OUTCOME_MAP.get((raw or "").strip().lower())
+
+
+def _build_embed_text(chunk_text: str, call_metadata: dict) -> str:
+    parts = [call_metadata["account"]]
+    stage = call_metadata.get("stage")
+    if stage:
+        parts.append(stage)
+    parts.append(call_metadata["date"])
+    parts.append(f"rep:{call_metadata['rep_email']}")
+    prefix = " | ".join(parts)
+    return f"{prefix}\n\n{chunk_text}"
 
 
 class TranscriptIngestor:
@@ -44,123 +72,69 @@ class TranscriptIngestor:
         )
         date_str = _to_date_str(raw_date)
 
-        # Account
-        acct = conv.get("account") or {}
-        account = (
-            payload.get("account_name")
-            or (acct.get("name") if isinstance(acct, dict) else None)
-            or payload.get("account")
-            or "Unknown"
-        )
-
-        # Opportunity / stage
-        deal = conv.get("deal") or {}
-        opportunity = (
-            payload.get("opportunity_name")
-            or (deal.get("name") if isinstance(deal, dict) else None)
-        )
-        stage = deal.get("current_stage") if isinstance(deal, dict) else None
-
-        # Rep email
-        owner = conv.get("owner") or {}
-        rep_email = (
-            payload.get("user_email")
-            or (owner.get("email") if isinstance(owner, dict) else None)
-            or "unknown@example.com"
-        )
-
-        # Participants → speaker_map
-        participants = conv.get("participants") or payload.get("participants") or []
-        speaker_map: dict[str, dict] = {}
-        for p in participants:
-            name = p.get("name") or p.get("email") or "Unknown"
-            ptype = p.get("type") or "other"
-            role = "rep" if ptype == "rep" else ("cust" if ptype in ("cust", "customer") else "other")
-            speaker_map[name] = {"name": name, "role": role, "email": p.get("email")}
-
-        if not speaker_map:
-            speaker_map = {"Speaker": {"name": rep_email, "role": "rep", "email": rep_email}}
-
-        # Turns: parse from "SpeakerName: text\n..." transcript string built by _build_transcript()
-        transcript_text = payload.get("transcript") or ""
-        turns: list[dict] = []
-        for i, line in enumerate(transcript_text.split("\n")):
-            line = line.strip()
-            if not line or line.startswith("["):
-                continue
-            if ": " in line:
-                speaker_name, text = line.split(": ", 1)
-                speaker_id = speaker_name.strip()
-            else:
-                speaker_id = "Speaker"
-                text = line
-            if text.strip():
-                turns.append({
-                    "speaker_id": speaker_id,
-                    "start_time_sec": i * 5,
-                    "end_time_sec": i * 5 + 5,
-                    "text": text.strip(),
-                })
-
-        # Fallback: use meeting_summary as a single turn if no utterances
-        if not turns:
-            summary = payload.get("meeting_summary") or conv.get("summary") or ""
-            action_items = payload.get("action_items") or []
-            text_parts = []
-            if summary:
-                text_parts.append(f"Summary: {summary}")
-            if action_items:
-                text_parts.append("Action items: " + "; ".join(str(a) for a in action_items if a))
-            if text_parts:
-                turns = [{"speaker_id": "Speaker", "start_time_sec": 0, "end_time_sec": 10,
-                          "text": " ".join(text_parts)}]
-
-        call_id = (
-            payload.get("chorus_call_id")
-            or payload.get("engagement_id")
-            or payload.get("id")
-        )
+        md = {
+            "date": payload.get("date") or payload.get("metadata", {}).get("date"),
+            "account": payload.get("account") or payload.get("metadata", {}).get("account") or "Unknown",
+            "opportunity": payload.get("opportunity") or payload.get("metadata", {}).get("opportunity"),
+            "stage": payload.get("stage") or payload.get("metadata", {}).get("stage"),
+            "rep_email": payload.get("rep_email") or payload.get("metadata", {}).get("rep_email") or "unknown@example.com",
+            "se_email": payload.get("se_email") or payload.get("metadata", {}).get("se_email"),
+            "call_outcome": payload.get("call_outcome") or payload.get("metadata", {}).get("call_outcome"),
+        }
 
         return {
-            "chorus_call_id": call_id,
-            "metadata": {
-                "date": date_str,
-                "account": account,
-                "opportunity": opportunity,
-                "stage": stage,
-                "rep_email": rep_email,
-                "se_email": None,
-                "subject": payload.get("subject"),
-            },
+            "chorus_call_id": payload.get("chorus_call_id") or payload.get("id"),
+            "engagement_type": payload.get("engagement_type"),
+            "meeting_summary": payload.get("meeting_summary"),
+            "action_items": payload.get("action_items") or [],
+            "metadata": md,
             "speaker_map": speaker_map,
             "turns": turns,
-            "recording_url": payload.get("url") or f"https://chorus.ai/meeting/{call_id}",
+            "recording_url": payload.get("recording_url"),
+            "transcript_url": payload.get("transcript_url"),
         }
 
     def _upsert_call(self, normalized: dict) -> ChorusCall:
+        from sqlalchemy.dialects.mysql import insert as _mysql_insert
+
         md = normalized.get("metadata", {})
         call_id = normalized["chorus_call_id"]
-        existing = self.db.execute(select(ChorusCall).where(ChorusCall.chorus_call_id == call_id)).scalar_one_or_none()
         participants = list((normalized.get("speaker_map") or {}).values())
+        values = {
+            "chorus_call_id": call_id,
+            "engagement_type": normalized.get("engagement_type") or "call",
+            "meeting_summary": normalized.get("meeting_summary"),
+            "action_items": normalized.get("action_items") or [],
+            "date": date.fromisoformat(md.get("date")),
+            "account": md.get("account", "Unknown"),
+            "opportunity": md.get("opportunity"),
+            "stage": md.get("stage"),
+            "rep_email": md.get("rep_email", "unknown@example.com"),
+            "se_email": md.get("se_email"),
+            "call_outcome": _coerce_outcome(md.get("call_outcome")),
+            "participants": participants,
+            "recording_url": normalized.get("recording_url"),
+            "transcript_url": normalized.get("transcript_url"),
+        }
 
-        if existing:
-            row = existing
+        dialect = self.db.bind.dialect.name if self.db.bind else ""
+        if dialect == "mysql":
+            # Atomic upsert — safe for concurrent threads, no lock contention
+            stmt = _mysql_insert(ChorusCall).values(**values)
+            stmt = stmt.on_duplicate_key_update(**{k: stmt.inserted[k] for k in values if k != "chorus_call_id"})
+            self.db.execute(stmt)
+            self.db.flush()
         else:
-            row = ChorusCall(chorus_call_id=call_id)
-            self.db.add(row)
+            existing = self.db.execute(select(ChorusCall).where(ChorusCall.chorus_call_id == call_id)).scalar_one_or_none()
+            if existing:
+                for k, v in values.items():
+                    setattr(existing, k, v)
+            else:
+                row = ChorusCall(**values)
+                self.db.add(row)
+            self.db.flush()
 
-        row.date = date.fromisoformat(md.get("date"))
-        row.account = md.get("account", "Unknown")
-        row.opportunity = md.get("opportunity")
-        row.stage = md.get("stage")
-        row.rep_email = md.get("rep_email", "unknown@example.com")
-        row.se_email = md.get("se_email")
-        row.participants = participants
-        row.recording_url = normalized.get("recording_url")
-        row.transcript_url = normalized.get("transcript_url")
-
-        self.db.flush()
-        return row
+        return self.db.execute(select(ChorusCall).where(ChorusCall.chorus_call_id == call_id)).scalar_one()
 
     def _upsert_document(self, normalized: dict, call: ChorusCall) -> KBDocument:
         call_id = normalized["chorus_call_id"]
@@ -191,11 +165,42 @@ class TranscriptIngestor:
         self.db.flush()
         return doc
 
-    def _replace_chunks(self, doc: KBDocument, normalized: dict) -> list[str]:
+    def _replace_chunks(self, doc: KBDocument, normalized: dict, call: ChorusCall) -> list[str]:
         self.db.execute(delete(KBChunk).where(KBChunk.document_id == doc.id))
-        chunks = chunk_transcript_turns(normalized.get("turns", []), normalized.get("speaker_map", {}))
-        embeddings = self.embedder.batch_embed([c.text for c in chunks]) if chunks else []
 
+        turns = normalized.get("turns", [])
+        meeting_summary = normalized.get("meeting_summary") or ""
+        action_items = normalized.get("action_items") or []
+
+        # Assemble call-level metadata to merge into each chunk's metadata_json
+        call_metadata: dict[str, str] = {
+            "rep_email": call.rep_email,
+            "account": call.account,
+            "date": call.date.isoformat(),
+        }
+        if call.se_email:
+            call_metadata["se_email"] = call.se_email
+        if call.stage:
+            call_metadata["stage"] = call.stage
+        if call.call_outcome:
+            call_metadata["call_outcome"] = call.call_outcome
+
+        if turns:
+            chunks = chunk_transcript_turns(turns, normalized.get("speaker_map", {}))
+        elif meeting_summary or action_items:
+            # No transcript — embed the Chorus-generated summary + action items instead
+            parts = []
+            if meeting_summary:
+                parts.append(f"Meeting Summary:\n{meeting_summary}")
+            if action_items:
+                parts.append("Action Items:\n" + "\n".join(f"- {a}" for a in action_items))
+            text = "\n\n".join(parts)
+            chunks = [TextChunk(text=text, token_count=len(text.split()), metadata={})]
+        else:
+            return []
+
+        embed_texts = [_build_embed_text(c.text, call_metadata) for c in chunks]
+        embeddings = self.embedder.batch_embed(embed_texts)
         snippets: list[str] = []
         for idx, (chunk, emb) in enumerate(zip(chunks, embeddings)):
             self.db.add(
@@ -205,7 +210,7 @@ class TranscriptIngestor:
                     text=chunk.text,
                     token_count=chunk.token_count,
                     embedding=emb,
-                    metadata_json=chunk.metadata,
+                    metadata_json={**chunk.metadata, **call_metadata},
                     content_hash=sha256_text(chunk.text),
                 )
             )
@@ -214,20 +219,40 @@ class TranscriptIngestor:
 
     def _replace_artifact(self, call_id: str, normalized: dict, snippets: list[str]) -> None:
         self.db.execute(delete(CallArtifact).where(CallArtifact.chorus_call_id == call_id))
-        artifact = self.generator.generate(normalized, snippets)
-        self.db.add(
-            CallArtifact(
-                chorus_call_id=call_id,
-                summary=artifact["summary"],
-                objections=artifact["objections"],
-                competitors_mentioned=artifact["competitors_mentioned"],
-                risks=artifact["risks"],
-                next_steps=artifact["next_steps"],
-                recommended_collateral=artifact["recommended_collateral"],
-                follow_up_questions=artifact["follow_up_questions"],
-                model_info=artifact["model_info"],
+
+        meeting_summary = normalized.get("meeting_summary") or ""
+        action_items = normalized.get("action_items") or []
+
+        if meeting_summary or action_items:
+            # Use Chorus's pre-generated summary — no OpenAI call needed
+            self.db.add(
+                CallArtifact(
+                    chorus_call_id=call_id,
+                    summary=meeting_summary or "No summary available.",
+                    objections=[],
+                    competitors_mentioned=[],
+                    risks=[],
+                    next_steps=action_items,
+                    recommended_collateral=[],
+                    follow_up_questions=[],
+                    model_info={"source": "chorus_ai"},
+                )
             )
-        )
+        else:
+            artifact = self.generator.generate(normalized, snippets)
+            self.db.add(
+                CallArtifact(
+                    chorus_call_id=call_id,
+                    summary=artifact["summary"],
+                    objections=artifact["objections"],
+                    competitors_mentioned=artifact["competitors_mentioned"],
+                    risks=artifact["risks"],
+                    next_steps=artifact["next_steps"],
+                    recommended_collateral=artifact["recommended_collateral"],
+                    follow_up_questions=artifact["follow_up_questions"],
+                    model_info=artifact["model_info"],
+                )
+            )
 
     def _ingest_one(self, normalized: dict) -> None:
         """Ingest a single normalized call into TiDB with rollback on failure."""
@@ -237,81 +262,48 @@ class TranscriptIngestor:
         self._replace_artifact(normalized["chorus_call_id"], normalized, snippets)
 
     def sync(self, since: date | None = None) -> dict:
-        raw_calls = self.connector.fetch_calls(since=since)
+        from app.db.session import SessionLocal
+
         processed = 0
-        skipped = 0
-        failed = 0
-        summary_fallbacks = 0
+        total_seen = 0
 
-        for raw in raw_calls:
-            # Skip non-meeting engagements (emails, content_viewed, etc.)
-            eng_type = raw.payload.get("engagement_type") or ""
-            if eng_type and eng_type not in ("meeting", ""):
-                skipped += 1
-                continue
+        # Warm up TiDB Serverless before the first write (auto-pause wakeup can take 30-60s)
+        warmup_db = SessionLocal()
+        try:
+            from sqlalchemy import text as _text
+            warmup_db.execute(_text("SELECT 1"))
+            warmup_db.execute(_text("SET SESSION innodb_lock_wait_timeout = 120"))
+        except Exception:
+            pass
+        finally:
+            warmup_db.close()
 
-            normalized = self._normalize(raw.payload)
-
-            # Skip if no turns — nothing to index
-            if not normalized.get("turns"):
-                skipped += 1
-                continue
-
-            # Track if this call is using summary fallback instead of full transcript
-            transcript = raw.payload.get("transcript") or ""
-            if not transcript:
-                summary_fallbacks += 1
-                logger.warning(
-                    "Call %s (%s): no utterance transcript — using summary fallback",
-                    raw.chorus_call_id,
-                    raw.payload.get("account_name", "unknown"),
-                )
-
-            # Retry up to 3 times on TiDB transient errors
-            for attempt in range(3):
+        for page in self.connector.fetch_calls_pages(since=since):
+            total_seen += len(page)
+            # Fresh DB session per page — avoids idle connection timeout during Chorus fetch
+            page_db = SessionLocal()
+            try:
+                # Extend lock wait timeout for this session
+                from sqlalchemy import text as _text
                 try:
-                    self._ingest_one(normalized)
+                    page_db.execute(_text("SET SESSION innodb_lock_wait_timeout = 120"))
+                except Exception:
+                    pass
+                page_ingestor = TranscriptIngestor(page_db)
+                for raw in page:
+                    normalized = self._normalize(raw.payload)
+                    call = page_ingestor._upsert_call(normalized)
+                    doc = page_ingestor._upsert_document(normalized, call)
+                    snippets = page_ingestor._replace_chunks(doc, normalized, call)
+                    if normalized.get("turns") or normalized.get("meeting_summary") or normalized.get("action_items"):
+                        page_ingestor._replace_artifact(normalized["chorus_call_id"], normalized, snippets)
                     processed += 1
-                    break
-                except SQLAlchemyError as exc:
-                    self.db.rollback()
-                    if attempt == 2:
-                        logger.error("Failed to ingest call %s after 3 attempts: %s", raw.chorus_call_id, exc)
-                        failed += 1
-                    else:
-                        wait = 2 ** attempt
-                        logger.warning("TiDB error for call %s (attempt %d), retrying in %ds: %s", raw.chorus_call_id, attempt + 1, wait, exc)
-                        time.sleep(wait)
+                page_db.commit()
+                logger.info("Chorus sync: committed %d/%d calls", processed, total_seen)
+            except Exception:
+                page_db.rollback()
+                raise
+            finally:
+                page_db.close()
 
-        self.db.commit()
-        result = {"calls_seen": len(raw_calls), "processed": processed, "skipped": skipped}
-        if failed:
-            result["failed"] = failed
-        if summary_fallbacks:
-            result["summary_fallbacks"] = summary_fallbacks
-        return result
-
-
-def _to_date_str(raw: object) -> str:
-    """Convert various date formats (Unix seconds, ISO string) to YYYY-MM-DD."""
-    from datetime import datetime, timezone
-    if not raw:
-        return datetime.now(tz=timezone.utc).strftime("%Y-%m-%d")
-    if isinstance(raw, (int, float)):
-        ts = float(raw)
-        if ts > 1e10:
-            ts /= 1000
-        try:
-            return datetime.utcfromtimestamp(ts).strftime("%Y-%m-%d")
-        except (ValueError, OSError, OverflowError):
-            pass
-    raw_str = str(raw).strip()
-    if raw_str.replace(".", "", 1).isdigit():
-        try:
-            ts = float(raw_str)
-            if ts > 1e10:
-                ts /= 1000
-            return datetime.utcfromtimestamp(ts).strftime("%Y-%m-%d")
-        except (ValueError, OSError, OverflowError):
-            pass
-    return raw_str[:10]  # Take YYYY-MM-DD from ISO string
+        return {"calls_seen": total_seen, "processed": processed}
