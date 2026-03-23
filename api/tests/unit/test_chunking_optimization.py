@@ -215,3 +215,180 @@ def test_build_embed_text_chunk_text_unchanged():
     assert result.endswith(chunk_text)
     # chunk_text appears verbatim after the double newline separator
     assert "\n\n" + chunk_text in result
+
+
+# ---------------------------------------------------------------------------
+# Task 5: _replace_chunks metadata + embedding
+# ---------------------------------------------------------------------------
+
+def _make_chorus_call(**overrides):
+    from datetime import date as date_cls
+    from unittest.mock import MagicMock
+    call = MagicMock()
+    call.rep_email = "alice@corp.com"
+    call.account = "Acme Corp"
+    call.date = date_cls(2026, 3, 15)
+    call.se_email = None
+    call.stage = None
+    call.call_outcome = None
+    for k, v in overrides.items():
+        setattr(call, k, v)
+    return call
+
+
+def _make_ingestor_with_mock_db():
+    from app.ingest.transcript_ingestor import TranscriptIngestor
+    from unittest.mock import MagicMock
+    ingestor = TranscriptIngestor.__new__(TranscriptIngestor)
+    ingestor.db = MagicMock()
+    ingestor.embedder = MagicMock()
+    ingestor.embedder.batch_embed.return_value = [[0.1] * 1536]
+    return ingestor
+
+
+def _minimal_normalized_with_turns():
+    return {
+        "chorus_call_id": "call-001",
+        "speaker_map": {"S1": {"name": "AE", "role": "ae", "email": "alice@corp.com"}},
+        "turns": [
+            {"speaker_id": "S1", "start_time_sec": 0, "end_time_sec": 60,
+             "text": "Hello and welcome to this call about your architecture."},
+        ],
+        "meeting_summary": None,
+        "action_items": [],
+    }
+
+
+def test_replace_chunks_metadata_has_rep_email_and_account():
+    from app.ingest.transcript_ingestor import TranscriptIngestor
+    from unittest.mock import MagicMock
+
+    ingestor = _make_ingestor_with_mock_db()
+    call = _make_chorus_call()
+
+    doc = MagicMock()
+    doc.id = "doc-001"
+
+    normalized = _minimal_normalized_with_turns()
+
+    added_chunks = []
+    ingestor.db.add.side_effect = added_chunks.append
+
+    ingestor._replace_chunks(doc, normalized, call)
+
+    assert len(added_chunks) >= 1
+    for chunk in added_chunks:
+        assert chunk.metadata_json["rep_email"] == "alice@corp.com"
+        assert chunk.metadata_json["account"] == "Acme Corp"
+        assert chunk.metadata_json["date"] == "2026-03-15"
+
+
+def test_replace_chunks_stage_absent_when_call_stage_none():
+    from app.ingest.transcript_ingestor import TranscriptIngestor
+    ingestor = _make_ingestor_with_mock_db()
+    call = _make_chorus_call(stage=None)
+    doc = MagicMock()
+    doc.id = "doc-001"
+    normalized = _minimal_normalized_with_turns()
+    added_chunks = []
+    ingestor.db.add.side_effect = added_chunks.append
+    ingestor._replace_chunks(doc, normalized, call)
+    for chunk in added_chunks:
+        assert "stage" not in chunk.metadata_json
+
+
+def test_replace_chunks_call_outcome_absent_when_none():
+    from app.ingest.transcript_ingestor import TranscriptIngestor
+    ingestor = _make_ingestor_with_mock_db()
+    call = _make_chorus_call(call_outcome=None)
+    doc = MagicMock()
+    doc.id = "doc-001"
+    normalized = _minimal_normalized_with_turns()
+    added_chunks = []
+    ingestor.db.add.side_effect = added_chunks.append
+    ingestor._replace_chunks(doc, normalized, call)
+    for chunk in added_chunks:
+        assert "call_outcome" not in chunk.metadata_json
+
+
+def test_replace_chunks_call_outcome_present_when_set():
+    from app.ingest.transcript_ingestor import TranscriptIngestor
+    ingestor = _make_ingestor_with_mock_db()
+    call = _make_chorus_call(call_outcome="won")
+    doc = MagicMock()
+    doc.id = "doc-001"
+    normalized = _minimal_normalized_with_turns()
+    added_chunks = []
+    ingestor.db.add.side_effect = added_chunks.append
+    ingestor._replace_chunks(doc, normalized, call)
+    for chunk in added_chunks:
+        assert chunk.metadata_json["call_outcome"] == "won"
+
+
+def test_replace_chunks_text_is_raw_transcript_not_prefixed():
+    from app.ingest.transcript_ingestor import TranscriptIngestor
+    import re
+    ingestor = _make_ingestor_with_mock_db()
+    call = _make_chorus_call(stage="Discovery")
+    doc = MagicMock()
+    doc.id = "doc-001"
+    normalized = _minimal_normalized_with_turns()
+    added_chunks = []
+    ingestor.db.add.side_effect = added_chunks.append
+    ingestor._replace_chunks(doc, normalized, call)
+    for chunk in added_chunks:
+        assert not re.match(r"^\S.*\|.*rep:", chunk.text)
+
+
+def test_replace_chunks_embed_text_is_prefixed():
+    from app.ingest.transcript_ingestor import TranscriptIngestor
+    import re
+    ingestor = _make_ingestor_with_mock_db()
+    call = _make_chorus_call(stage="Discovery")
+    doc = MagicMock()
+    doc.id = "doc-001"
+    normalized = _minimal_normalized_with_turns()
+    ingestor._replace_chunks(doc, normalized, call)
+    embed_arg = ingestor.embedder.batch_embed.call_args.args[0][0]
+    assert re.match(r"^\S.*\|.*rep:", embed_arg)
+
+
+def test_replace_chunks_fallback_path_text_not_prefixed():
+    """Summary-only path: KBChunk.text must not contain prefix."""
+    from app.ingest.transcript_ingestor import TranscriptIngestor
+    import re
+    ingestor = _make_ingestor_with_mock_db()
+    call = _make_chorus_call(stage="Discovery")
+    doc = MagicMock()
+    doc.id = "doc-001"
+    normalized = {
+        "chorus_call_id": "call-001",
+        "speaker_map": {},
+        "turns": [],
+        "meeting_summary": "Great call about architecture.",
+        "action_items": [],
+    }
+    added_chunks = []
+    ingestor.db.add.side_effect = added_chunks.append
+    ingestor._replace_chunks(doc, normalized, call)
+    assert len(added_chunks) == 1
+    assert not re.match(r"^\S.*\|.*rep:", added_chunks[0].text)
+    embed_arg = ingestor.embedder.batch_embed.call_args.args[0][0]
+    assert re.match(r"^\S.*\|.*rep:", embed_arg)
+
+
+def test_replace_chunks_preserves_time_window_keys():
+    """start_time_sec / end_time_sec from chunk_transcript_turns must survive the metadata merge."""
+    from app.ingest.transcript_ingestor import TranscriptIngestor
+    ingestor = _make_ingestor_with_mock_db()
+    call = _make_chorus_call()
+    doc = MagicMock()
+    doc.id = "doc-001"
+    normalized = _minimal_normalized_with_turns()
+    added_chunks = []
+    ingestor.db.add.side_effect = added_chunks.append
+    ingestor._replace_chunks(doc, normalized, call)
+    assert len(added_chunks) >= 1
+    for chunk in added_chunks:
+        assert "start_time_sec" in chunk.metadata_json
+        assert "end_time_sec" in chunk.metadata_json

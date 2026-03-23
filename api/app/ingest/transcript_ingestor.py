@@ -174,12 +174,25 @@ class TranscriptIngestor:
         self.db.flush()
         return doc
 
-    def _replace_chunks(self, doc: KBDocument, normalized: dict) -> list[str]:
+    def _replace_chunks(self, doc: KBDocument, normalized: dict, call: ChorusCall) -> list[str]:
         self.db.execute(delete(KBChunk).where(KBChunk.document_id == doc.id))
 
         turns = normalized.get("turns", [])
         meeting_summary = normalized.get("meeting_summary") or ""
         action_items = normalized.get("action_items") or []
+
+        # Assemble call-level metadata to merge into each chunk's metadata_json
+        call_metadata: dict = {
+            "rep_email": call.rep_email,
+            "account": call.account,
+            "date": call.date.isoformat(),
+        }
+        if call.se_email:
+            call_metadata["se_email"] = call.se_email
+        if call.stage:
+            call_metadata["stage"] = call.stage
+        if call.call_outcome:
+            call_metadata["call_outcome"] = call.call_outcome
 
         if turns:
             chunks = chunk_transcript_turns(turns, normalized.get("speaker_map", {}))
@@ -195,7 +208,8 @@ class TranscriptIngestor:
         else:
             return []
 
-        embeddings = self.embedder.batch_embed([c.text for c in chunks])
+        embed_texts = [_build_embed_text(c.text, call_metadata) for c in chunks]
+        embeddings = self.embedder.batch_embed(embed_texts)
         snippets: list[str] = []
         for idx, (chunk, emb) in enumerate(zip(chunks, embeddings)):
             self.db.add(
@@ -205,7 +219,7 @@ class TranscriptIngestor:
                     text=chunk.text,
                     token_count=chunk.token_count,
                     embedding=emb,
-                    metadata_json=chunk.metadata,
+                    metadata_json={**chunk.metadata, **call_metadata},
                     content_hash=sha256_text(chunk.text),
                 )
             )
@@ -282,7 +296,7 @@ class TranscriptIngestor:
                     normalized = self._normalize(raw.payload)
                     call = page_ingestor._upsert_call(normalized)
                     doc = page_ingestor._upsert_document(normalized, call)
-                    snippets = page_ingestor._replace_chunks(doc, normalized)
+                    snippets = page_ingestor._replace_chunks(doc, normalized, call)
                     if normalized.get("turns") or normalized.get("meeting_summary") or normalized.get("action_items"):
                         page_ingestor._replace_artifact(normalized["chorus_call_id"], normalized, snippets)
                     processed += 1
