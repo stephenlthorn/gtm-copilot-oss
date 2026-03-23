@@ -574,6 +574,9 @@ class LLMService:
             "include": ["reasoning.encrypted_content"],
         }
 
+        if tools:
+            payload["tools"] = tools
+
         if reasoning_effort and reasoning_effort in ("low", "medium", "high"):
             payload["reasoning"] = {"effort": reasoning_effort}
 
