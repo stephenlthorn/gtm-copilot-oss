@@ -42,6 +42,51 @@ def create_feedback(
     db.add(fb)
     db.commit()
     db.refresh(fb)
+
+    # Write chunk quality signals if citations provided
+    if body.citations:
+        try:
+            from datetime import datetime, timedelta, timezone
+            from app.models import AuditLog
+            from app.models.feedback import ChunkQualitySignal
+
+            audit_log = None
+            if body.audit_id:
+                audit_log = db.execute(
+                    select(AuditLog).where(AuditLog.id == body.audit_id)
+                ).scalar_one_or_none()
+            if audit_log is None:
+                cutoff = datetime.now(timezone.utc) - timedelta(seconds=60)
+                audit_log = db.execute(
+                    select(AuditLog)
+                    .where(AuditLog.actor == email)
+                    .where(AuditLog.timestamp >= cutoff)
+                    .order_by(AuditLog.timestamp.desc())
+                    .limit(1)
+                ).scalar_one_or_none()
+
+            cited_set = set(body.citations)
+            signal_val = "cited_positive" if body.rating == "positive" else "cited_negative"
+            for chunk_id in cited_set:
+                db.add(ChunkQualitySignal(
+                    chunk_id=chunk_id,
+                    signal=signal_val,
+                    query_mode=body.mode,
+                ))
+
+            if audit_log and audit_log.retrieval_json:
+                retrieved = {r["chunk_id"] for r in audit_log.retrieval_json.get("results", [])}
+                for chunk_id in retrieved - cited_set:
+                    db.add(ChunkQualitySignal(
+                        chunk_id=chunk_id,
+                        signal="retrieved_unused",
+                        query_mode=body.mode,
+                    ))
+
+            db.commit()
+        except Exception:
+            pass
+
     return fb
 
 

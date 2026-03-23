@@ -9,7 +9,7 @@ logger = logging.getLogger(__name__)
 import httpx
 from dateutil.parser import isoparse
 from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request
-from sqlalchemy import select
+from sqlalchemy import case, func, select
 from sqlalchemy.orm import Session
 
 from app.api.deps import db_session
@@ -645,3 +645,47 @@ def sync_feishu(request: Request, db: Session = Depends(db_session)) -> dict:
         status=AuditStatus.OK,
     )
     return {"status": status_value, "message": message, **result}
+
+
+@router.get("/chunk-quality")
+def chunk_quality_stats(
+    limit: int = Query(default=50, ge=1, le=500),
+    min_signals: int = Query(default=10, ge=1),
+    db: Session = Depends(db_session),
+):
+    """Return chunks ranked by positive signal rate, for corpus quality review."""
+    from app.models.feedback import ChunkQualitySignal
+    from app.models.entities import KBChunk
+
+    rows = db.execute(
+        select(
+            ChunkQualitySignal.chunk_id,
+            func.sum(case((ChunkQualitySignal.signal == "cited_positive", 1), else_=0)).label("pos"),
+            func.sum(case((ChunkQualitySignal.signal == "cited_negative", 1), else_=0)).label("neg"),
+            func.sum(case((ChunkQualitySignal.signal == "retrieved_unused", 1), else_=0)).label("unused"),
+            func.count().label("total"),
+        )
+        .group_by(ChunkQualitySignal.chunk_id)
+        .having(func.count() >= min_signals)
+        .order_by((
+            func.sum(case((ChunkQualitySignal.signal == "cited_positive", 1), else_=0)) /
+            func.nullif(
+                func.sum(case((ChunkQualitySignal.signal == "cited_positive", 1), else_=0)) +
+                func.sum(case((ChunkQualitySignal.signal == "cited_negative", 1), else_=0)),
+                0
+            )
+        ).desc().nulls_last())
+        .limit(limit)
+    ).all()
+
+    return [
+        {
+            "chunk_id": str(row.chunk_id),
+            "cited_positive": int(row.pos),
+            "cited_negative": int(row.neg),
+            "retrieved_unused": int(row.unused),
+            "total_signals": int(row.total),
+            "positive_rate": round(row.pos / (row.pos + row.neg), 3) if (row.pos + row.neg) > 0 else None,
+        }
+        for row in rows
+    ]
