@@ -105,7 +105,8 @@ class ChorusCall(Base):
     __tablename__ = "chorus_calls"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID_TYPE, primary_key=True, default=_uuid)
-    chorus_call_id: Mapped[str] = mapped_column(String(255), unique=True, nullable=False, index=True)
+    chorus_call_id: Mapped[str | None] = mapped_column(String(255), unique=True, nullable=True, index=True)
+    source_type: Mapped[str] = mapped_column(String(32), nullable=False, default="chorus", server_default="chorus")
     date: Mapped[date] = mapped_column(Date, nullable=False, index=True)
     account: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
     opportunity: Mapped[str | None] = mapped_column(String(512))
@@ -120,6 +121,10 @@ class ChorusCall(Base):
     recording_url: Mapped[str | None] = mapped_column(Text)
     transcript_url: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    def __init__(self, **kwargs):
+        kwargs.setdefault("source_type", "chorus")
+        super().__init__(**kwargs)
 
 
 class CallArtifact(Base):
@@ -417,3 +422,28 @@ class ChatMessage(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
+class AccountDealMemory(Base):
+    __tablename__ = "account_deal_memory"
+
+    account: Mapped[str] = mapped_column(String(255), primary_key=True)
+    deal_stage: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    is_new_business: Mapped[bool] = mapped_column(Boolean(), nullable=False, default=True)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="active")
+    meddpicc: Mapped[dict | None] = mapped_column(JSON_TYPE, nullable=True, default=None)
+    key_contacts: Mapped[list | None] = mapped_column(JSON_TYPE, nullable=True, default=None)
+    tech_stack: Mapped[dict | None] = mapped_column(JSON_TYPE, nullable=True, default=None)
+    open_items: Mapped[list | None] = mapped_column(JSON_TYPE, nullable=True, default=None)
+    summary: Mapped[str | None] = mapped_column(Text, nullable=True)
+    call_count: Mapped[int] = mapped_column(Integer(), nullable=False, default=0)
+    last_call_date: Mapped[date | None] = mapped_column(Date(), nullable=True)
+    pending_review: Mapped[bool] = mapped_column(Boolean(), nullable=False, default=False)
+    pending_delta: Mapped[dict | None] = mapped_column(JSON_TYPE, nullable=True, default=None)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+    def __init__(self, **kwargs):
+        kwargs.setdefault("is_new_business", True)
+        kwargs.setdefault("status", "active")
+        kwargs.setdefault("pending_review", False)
+        kwargs.setdefault("call_count", 0)
+        super().__init__(**kwargs)
