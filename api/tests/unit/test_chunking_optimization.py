@@ -78,3 +78,90 @@ def test_coerce_outcome_none_returns_none():
 def test_coerce_outcome_unrecognized_returns_none():
     from app.ingest.transcript_ingestor import _coerce_outcome
     assert _coerce_outcome("something_random") is None
+
+
+# ---------------------------------------------------------------------------
+# Task 3: _normalize and _upsert_call for call_outcome
+# ---------------------------------------------------------------------------
+
+def test_normalize_extracts_call_outcome_from_top_level():
+    from app.ingest.transcript_ingestor import TranscriptIngestor
+    payload = {
+        "chorus_call_id": "abc",
+        "date": "2026-03-01",
+        "account": "Acme",
+        "rep_email": "rep@corp.com",
+        "call_outcome": "closed won",
+        "turns": [],
+    }
+    normalized = TranscriptIngestor._normalize(payload)
+    assert normalized["metadata"]["call_outcome"] == "closed won"
+
+
+def test_normalize_extracts_call_outcome_from_metadata_dict():
+    from app.ingest.transcript_ingestor import TranscriptIngestor
+    payload = {
+        "chorus_call_id": "abc",
+        "metadata": {
+            "date": "2026-03-01",
+            "account": "Acme",
+            "rep_email": "rep@corp.com",
+            "call_outcome": "open",
+        },
+        "turns": [],
+    }
+    normalized = TranscriptIngestor._normalize(payload)
+    assert normalized["metadata"]["call_outcome"] == "open"
+
+
+def test_normalize_call_outcome_none_when_absent():
+    from app.ingest.transcript_ingestor import TranscriptIngestor
+    payload = {
+        "chorus_call_id": "abc",
+        "date": "2026-03-01",
+        "account": "Acme",
+        "rep_email": "rep@corp.com",
+        "turns": [],
+    }
+    normalized = TranscriptIngestor._normalize(payload)
+    assert normalized["metadata"]["call_outcome"] is None
+
+
+def test_upsert_call_persists_call_outcome():
+    """_upsert_call must include call_outcome in values via _coerce_outcome."""
+    from app.ingest.transcript_ingestor import TranscriptIngestor
+    from unittest.mock import MagicMock
+
+    db = MagicMock()
+    db.bind.dialect.name = "sqlite"
+    ingestor = TranscriptIngestor.__new__(TranscriptIngestor)
+    ingestor.db = db
+
+    # sqlite path: scalar_one_or_none returns None → new row added
+    db.execute.return_value.scalar_one_or_none.return_value = None
+    db.execute.return_value.scalar_one.return_value = MagicMock(
+        chorus_call_id="test-id", call_outcome="won"
+    )
+
+    normalized = {
+        "chorus_call_id": "test-id",
+        "engagement_type": "call",
+        "meeting_summary": None,
+        "action_items": [],
+        "metadata": {
+            "date": "2026-03-01",
+            "account": "Acme",
+            "rep_email": "rep@corp.com",
+            "se_email": None,
+            "stage": None,
+            "call_outcome": "closed won",
+        },
+        "speaker_map": {},
+        "recording_url": None,
+        "transcript_url": None,
+    }
+
+    ingestor._upsert_call(normalized)
+    # The ChorusCall was added with call_outcome coerced from "closed won" -> "won"
+    added_obj = db.add.call_args[0][0]
+    assert added_obj.call_outcome == "won"

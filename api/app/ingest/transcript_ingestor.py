@@ -77,6 +77,7 @@ class TranscriptIngestor:
             "stage": payload.get("stage") or payload.get("metadata", {}).get("stage"),
             "rep_email": payload.get("rep_email") or payload.get("metadata", {}).get("rep_email") or "unknown@example.com",
             "se_email": payload.get("se_email") or payload.get("metadata", {}).get("se_email"),
+            "call_outcome": payload.get("call_outcome") or payload.get("metadata", {}).get("call_outcome"),
         }
 
         return {
@@ -108,6 +109,7 @@ class TranscriptIngestor:
             "stage": md.get("stage"),
             "rep_email": md.get("rep_email", "unknown@example.com"),
             "se_email": md.get("se_email"),
+            "call_outcome": _coerce_outcome(md.get("call_outcome")),
             "participants": participants,
             "recording_url": normalized.get("recording_url"),
             "transcript_url": normalized.get("transcript_url"),
