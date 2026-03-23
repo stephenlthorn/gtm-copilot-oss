@@ -168,3 +168,50 @@ def test_upsert_call_persists_call_outcome():
     # The ChorusCall was added with call_outcome coerced from "closed won" -> "won"
     added_obj = db.add.call_args[0][0]
     assert added_obj.call_outcome == "won"
+
+
+# ---------------------------------------------------------------------------
+# Task 4: _build_embed_text
+# ---------------------------------------------------------------------------
+
+def _make_call_metadata(**overrides):
+    base = {
+        "rep_email": "alice@corp.com",
+        "account": "Acme Corp",
+        "date": "2026-03-15",
+    }
+    base.update(overrides)
+    return base
+
+
+def test_build_embed_text_with_stage():
+    from app.ingest.transcript_ingestor import _build_embed_text
+    meta = _make_call_metadata(stage="Discovery")
+    result = _build_embed_text("some transcript text", meta)
+    assert result == "Acme Corp | Discovery | 2026-03-15 | rep:alice@corp.com\n\nsome transcript text"
+
+
+def test_build_embed_text_without_stage():
+    from app.ingest.transcript_ingestor import _build_embed_text
+    meta = _make_call_metadata()  # no stage key
+    result = _build_embed_text("some transcript text", meta)
+    assert result == "Acme Corp | 2026-03-15 | rep:alice@corp.com\n\nsome transcript text"
+
+
+def test_build_embed_text_empty_stage_omitted():
+    from app.ingest.transcript_ingestor import _build_embed_text
+    meta = _make_call_metadata(stage="")
+    result = _build_embed_text("some transcript text", meta)
+    # Empty string is falsy — prefix must NOT contain double-pipe
+    assert " |  | " not in result
+    assert "2026-03-15" in result
+
+
+def test_build_embed_text_chunk_text_unchanged():
+    from app.ingest.transcript_ingestor import _build_embed_text
+    chunk_text = "00:01:23 AE: Let me understand your current architecture..."
+    meta = _make_call_metadata(stage="Discovery")
+    result = _build_embed_text(chunk_text, meta)
+    assert result.endswith(chunk_text)
+    # chunk_text appears verbatim after the double newline separator
+    assert "\n\n" + chunk_text in result

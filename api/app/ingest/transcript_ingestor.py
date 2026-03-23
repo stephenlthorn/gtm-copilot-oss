@@ -34,6 +34,17 @@ def _coerce_outcome(raw: str | None) -> str | None:
     return _OUTCOME_MAP.get((raw or "").strip().lower())
 
 
+def _build_embed_text(chunk_text: str, call_metadata: dict) -> str:
+    parts = [call_metadata["account"]]
+    stage = call_metadata.get("stage")
+    if stage:
+        parts.append(stage)
+    parts.append(call_metadata["date"])
+    parts.append(f"rep:{call_metadata['rep_email']}")
+    prefix = " | ".join(parts)
+    return f"{prefix}\n\n{chunk_text}"
+
+
 class TranscriptIngestor:
     def __init__(self, db: Session) -> None:
         self.db = db
