@@ -5,11 +5,13 @@ import GTMFeaturePanel from '../../../components/GTMFeaturePanel';
 import KnowledgeSourcesPanel from '../../../components/KnowledgeSourcesPanel';
 import CallsPanel from '../../../components/CallsPanel';
 import SourceProfilesPanel from '../../../components/SourceProfilesPanel';
+import PromptStudio from '../../../components/PromptStudio';
 
 const NAV = [
   ['#account', 'Account'],
   ['#knowledge', 'Knowledge'],
   ['#ai', 'AI Behavior'],
+  ['#prompts', 'Prompt Studio'],
   ['#data', 'Data'],
 ];
 
@@ -139,6 +141,69 @@ export default async function SettingsPage() {
           </div>
         </div>
 
+        {/* TiDB Expert Mode panel */}
+        <div className="panel" style={{ marginTop: '0.75rem' }}>
+          <div className="panel-header">
+            <span className="panel-title" style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+              <span style={{ color: '#7c3aed' }}>◎</span> TiDB Expert Mode
+            </span>
+            <span className="tag" style={{ background: '#7c3aed15', color: '#7c3aed', border: '1px solid #7c3aed30' }}>Auto</span>
+          </div>
+          <div className="panel-body" style={{ display: 'grid', gap: '0.75rem' }}>
+            <p style={{ margin: 0, fontSize: '0.8rem', color: 'var(--text-2)', lineHeight: 1.5 }}>
+              TiDB Expert mode injects a comprehensive technical context block into every AI response, covering TiDB architecture, migration paths, and competitive differentiators. It is <strong>automatically activated</strong> when you switch to an SE section and deactivated for sales sections.
+            </p>
+
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem', fontSize: '0.78rem' }}>
+              <div style={{ padding: '0.5rem 0.75rem', borderRadius: '6px', background: '#7c3aed10', border: '1px solid #7c3aed25' }}>
+                <div style={{ fontWeight: 600, color: '#7c3aed', marginBottom: '0.3rem', fontSize: '0.7rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Auto-On (SE sections)</div>
+                <div style={{ color: 'var(--text-2)', lineHeight: 1.5 }}>SE: POC Plan<br />SE: Architecture Fit<br />SE: Competitor Coach</div>
+              </div>
+              <div style={{ padding: '0.5rem 0.75rem', borderRadius: '6px', background: 'var(--bg-2)', border: '1px solid var(--border)' }}>
+                <div style={{ fontWeight: 600, color: 'var(--text-2)', marginBottom: '0.3rem', fontSize: '0.7rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Off (Sales sections)</div>
+                <div style={{ color: 'var(--text-3)', lineHeight: 1.5 }}>Pre-Call Intel<br />Post-Call Analysis<br />Follow-Up / TAL</div>
+              </div>
+            </div>
+
+            <details>
+              <summary style={{ fontSize: '0.75rem', color: 'var(--text-3)', cursor: 'pointer', padding: '0.2rem 0', listStyle: 'none', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                <span style={{ fontSize: '0.65rem' }}>▶</span> View injected expert context
+              </summary>
+              <pre style={{
+                marginTop: '0.6rem', padding: '0.75rem', borderRadius: '6px',
+                background: 'var(--bg-2)', border: '1px solid var(--border)',
+                fontSize: '0.72rem', lineHeight: 1.6, whiteSpace: 'pre-wrap',
+                color: 'var(--text-2)', overflowY: 'auto', maxHeight: '340px',
+              }}>{`You are an expert on TiDB, a distributed SQL database built by PingCAP. Key architecture knowledge:
+
+**Core Components:**
+- TiDB Server: Stateless SQL layer, MySQL 8.0 wire-protocol compatible. Handles SQL parsing, optimization, and execution.
+- TiKV: Distributed transactional key-value store using Raft consensus. Data is split into ~96MB Regions replicated across nodes.
+- TiFlash: Columnar storage engine for real-time HTAP. Uses Raft Learner to replicate from TiKV with sub-second freshness.
+- PD (Placement Driver): Cluster metadata manager, timestamp oracle (TSO), and scheduling coordinator.
+
+**Key Capabilities:**
+- MySQL Compatibility: Supports most MySQL 8.0 syntax, drivers, and tools. Compatible with MySQL Workbench, mysqldump, DM (Data Migration).
+- Horizontal Scaling: Add TiKV/TiFlash nodes online. Automatic region splitting and rebalancing.
+- Distributed Transactions: Percolator-based 2PC with optimistic and pessimistic locking modes.
+- HTAP: Run OLTP on TiKV and OLAP on TiFlash simultaneously. TiDB optimizer auto-routes queries.
+- TiDB Cloud Serverless: Fully managed, auto-scaling, pay-per-use. Vector search support for AI workloads.
+
+**Migration Paths:**
+- From MySQL: Near drop-in replacement. Use TiDB Data Migration (DM) for online migration with binlog replication.
+- From Oracle: SQL compatibility layer handles most PL/SQL patterns. Use OGG or custom ETL.
+- From Aurora/RDS: Export via mysqldump or DM. TiDB handles MySQL replication protocol.
+- From PostgreSQL: Schema translation needed. Use heterogeneous migration tools.
+
+**Competitive Differentiators vs:**
+- CockroachDB: TiDB has native MySQL compatibility (not PostgreSQL), columnar HTAP (TiFlash), and proven scale at 100+ node clusters.
+- PlanetScale (Vitess): TiDB is a single distributed database, not a sharding middleware. No application-level shard routing needed.
+- Aurora: TiDB scales writes horizontally (Aurora scales reads only). TiDB avoids vendor lock-in.
+- AlloyDB: TiDB is open-source with no cloud vendor dependency. True horizontal write scaling.`}</pre>
+            </details>
+          </div>
+        </div>
+
         <details style={{ marginTop: '0.5rem' }}>
           <summary style={{
             fontSize: '0.78rem',
@@ -157,6 +222,11 @@ export default async function SettingsPage() {
             <GTMFeaturePanel initialPocKitUrl={sePocKitUrl} initialFeatureFlags={featureFlags} />
           </div>
         </details>
+
+        {/* ── Prompt Studio ─────────────────────────────────── */}
+        <SectionLabel id="prompts">Prompt Studio</SectionLabel>
+
+        <PromptStudio />
 
         {/* ── Data ─────────────────────────────────────────── */}
         <SectionLabel id="data">Data</SectionLabel>
