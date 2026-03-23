@@ -49,10 +49,14 @@ failure_category: Mapped[str | None] = mapped_column(String(64), nullable=True)
 
 ### Schema Change
 
-**File:** `api/app/schemas/feedback.py` — `FeedbackCreate`
+**File:** `api/app/schemas/feedback.py` — `FeedbackCreate` and `FeedbackRead`
 
-Add one optional field:
+Add to `FeedbackCreate`:
+```python
+failure_category: str | None = None
+```
 
+Add to `FeedbackRead` (so callers can see the stored category):
 ```python
 failure_category: str | None = None
 ```
@@ -186,6 +190,8 @@ Checks for patterns that have crossed the suggestion threshold since the last su
 
 ### `POST /admin/feedback-suggestions/{id}/apply`
 
+Route signature: `id: uuid.UUID` path parameter. FastAPI receives it as a string and must declare it as `uuid.UUID` so `db.get(PromptSuggestion, id)` resolves correctly.
+
 1. Load `PromptSuggestion` by id. Return 404 if not found.
 2. If `prompt_type = "persona"`: update `KBConfig.persona_prompt` to `suggestion.suggested_prompt` using the existing KBConfig update path.
 3. If `prompt_type = "builtin"`: return 400 — built-in prompts require a code change and cannot be applied via API.
@@ -193,7 +199,11 @@ Checks for patterns that have crossed the suggestion threshold since the last su
 
 ### `POST /admin/feedback-suggestions/{id}/dismiss`
 
-Set `dismissed_at = now()`. Resets the threshold counter for this `(mode, failure_category)` pair (next alert triggers after 3 more failures). Return 200.
+Route signature: `id: uuid.UUID` path parameter (same as apply).
+
+Set `dismissed_at = now()`. Return 200.
+
+**Threshold reset behaviour:** `GET /admin/feedback-alerts` counts failures since the most recent `PromptSuggestion.created_at` for each `(mode, failure_category)` combo, regardless of whether that suggestion was applied or dismissed. Because dismiss sets only `dismissed_at` (not `created_at`), the existing row's `created_at` already anchors the lookback window — the counter effectively resets to zero from that timestamp. No additional query filtering by `dismissed_at` is needed in the alerts endpoint.
 
 ---
 
@@ -237,23 +247,23 @@ ui/app/api/admin/feedback-suggestions/[id]/dismiss/route.js
 ui/app/api/admin/feedback-alerts/route.js
 ```
 
-Each follows the existing proxy pattern: forward request to backend API with session headers.
+Each follows the existing admin proxy pattern: forward request to backend API with `X-OpenAI-Token: session.access_token` header, matching `ui/app/api/admin/kb-config/route.js`. Do not use the feedback proxy pattern (`X-User-Email`) for these admin routes.
 
 ---
 
 ## Mode → Built-in Prompt Mapping
 
-Used by `POST /admin/feedback-suggestions` to read the current built-in prompt for a mode.
+Used by `POST /admin/feedback-suggestions` to read the current built-in prompt for a mode. Constants are defined in `api/app/prompts/templates.py` and imported into `services/llm.py` from there. Implementation must import from `app.prompts.templates`.
 
-| Mode value | Constant | Location |
+| Mode value | Constant | File |
 |---|---|---|
-| `oracle` | `SYSTEM_ORACLE` | `api/app/services/llm.py` |
-| `call_assistant` | `SYSTEM_CALL_COACH` | `api/app/services/llm.py` |
-| `rep` | `SYSTEM_REP` | `api/app/services/llm.py` |
-| `se` | `SYSTEM_SE` | `api/app/services/llm.py` |
-| `marketing` | `SYSTEM_MARKETING` | `api/app/services/llm.py` |
+| `oracle` | `SYSTEM_ORACLE` | `api/app/prompts/templates.py` |
+| `call_assistant` | `SYSTEM_CALL_COACH` | `api/app/prompts/templates.py` |
+| `rep` | `SYSTEM_REP_EXECUTION` | `api/app/prompts/templates.py` |
+| `se` | `SYSTEM_SE_EXECUTION` | `api/app/prompts/templates.py` |
+| `marketing` | `SYSTEM_MARKETING_EXECUTION` | `api/app/prompts/templates.py` |
 
-These constant names must be verified against the actual file before implementation.
+Phase 1 covers these five modes. Other system prompts (`SYSTEM_SE_ANALYSIS`, `SYSTEM_PRE_CALL_INTEL`, etc.) are out of scope.
 
 ---
 
