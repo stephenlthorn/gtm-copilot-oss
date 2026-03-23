@@ -43,10 +43,6 @@ export default function RepExecutionWidget() {
   );
 
   const run = async (action) => {
-    if (!basePayload.account) {
-      setError('Enter an account name.');
-      return;
-    }
     setError('');
     setLoadingAction(action);
     try {
@@ -112,7 +108,7 @@ export default function RepExecutionWidget() {
       <div className="panel-body" style={{ display: 'grid', gap: '0.75rem' }}>
         <div className="two-col" style={{ gap: '0.75rem' }}>
           <div style={{ display: 'grid', gap: '0.35rem' }}>
-            <label style={{ color: 'var(--text-3)', fontSize: '0.72rem' }}>Account</label>
+            <label style={{ color: 'var(--text-3)', fontSize: '0.72rem' }}>Account (optional)</label>
             <input
               className="input"
               value={account}

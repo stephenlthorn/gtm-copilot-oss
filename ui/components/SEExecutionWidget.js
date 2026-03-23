@@ -21,11 +21,6 @@ export default function SEExecutionWidget() {
   const basePayload = { account: account.trim(), chorus_call_id: chorusCallId || null };
 
   const run = async (kind) => {
-    if (!basePayload.account) {
-      setError('Enter an account name.');
-      return;
-    }
-
     let path = '';
     let payload = { ...basePayload };
 
@@ -84,7 +79,7 @@ export default function SEExecutionWidget() {
       <div className="panel-body" style={{ display: 'grid', gap: '0.75rem' }}>
         <div className="two-col" style={{ gap: '0.75rem' }}>
           <div style={{ display: 'grid', gap: '0.35rem' }}>
-            <label style={{ color: 'var(--text-3)', fontSize: '0.72rem' }}>Account</label>
+            <label style={{ color: 'var(--text-3)', fontSize: '0.72rem' }}>Account (optional)</label>
             <input
               className="input"
               value={account}
