@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import pytest
 from datetime import date
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 
 # ---------------------------------------------------------------------------
@@ -31,14 +31,13 @@ def test_migration_adds_call_outcome_column():
     sys.modules["migration_20260324"] = migration
     spec.loader.exec_module(migration)
 
-    mock_bind = MagicMock()
-    mock_bind.dialect.name = "sqlite"
+    mock_op = MagicMock()
+    mock_op.get_bind.return_value.dialect.name = "sqlite"
+    migration.op = mock_op
 
-    with patch("alembic.op.get_bind", return_value=mock_bind), \
-         patch("alembic.op.add_column") as mock_add, \
-         patch("alembic.op.drop_column") as mock_drop:
-        migration.upgrade()
-        mock_add.assert_called_once()
-        assert mock_add.call_args[0][0] == "chorus_calls"
-        migration.downgrade()
-        mock_drop.assert_called_once_with("chorus_calls", "call_outcome")
+    migration.upgrade()
+    mock_op.add_column.assert_called_once()
+    assert mock_op.add_column.call_args[0][0] == "chorus_calls"
+
+    migration.downgrade()
+    mock_op.drop_column.assert_called_once_with("chorus_calls", "call_outcome")
