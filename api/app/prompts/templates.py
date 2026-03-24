@@ -101,53 +101,71 @@ e) Is there a risk to the deal that should be quietly addressed in the email?
 === STEP 2: EMAIL CONSTRUCTION ===
 
 SUBJECT LINE
-- Must reference: account name + the specific topic or next milestone
-- Format options: "[Account] — [topic]: [action needed]" or "RE: [specific thing discussed]"
-- Never use: "Following up", "Touching base", "Quick question", "Next steps" alone
-- Examples: "Rivus Pay — latency POC scope + April 10 kick-off" | "AcmeBank migration risk brief + Q2 eval timeline"
+- Must reference: account name + the specific topics or next milestone discussed
+- Format: "[Account] — [topic 1] + [topic 2]" or "[Account] — [key outcome]: [next action]"
+- Banned words in subject: "follow-up", "following up", "touching base", "quick question", "next steps" (alone)
+- The word "follow-up" signals you have nothing specific to say — never use it
+- Good: "Rivus Pay — slow-query fixes + Brazil event + scaling headroom" | "AcmeBank — migration risk brief + Q2 POC timeline"
 
 OPENING (1–2 sentences max)
-- Call 1: one sentence acknowledging the call + one sentence on the most important thing agreed
-- Calls 2+: one sentence acknowledging the relationship progress, not just "today's call"
-- Banned phrases: "I hope this finds you well", "Thank you for your time today", "It was great connecting"
-- Lead with substance: the pain, the commitment, the key question — not pleasantries
+- Lead with the most important result or commitment from the call — not a greeting
+- Banned opening phrases (these are filler — cut them entirely):
+    "Great speaking today / this week / with you"
+    "I hope this finds you well"
+    "Thank you for your time"
+    "It was great connecting / meeting / chatting"
+    "Just wanted to follow up"
+    "As discussed..."
+- Instead: open with the outcome ("The migration is delivering: costs are down, performance is up.") or the commitment ("You confirmed $300k approved and Q2 as the window.")
+- If call_count > 1: one sentence on what has changed or progressed since the last conversation
 
 BODY
-Paragraph 1 — What we established:
-  - Summarize what was confirmed or decided on this call with specific language from the call
-  - If pain was discussed: state the pain precisely (not "your performance challenges" — say "800ms P99 on fraud detection impacting approval rates")
-  - If a technical constraint came up: name it accurately using their actual stack
+Paragraph 1 — What this call established:
+  - State what was confirmed, decided, or learned with specific language from the call
+  - Use their exact terminology for pain and tech stack — not generic paraphrases
+  - If a recommendation was made (sizing, architecture change, next phase): state it explicitly here, not buried in next steps
 
-Paragraph 2 — Next steps (required, no exceptions):
-  - Use this exact format for each item: "• [Owner first name or role]: [specific action] by [date]"
-  - Every step needs all three: owner, action, date. If date is unknown, write "by [date TBD — let's confirm]"
-  - 2–4 steps maximum. If there are more, group them.
+Paragraph 2 — All committed actions (required, no exceptions):
+  - This section covers EVERYTHING with an owner and a date: mutual next steps AND rep recommendations AND deliverables
+  - Format for every item: "• [Owner name or role]: [specific action] by [date]"
+  - If a recommendation was made (e.g. "run a sizing check"), it must appear here as a rep-owned action with a date — not as a floating paragraph with no owner
+  - Every item needs all three: owner, action, date. Missing date → write "by [date TBD — confirm reply]"
+  - 2–5 items. If more, group related items into one bullet.
 
-Paragraph 3 — The bridge (use when needed):
-  - One open question that either fills a MEDDPICC gap OR advances the deal to the next stage
-  - Frame it as serving them, not interrogating them: "To make sure the POC tests the right things..." not "I need to know..."
-  - If you have no natural gap to address, skip this paragraph
+Paragraph 3 — The MEDDPICC bridge (required when gaps exist):
+  - Check the account history for unscored MEDDPICC elements (score 0–2)
+  - For each unscored element that is natural to raise, plant ONE question that serves them while filling the gap
+  - Unscored elements and the question to plant:
+      Champion (0–2): "Who internally is most invested in solving [specific pain] — is there someone you'd want looped in on the POC results?"
+      Decision Process (0): "As you move toward a decision — is there a formal evaluation process or committee we should be designing the POC around?"
+      Decision Criteria (0): "What does 'good' look like for you at the end of this eval — specific latency targets, cost thresholds, or something else?"
+      Competition (0): "Are you evaluating any other options in parallel, or is this a focused TiDB assessment?"
+      Paper Process (0): "Once you're ready to move forward — what does the contract and sign-off process look like on your end?"
+  - Pick at most ONE gap question per email. Frame it as serving their evaluation, not interrogating them.
+  - If no gaps exist or no question fits naturally, skip this paragraph — do not force it.
 
-CLOSE / CTA (1 ask only — never a list of asks)
-- Discovery: ask to confirm the next call or intro to another stakeholder
-- Evaluation: ask to confirm POC criteria or approve a timeline
-- Negotiation: ask for a specific decision or sign-off by date
-- Closing: drive to a commitment date — be direct
-- The CTA should be one sentence ending with a question mark or a specific date
+CLOSE / CTA (1 ask only — never offer a list of asks)
+- Discovery: confirm next call time or request intro to a specific stakeholder by name
+- Evaluation: confirm POC success criteria or approve a specific timeline
+- Negotiation: request a decision or sign-off by a named date
+- Closing: name a specific date and ask for confirmation — be direct
+- If offering time slots: list 2–3 options with day, date, time, and timezone
+- End with a question mark or a named date. One sentence.
 
 TONE RULES
-- crisp: subject + 3 short paragraphs max, bullets for next steps, nothing that doesn't earn its place
-- executive: flowing paragraphs, business outcomes only (no product features, no benchmarks), 1 paragraph per section
-- technical: include the actual architecture/query detail that matters to an SE audience, call out specific migration risks or compatibility questions
+- crisp: bullets for next steps, every sentence earns its place, no transitions or filler, 3 sections max
+- executive: flowing paragraphs, lead with business outcomes (revenue impact, risk, timeline), no product features or benchmarks
+- technical: name the specific query type, migration risk, or architecture decision; call out compatibility questions an SE would care about
 
 === STEP 3: QUALITY CHECK BEFORE OUTPUTTING ===
 
-Ask yourself:
-- Would a rep who knows nothing about this account understand what happened on the call from this email alone? (If yes, it's too generic — it should assume shared context)
-- Does every next step have an owner, action, and date?
-- Is the CTA one single ask?
-- Does it avoid all banned phrases?
-- Is it specific enough that forwarding it internally would help the champion make the case?
+Reject and rewrite if any of these are true:
+- Subject line contains "follow-up", "following up", "touching base", or "next steps" alone
+- Opening sentence is a pleasantry or greeting ("Great speaking", "Hope you're well", etc.)
+- Any recommendation or suggestion appears without an owner and a date in the actions list
+- A MEDDPICC gap exists but no bridge question is planted (unless no natural opening exists)
+- The CTA contains more than one ask
+- Any next step is missing owner, action, or date
 
 === FORMAT ===
 Plain text only. First line = subject line. Blank line. Then the email body.
