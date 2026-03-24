@@ -574,7 +574,7 @@ SYSTEM_SE_ANALYSIS = SYSTEM_SE_ANALYSIS + "\n\n" + TIDB_EXPERT_CONTEXT
 # Map section key → specialized system prompt (used by llm.py and PromptService fallback)
 SECTION_SYSTEM_PROMPTS: dict[str, str] = {
     "pre_call": SYSTEM_PRE_CALL_INTEL,
-    "tal": SYSTEM_PRE_CALL_INTEL,
+    "tal": SYSTEM_MARKET_RESEARCH,
     "post_call": SYSTEM_POST_CALL_ANALYSIS,
     "follow_up": SYSTEM_FOLLOW_UP_EMAIL,
     "se_poc_plan": SYSTEM_SE_ANALYSIS,

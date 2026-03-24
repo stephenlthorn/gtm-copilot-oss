@@ -228,19 +228,15 @@ ALL_DEFAULTS: dict[str, dict] = {
         "name": "Market Research / TAL",
         "description": "User-facing template for target account list generation",
         "content": (
-            "Build a target account list based on the following criteria:\n\n"
-            "Reference account: {account}\n"
-            "Regions / Territory: {regions}\n"
+            "TARGET ACCOUNT LIST REQUEST\n\n"
+            "Reference account (ICP anchor): {account}\n"
+            "Territory / Regions: {regions}\n"
             "Industry vertical: {industry}\n"
             "Revenue range: ${revenue_min}M – ${revenue_max}M\n"
+            "Top N requested: {top_n}\n"
             "Additional context: {context}\n\n"
-            "Return the top {top_n} accounts most likely to benefit from TiDB. For each account provide:\n"
-            "• Company name\n"
-            "• Why they are a strong TiDB fit (specific signal)\n"
-            "• Estimated revenue or employee count\n"
-            "• Key pain signal (job postings, tech stack, news)\n"
-            "• Recommended entry point (who to target, what angle)\n\n"
-            "Prioritize companies showing signals of: MySQL/Aurora at scale, database sharding, high-volume OLTP, real-time analytics needs, or significant infrastructure investment."
+            "Return the top {top_n} accounts. For each: account name, ICP score rationale, "
+            "top signal (with source), recommended entry point (role + angle), and suggested first action."
         ),
         "variables": '["{account}", "{regions}", "{industry}", "{revenue_min}", "{revenue_max}", "{context}", "{top_n}"]',
     },

@@ -116,14 +116,15 @@ def _seed_defaults() -> None:
             "tal",
             "Market Research / TAL (Default)",
             (
-                "Build a target account list for the following criteria:\n"
-                "- Regions: {regions}\n"
-                "- Industry: {industry}\n"
-                "- Revenue range: ${revenue_min}M – ${revenue_max}M\n"
-                "- Reference account: {account}\n"
-                "- Additional context: {context}\n\n"
-                "Return the top {top_n} accounts most likely to need TiDB."
-                " For each: company name, why they're a fit, estimated revenue, and key signal."
+                "TARGET ACCOUNT LIST REQUEST\n\n"
+                "Reference account (ICP anchor): {account}\n"
+                "Territory / Regions: {regions}\n"
+                "Industry vertical: {industry}\n"
+                "Revenue range: ${revenue_min}M – ${revenue_max}M\n"
+                "Top N requested: {top_n}\n"
+                "Additional context: {context}\n\n"
+                "Return the top {top_n} accounts. For each: account name, ICP score rationale, "
+                "top signal (with source), recommended entry point (role + angle), and suggested first action."
             ),
         ),
         (

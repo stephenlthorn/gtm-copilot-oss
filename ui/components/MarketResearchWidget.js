@@ -7,9 +7,8 @@ const TEMPLATE_CURRENT_CUSTOMERS = 'account,region,industry,current_platform,use
 const TEMPLATE_PIPELINE = 'account,region,stage,industry,workload,est_arr,close_quarter,competing_vendor';
 
 export default function MarketResearchWidget() {
-  const [goal, setGoal] = useState('Market research on all current customers and pipeline, then build a strategic list for East and Central.');
-  const [east, setEast] = useState(true);
-  const [central, setCentral] = useState(true);
+  const [goal, setGoal] = useState('Build an execution-ready strategic account list for this territory.');
+  const [territory, setTerritory] = useState('');
   const [currentCsv, setCurrentCsv] = useState('');
   const [pipelineCsv, setPipelineCsv] = useState('');
   const [additionalContext, setAdditionalContext] = useState('');
@@ -32,9 +31,7 @@ export default function MarketResearchWidget() {
     setError('');
     setResult(null);
     try {
-      const regions = [];
-      if (east) regions.push('East');
-      if (central) regions.push('Central');
+      const regions = territory.split(',').map(r => r.trim()).filter(Boolean);
       const res = await fetch('/api/rep/market-research', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -88,17 +85,17 @@ export default function MarketResearchWidget() {
           />
         </div>
 
-        <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center', flexWrap: 'wrap' }}>
-          <span style={{ color: 'var(--text-3)', fontSize: '0.72rem' }}>Territory Focus</span>
-          <label style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', fontSize: '0.76rem' }}>
-            <input type="checkbox" checked={east} onChange={(e) => setEast(e.target.checked)} />
-            East
-          </label>
-          <label style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', fontSize: '0.76rem' }}>
-            <input type="checkbox" checked={central} onChange={(e) => setCentral(e.target.checked)} />
-            Central
-          </label>
-          <label style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.76rem' }}>
+        <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'flex-end', flexWrap: 'wrap' }}>
+          <div style={{ display: 'grid', gap: '0.3rem', flex: 1 }}>
+            <label style={{ color: 'var(--text-3)', fontSize: '0.72rem' }}>Territory (comma-separated)</label>
+            <input
+              className="input"
+              value={territory}
+              onChange={(e) => setTerritory(e.target.value)}
+              placeholder="East, Central, APAC, EMEA…"
+            />
+          </div>
+          <label style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.76rem', whiteSpace: 'nowrap' }}>
             Top N
             <input
               className="input"
@@ -180,7 +177,8 @@ export default function MarketResearchWidget() {
                       <th>Type</th>
                       <th>Region</th>
                       <th>Priority</th>
-                      <th>Why Now</th>
+                      <th>Why Now + Actions</th>
+                      <th>Suggested Assets</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -190,13 +188,18 @@ export default function MarketResearchWidget() {
                         <td>{item.motion_type}</td>
                         <td>{item.region}</td>
                         <td style={{ color: item.priority === 'High' ? 'var(--accent)' : 'var(--text-2)' }}>{item.priority}</td>
-                        <td style={{ minWidth: '360px' }}>
+                        <td style={{ minWidth: '300px' }}>
                           <div style={{ marginBottom: '0.3rem' }}>{item.why_now}</div>
                           {Array.isArray(item.actions) && item.actions.length > 0 && (
-                            <div style={{ fontSize: '0.72rem', color: 'var(--text-3)' }}>
-                              Next: {item.actions.slice(0, 2).join(' | ')}
-                            </div>
+                            <ul style={{ margin: '0.25rem 0 0 1rem', padding: 0, fontSize: '0.72rem', color: 'var(--text-3)' }}>
+                              {item.actions.slice(0, 3).map((a, i) => <li key={i}>{a}</li>)}
+                            </ul>
                           )}
+                        </td>
+                        <td style={{ minWidth: '180px', fontSize: '0.72rem', color: 'var(--text-3)' }}>
+                          {Array.isArray(item.suggested_assets) && item.suggested_assets.length > 0
+                            ? item.suggested_assets.slice(0, 3).join(', ')
+                            : '—'}
                         </td>
                       </tr>
                     ))}

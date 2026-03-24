@@ -426,22 +426,16 @@ Tone: {email_tone}
 --- TASK ---
 Write a specific, deal-advancing follow-up email using the call record, additional notes, and any retrieved call evidence below. Do not write a generic email — every sentence should be specific to this account and this call.`,
 
-  tal: `Build a target account list based on the following criteria:
+  tal: `TARGET ACCOUNT LIST REQUEST
 
-Reference account: {account}
-Regions / Territory: {regions}
+Reference account (ICP anchor): {account}
+Territory / Regions: {regions}
 Industry vertical: {industry}
 Revenue range: \${revenue_min}M – \${revenue_max}M
+Top N requested: {top_n}
 Additional context: {context}
 
-Return the top {top_n} accounts most likely to benefit from TiDB. For each account provide:
-• Company name
-• Why they are a strong TiDB fit (specific signal)
-• Estimated revenue or employee count
-• Key pain signal (job postings, tech stack, news)
-• Recommended entry point (who to target, what angle)
-
-Prioritize companies showing signals of: MySQL/Aurora at scale, database sharding, high-volume OLTP, real-time analytics needs, or significant infrastructure investment.`,
+Return the top {top_n} accounts. For each: account name, ICP score rationale, top signal (with source), recommended entry point (role + angle), and suggested first action.`,
 
   se_poc_plan: `Create a detailed technical POC evaluation roadmap for {account}.
 

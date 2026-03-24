@@ -10,7 +10,7 @@ export async function POST(request) {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      ...(session?.openai_key ? { 'X-OpenAI-Token': session.openai_key } : {}),
+      ...(session?.access_token ? { 'X-OpenAI-Token': session.access_token } : {}),
     },
     body: JSON.stringify({
       ...body,
