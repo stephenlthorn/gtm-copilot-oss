@@ -59,7 +59,7 @@ export default async function SettingsPage() {
     apiGet('/prompts/tidb_expert').catch(() => null),
   ]);
 
-  const docsCount = docsCountRaw?.count ?? 0;
+  const docsCount = Array.isArray(docsRaw) ? docsRaw.length : (docsRaw?.count ?? 0);
   const docs = docsRaw || [];
   const allDocs = allDocsRaw || docs;
   const audits = auditsRaw || [];
