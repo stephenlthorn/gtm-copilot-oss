@@ -90,18 +90,12 @@ def sync_salesforce(org_id: int, instance_url: str, access_token: str) -> dict:
 
 @celery_app.task(name="scrape_urls_connector")
 def scrape_urls(urls: list[str], org_id: int) -> dict:
-    """Scrape URLs via Firecrawl and return content."""
+    """Scrape URLs via requests+BeautifulSoup and return content."""
     init_db()
-    from app.services.connectors.firecrawl import FirecrawlConnector
+    from app.services.connectors.web_scraper import WebScraper
 
-    api_key = settings.openai_api_key
-    firecrawl_key = getattr(settings, "firecrawl_api_key", None) or api_key
-
-    if not firecrawl_key:
-        return {"error": "Firecrawl API key not configured"}
-
-    connector = FirecrawlConnector(api_key=firecrawl_key)
-    results = connector.scrape_urls(urls)
+    scraper = WebScraper()
+    results = scraper.scrape_urls(urls)
     return {
         "scraped": len(results),
         "pages": [

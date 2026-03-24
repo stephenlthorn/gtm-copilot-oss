@@ -16,7 +16,6 @@ from app.services.mcp.gmail_mcp import create_gmail_mcp_server
 from app.services.mcp.calendar_mcp import create_calendar_mcp_server
 from app.services.mcp.zoominfo_mcp import create_zoominfo_mcp_server
 from app.services.mcp.linkedin_mcp import create_linkedin_mcp_server
-from app.services.mcp.firecrawl_mcp import create_firecrawl_mcp_server
 from app.services.mcp.github_mcp import create_github_mcp_server
 from app.services.mcp.crunchbase_mcp import create_crunchbase_mcp_server
 
@@ -60,7 +59,7 @@ class MCPRouter:
         google_access_token: str | None = None,
         linkedin_access_token: str | None = None,
         zoominfo_api_key: str | None = None,
-        firecrawl_api_key: str | None = None,
+        firecrawl_api_key: str | None = None,  # deprecated — kept for API compat
         github_access_token: str | None = None,
         crunchbase_api_key: str | None = None,
     ) -> None:
@@ -80,9 +79,6 @@ class MCPRouter:
 
         if linkedin_access_token:
             self._registry.register(create_linkedin_mcp_server(linkedin_access_token))
-
-        if firecrawl_api_key:
-            self._registry.register(create_firecrawl_mcp_server(firecrawl_api_key))
 
         if github_access_token:
             self._registry.register(create_github_mcp_server(github_access_token))

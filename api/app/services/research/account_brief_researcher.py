@@ -6,7 +6,7 @@ import re
 from dataclasses import dataclass, field
 from urllib.parse import quote
 
-from app.services.connectors.firecrawl import FirecrawlConnector
+from app.services.connectors.web_scraper import WebScraper
 
 logger = logging.getLogger(__name__)
 
@@ -28,8 +28,8 @@ class AccountBriefResearcher:
     """Concurrently scrapes multiple web sources to build research context
     for a 7-section account brief."""
 
-    def __init__(self, connector: FirecrawlConnector) -> None:
-        self._connector = connector
+    def __init__(self, connector: WebScraper | None = None) -> None:
+        self._connector = connector or WebScraper()
 
     async def research(
         self,
