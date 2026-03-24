@@ -34,6 +34,8 @@ services:
     env_file: .env
     environment:
       - REDIS_URL=redis://redis:6379/0
+    volumes:
+      - ~/.codex:/root/.codex
     depends_on:
       - redis
 
@@ -46,6 +48,8 @@ services:
     env_file: .env
     environment:
       - REDIS_URL=redis://redis:6379/0
+    volumes:
+      - ~/.codex:/root/.codex
     depends_on:
       - redis
 
