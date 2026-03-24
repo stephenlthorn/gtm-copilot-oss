@@ -22,7 +22,6 @@ from app.models import (
     SourceType,
 )
 from app.core.settings import get_settings
-from app.models.entities import Account
 from app.services.connectors.web_scraper import WebScraper
 from app.services.research.account_brief_researcher import AccountBriefResearcher
 from app.prompts.personas import get_default_persona_prompt, normalize_persona
@@ -260,13 +259,9 @@ class GTMModuleService:
         tools = self._resolve_tools()
         persona_name, persona_prompt = self._resolve_persona("sales_representative")
 
-        # Look up Account record for website / industry / employee_count
-        account_record = self.db.execute(
-            select(Account).where(Account.name == account).limit(1)
-        ).scalar_one_or_none()
-        effective_website = website or (account_record.website if account_record else None)
-        account_industry = account_record.industry if account_record else None
-        account_employee_count = account_record.employee_count if account_record else None
+        effective_website = website
+        account_industry = None
+        account_employee_count = None
 
         # Run concurrent web research for account brief
         research_context = None
