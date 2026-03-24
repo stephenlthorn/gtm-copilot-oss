@@ -131,31 +131,76 @@ def _seed_defaults() -> None:
             "se_poc_plan",
             "SE: POC Plan (Default)",
             (
-                "Create a technical POC evaluation roadmap for {account}.\n"
+                "Create a detailed technical POC evaluation roadmap for {account}.\n\n"
                 "Offering: {target_offering}\n"
                 "Call context: {call_context}\n\n"
-                "Include: POC objectives, success criteria, technical requirements,"
-                " 4-week milestone plan, resources needed, risk factors."
+                "Produce a complete POC plan including:\n\n"
+                "**POC Objectives**\n"
+                "What success looks like for the customer and for us.\n\n"
+                "**Success Criteria**\n"
+                "Specific, measurable criteria the customer will use to evaluate TiDB. Include at least 3.\n\n"
+                "**Technical Requirements**\n"
+                "What we need from the customer to run the POC (access, data, team members, environments).\n\n"
+                "**4-Week Milestone Plan**\n"
+                "Week 1: Setup and baseline\n"
+                "Week 2: Core workload migration / test\n"
+                "Week 3: Performance and scale testing\n"
+                "Week 4: Results review and business case\n\n"
+                "**Resources Required**\n"
+                "From TiDB side and from customer side.\n\n"
+                "**Risk Factors & Mitigations**\n"
+                "Top 3 risks and how to address them.\n\n"
+                "**Recommended POC Kit**\n"
+                "Suggest relevant TiDB documentation, benchmarks, or migration tools."
             ),
         ),
         (
             "se_arch_fit",
             "SE: Architecture Fit (Default)",
             (
-                "Analyze TiDB architecture fit for {account}.\n"
+                "Analyze TiDB architecture fit for {account}.\n\n"
                 "Call context: {call_context}\n\n"
-                "Cover: current database signals, scalability pain, MySQL/Oracle compatibility needs,"
-                " HTAP potential, migration complexity, TiDB placement recommendation."
+                "Produce a complete architecture fit analysis:\n\n"
+                "**Current State Assessment**\n"
+                "Based on call context and research — what database and infrastructure does {account} likely use today?\n\n"
+                "**Scalability Pain Signals**\n"
+                "What evidence suggests they are hitting scale limits with their current stack?\n\n"
+                "**MySQL / PostgreSQL / Oracle Compatibility**\n"
+                "How compatible is their existing workload with TiDB's MySQL compatibility layer?\n\n"
+                "**HTAP Opportunity**\n"
+                "Is there a real-time analytics or HTAP use case? Describe it if present.\n\n"
+                "**Migration Complexity Assessment**\n"
+                "Rate migration complexity (Low / Medium / High) and explain why.\n\n"
+                "**TiDB Placement Recommendation**\n"
+                "Where does TiDB fit in their architecture?\n"
+                "(Replace primary DB / Add as analytics layer / Modernize sharded MySQL / Greenfield new service)\n\n"
+                "**Target State Architecture**\n"
+                "Describe what the architecture would look like with TiDB in place."
             ),
         ),
         (
             "se_competitor",
             "SE: Competitor Coach (Default)",
             (
-                "Competitor coaching for {account} — primary competitor: {competitor}.\n"
+                "Competitor coaching for {account} — primary competitor in this deal: {competitor}.\n\n"
                 "Call context: {call_context}\n\n"
-                "Provide: competitive positioning vs {competitor}, top 5 objections and TiDB responses,"
-                " where TiDB wins and where to be careful, recommended proof points."
+                "Produce a complete competitive coaching brief:\n\n"
+                "**Competitive Positioning vs {competitor}**\n"
+                "Where TiDB wins, where to be careful, and where it is a draw.\n\n"
+                "**Top 5 Objections & TiDB Responses**\n"
+                "1. Objection: | Response:\n"
+                "2. Objection: | Response:\n"
+                "3. Objection: | Response:\n"
+                "4. Objection: | Response:\n"
+                "5. Objection: | Response:\n\n"
+                "**{competitor} Weaknesses to Probe**\n"
+                "Key questions to ask the customer that expose {competitor} limitations.\n\n"
+                "**TiDB Proof Points**\n"
+                "Specific benchmarks, case studies, or technical references that counter {competitor}'s strengths.\n\n"
+                "**Recommended Demo or POC Focus**\n"
+                "What to show in a demo or POC that {competitor} cannot match.\n\n"
+                "**Deal Strategy Recommendation**\n"
+                "Given what we know about {account} and {competitor}, what is the recommended win strategy?"
             ),
         ),
     ]
