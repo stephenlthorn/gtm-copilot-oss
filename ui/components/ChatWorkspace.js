@@ -165,8 +165,9 @@ export default function ChatWorkspace() {
       email_to: fieldValues.email_to || '[fill in recipient]',
       email_cc: fieldValues.email_cc || '',
       email_tone: fieldValues.email_tone || 'crisp',
-      regions: fieldValues.regions || '[regions]',
-      industry: fieldValues.industry || '[industry]',
+      icp_description: fieldValues.icp_description || '[describe your ICP — company type, workload signals, pain indicators]',
+      regions: fieldValues.regions || '[regions — required]',
+      industry: fieldValues.industry || '[industry — required]',
       revenue_min: fieldValues.revenue_min || '[revenue_min]',
       revenue_max: fieldValues.revenue_max || '[revenue_max]',
       context: fieldValues.context || '',
@@ -428,12 +429,12 @@ Write a specific, deal-advancing follow-up email using the call record, addition
 
   tal: `TARGET ACCOUNT LIST REQUEST
 
-Reference account (ICP anchor): {account}
+ICP: {icp_description}
 Territory / Regions: {regions}
 Industry vertical: {industry}
 Revenue range: \${revenue_min}M – \${revenue_max}M
 Top N requested: {top_n}
-Additional context: {context}
+Constraints / Priorities: {context}
 
 Return the top {top_n} accounts. For each: account name, ICP score rationale, top signal (with source), recommended entry point (role + angle), and suggested first action.`,
 

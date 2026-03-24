@@ -229,16 +229,16 @@ ALL_DEFAULTS: dict[str, dict] = {
         "description": "User-facing template for target account list generation",
         "content": (
             "TARGET ACCOUNT LIST REQUEST\n\n"
-            "Reference account (ICP anchor): {account}\n"
+            "ICP: {icp_description}\n"
             "Territory / Regions: {regions}\n"
             "Industry vertical: {industry}\n"
             "Revenue range: ${revenue_min}M – ${revenue_max}M\n"
             "Top N requested: {top_n}\n"
-            "Additional context: {context}\n\n"
+            "Constraints / Priorities: {context}\n\n"
             "Return the top {top_n} accounts. For each: account name, ICP score rationale, "
             "top signal (with source), recommended entry point (role + angle), and suggested first action."
         ),
-        "variables": '["{account}", "{regions}", "{industry}", "{revenue_min}", "{revenue_max}", "{context}", "{top_n}"]',
+        "variables": '["{icp_description}", "{regions}", "{industry}", "{revenue_min}", "{revenue_max}", "{context}", "{top_n}"]',
     },
     "tpl_se_poc_plan": {
         "category": "template",

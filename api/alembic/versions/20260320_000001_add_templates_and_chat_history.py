@@ -117,12 +117,12 @@ def _seed_defaults() -> None:
             "Market Research / TAL (Default)",
             (
                 "TARGET ACCOUNT LIST REQUEST\n\n"
-                "Reference account (ICP anchor): {account}\n"
+                "ICP: {icp_description}\n"
                 "Territory / Regions: {regions}\n"
                 "Industry vertical: {industry}\n"
                 "Revenue range: ${revenue_min}M – ${revenue_max}M\n"
                 "Top N requested: {top_n}\n"
-                "Additional context: {context}\n\n"
+                "Constraints / Priorities: {context}\n\n"
                 "Return the top {top_n} accounts. For each: account name, ICP score rationale, "
                 "top signal (with source), recommended entry point (role + angle), and suggested first action."
             ),
