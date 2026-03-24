@@ -4,6 +4,7 @@ from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
 from app.services.llm import LLMService
+from app.prompts.templates import TIDB_EXPERT_CONTEXT
 
 router = APIRouter()
 
@@ -19,7 +20,8 @@ def generate_account_profile(req: AccountIntelRequest, request: Request) -> dict
     llm = LLMService(api_key=openai_token)
 
     system = (
-        "You are a TiDB Cloud sales engineering expert. "
+        TIDB_EXPERT_CONTEXT
+        + "\n\nYou are producing a structured account intelligence profile. "
         "Return ONLY valid JSON with no markdown, code fences, or explanation."
     )
 
