@@ -41,7 +41,9 @@ class PreferencesUpdate(BaseModel):
 
 
 class ConnectProviderRequest(BaseModel):
-    access_token: str
+    access_token: str | None = None
+    username: str | None = None
+    password: str | None = None
     instance_url: str | None = None
     base_url: str | None = None
 
@@ -184,9 +186,32 @@ def connect_provider(
     if provider not in valid_providers:
         raise HTTPException(status_code=400, detail=f"Invalid provider. Must be one of: {valid_providers}")
 
+    access_token = req.access_token
+
+    # ZoomInfo: exchange username/password for a JWT via their authenticate endpoint
+    if provider == "zoominfo" and req.username and req.password:
+        import httpx as _httpx
+        try:
+            zi_resp = _httpx.post(
+                "https://api.zoominfo.com/authenticate",
+                json={"username": req.username, "password": req.password},
+                timeout=15.0,
+            )
+            zi_resp.raise_for_status()
+            access_token = zi_resp.json().get("jwt") or zi_resp.json().get("access_token")
+            if not access_token:
+                raise HTTPException(status_code=400, detail="ZoomInfo authentication succeeded but returned no token")
+        except _httpx.HTTPStatusError as exc:
+            raise HTTPException(status_code=400, detail=f"ZoomInfo authentication failed: {exc.response.text}")
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=f"ZoomInfo authentication error: {exc}")
+
+    if not access_token:
+        raise HTTPException(status_code=400, detail="access_token or username+password required")
+
     accounts = dict(user.connected_accounts or {})
     accounts[provider] = {
-        "access_token": req.access_token,
+        "access_token": access_token,
         "instance_url": req.instance_url,
         "base_url": req.base_url,
         "connected": True,

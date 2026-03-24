@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react';
 
 const PROVIDERS = [
   { id: 'salesforce', label: 'Salesforce', type: 'oauth' },
-  { id: 'zoominfo', label: 'ZoomInfo', type: 'api_key' },
+  { id: 'zoominfo', label: 'ZoomInfo', type: 'credentials' },
   { id: 'linkedin', label: 'LinkedIn', type: 'api_key' },
   { id: 'chorus', label: 'Chorus', type: 'api_key', hasBaseUrl: true },
 ];
@@ -16,6 +16,8 @@ const PROVIDER_DEFAULTS = {
 function ProviderRow({ provider, initialConnected }) {
   const [connected, setConnected] = useState(initialConnected);
   const [apiKey, setApiKey] = useState('');
+  const [username, setUsername] = useState('');
+  const [password, setPassword] = useState('');
   const [baseUrl, setBaseUrl] = useState(PROVIDER_DEFAULTS[provider.id]?.base_url || '');
   const [showInput, setShowInput] = useState(false);
   const [working, setWorking] = useState(false);
@@ -23,6 +25,33 @@ function ProviderRow({ provider, initialConnected }) {
 
   const connectOAuth = () => {
     window.location.href = `/api/auth/connect/${provider.id}`;
+  };
+
+  const connectCredentials = async () => {
+    if (!username.trim() || !password.trim()) {
+      setMessage('Please enter your email and password.');
+      return;
+    }
+    setWorking(true);
+    setMessage('');
+    try {
+      const res = await fetch(`/api/auth/connect/${provider.id}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username: username.trim(), password: password.trim() }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.detail || data?.error || `Failed to connect ${provider.label}.`);
+      setConnected(true);
+      setUsername('');
+      setPassword('');
+      setShowInput(false);
+      setMessage('Connected.');
+    } catch (err) {
+      setMessage(String(err?.message || err));
+    } finally {
+      setWorking(false);
+    }
   };
 
   const connectApiKey = async () => {
@@ -130,6 +159,42 @@ function ProviderRow({ provider, initialConnected }) {
           </span>
         )}
       </div>
+
+      {showInput && !connected && provider.type === 'credentials' && (
+        <div style={{ display: 'grid', gap: '0.4rem', paddingLeft: '112px' }}>
+          <div style={{ display: 'grid', gap: '0.4rem' }}>
+            <input
+              type="email"
+              className="input"
+              value={username}
+              onChange={(e) => setUsername(e.target.value)}
+              placeholder="ZoomInfo email"
+              autoComplete="username"
+              style={{ maxWidth: '320px' }}
+            />
+            <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+              <input
+                type="password"
+                className="input"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                placeholder="ZoomInfo password"
+                autoComplete="current-password"
+                style={{ flex: 1, maxWidth: '320px' }}
+              />
+              <button
+                type="button"
+                className="btn btn-primary"
+                onClick={connectCredentials}
+                disabled={working}
+                style={{ fontSize: '0.78rem', padding: '0.3rem 0.75rem' }}
+              >
+                {working ? 'Connecting…' : 'Connect'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {showInput && !connected && provider.type === 'api_key' && (
         <div style={{ display: 'grid', gap: '0.4rem', paddingLeft: '112px' }}>
