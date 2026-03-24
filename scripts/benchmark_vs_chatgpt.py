@@ -25,7 +25,7 @@ from datetime import datetime
 # ---------------------------------------------------------------------------
 
 COPILOT_BASE = "http://localhost:8000"
-COPILOT_USER = "benchmark@pingcap.com"
+COPILOT_USER = os.environ.get("BENCHMARK_USER", "benchmark@yourcompany.com")
 MODEL_VANILLA = "gpt-4o"
 MODEL_JUDGE = "gpt-4o-mini"
 

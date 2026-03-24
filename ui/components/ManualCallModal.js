@@ -62,7 +62,7 @@ export default function ManualCallModal({ onClose, onSuccess }) {
           </div>
           <div>
             <label style={{ fontSize: '0.75rem', color: 'var(--text-3)' }}>Participants (comma-separated emails)</label>
-            <input className="input" value={form.participants} onChange={e => setForm(f => ({...f, participants: e.target.value}))} placeholder="panos@brex.com, se@pingcap.com" />
+            <input className="input" value={form.participants} onChange={e => setForm(f => ({...f, participants: e.target.value}))} placeholder="contact@prospect.com, se@yourcompany.com" />
           </div>
           <div>
             <label style={{ fontSize: '0.75rem', color: 'var(--text-3)' }}>Notes * (paste transcript, voice memo, or your own notes)</label>

@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { exchangeCode, parseIdToken } from '../../../../lib/pkce';
 
-const ALLOWED_DOMAIN = process.env.ALLOWED_EMAIL_DOMAIN || 'pingcap.com';
+const ALLOWED_DOMAIN = process.env.ALLOWED_EMAIL_DOMAIN;
 
 export async function GET(request) {
   const { searchParams } = new URL(request.url);
@@ -38,6 +38,10 @@ export async function GET(request) {
 
   const claims = tokens.id_token ? parseIdToken(tokens.id_token) : {};
   const email = claims.email || '';
+
+  if (!ALLOWED_DOMAIN) {
+    return NextResponse.redirect(new URL('/login?error=domain_not_configured', request.url));
+  }
 
   if (!email.endsWith(`@${ALLOWED_DOMAIN}`)) {
     return NextResponse.redirect(new URL('/login?error=unauthorized_domain', request.url));
