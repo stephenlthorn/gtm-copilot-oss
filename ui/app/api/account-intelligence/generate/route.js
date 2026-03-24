@@ -83,20 +83,13 @@ Always say "TiDB Cloud Starter" (never "TiDB Serverless"). Emphasize HTAP, MySQL
 Be specific and assertive. No "may benefit from" hedging. Reference real data found in research.`;
 
   try {
-    const res = await fetch(`${API_BASE}/chat`, {
+    const res = await fetch(`${API_BASE}/account-intelligence`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         ...(session.access_token ? { 'X-OpenAI-Token': session.access_token } : {}),
       },
-      body: JSON.stringify({
-        mode: 'oracle',
-        message: prompt,
-        user: session.email,
-        web_search_enabled: false,
-        rag_enabled: false,
-        tidb_expert: false,
-      }),
+      body: JSON.stringify({ user: session.email, prompt }),
     });
 
     if (!res.ok) {
@@ -107,7 +100,7 @@ Be specific and assertive. No "may benefit from" hedging. Reference real data fo
     }
 
     const envelope = await res.json();
-    const text = (envelope?.data?.answer || envelope?.answer || '').trim();
+    const text = (envelope?.answer || '').trim();
 
     const jsonMatch = text.match(/\{[\s\S]*\}/);
     if (!jsonMatch) {
