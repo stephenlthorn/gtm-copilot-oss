@@ -566,6 +566,69 @@ TiDB evolves fast. When the user asks about a feature, configuration, or behavio
 
 When a new topic comes up that isn't covered here (a new system variable, a new Cloud feature, a new ecosystem tool), research it thoroughly using available tools, reason about it from first principles using your knowledge of the architecture, and give the user the same quality of answer as the core topics above. The architecture knowledge and distributed systems fundamentals in this skill are the foundation — they apply to new features too because those features are built on the same primitives."""
 
+TIDB_AI_CONTEXT = """# TiDB AI & Vector Capabilities
+
+## TiDB as an AI-Native Database
+
+TiDB Cloud now supports vector embeddings natively — this is a significant positioning shift from "HTAP database" to "AI-native HTAP database." Understand this well because it opens new discovery angles with any company doing AI/ML work.
+
+### Vector Search
+TiDB supports a `VECTOR` column type for storing high-dimensional embeddings (up to 16,383 dimensions). It provides approximate nearest neighbor (ANN) search via HNSW indexes, with cosine similarity, L2 distance, and inner product distance functions exposed as SQL functions (`VEC_COSINE_DISTANCE`, `VEC_L2_DISTANCE`).
+
+The key architectural advantage: **vector search and relational filtering in a single query**. Instead of fetching nearest neighbors from a vector index then joining to a relational DB for metadata filtering (the typical Pinecone/Weaviate + Postgres pattern), TiDB does both in one query. Example: "Find the 10 most similar product embeddings among items that are in-stock, belong to category X, and have a price < $100" — that filter is pushed down to TiKV alongside the vector search, not done as a post-filter in application code.
+
+This matters architecturally because:
+- No dual-write complexity (keeping vector store and relational store in sync)
+- Strong consistency — no "vector index is stale" problem
+- Transactions across vector and relational data
+- Simpler operational model: one database, one SLA, one backup/restore procedure
+
+### tidb.ai
+tidb.ai is PingCAP's hosted AI platform built on TiDB Cloud. It demonstrates TiDB's AI capabilities through a production RAG application, and serves as a reference architecture for customers building similar systems. Key selling point: tidb.ai itself runs on TiDB Cloud — "we eat our own dog food at AI scale."
+
+### AI Use Cases Where TiDB Wins
+
+**RAG (Retrieval-Augmented Generation) backends**
+The canonical LLM application pattern: store document embeddings + metadata in TiDB, run hybrid vector+relational queries to retrieve relevant context, pass to LLM. TiDB replaces the typical Pinecone + PostgreSQL dual-database pattern with a single system. LangChain and LlamaIndex both have TiDB integrations.
+
+**Real-time ML feature stores**
+Feature stores need both: fast point lookups for online serving (TiKV, row format, sub-millisecond) and batch reads for offline training (TiFlash, columnar, high throughput). TiDB's HTAP architecture handles both natively — this is a strong story for companies running ML pipelines where they currently maintain separate online (Redis/DynamoDB) and offline (Snowflake/BigQuery) feature storage.
+
+**Recommendation engines**
+High-throughput transactional writes (user interactions, clicks, purchases) + real-time analytics (what's trending, collaborative filtering) + vector similarity (embedding-based recommendations) = classic TiDB sweet spot. The HTAP + vector combination eliminates the need for separate OLTP DB + analytics DB + vector DB.
+
+**Fraud detection and risk scoring**
+Real-time transaction writes with concurrent analytical queries over recent history — this is HTAP. Adding vector similarity for behavioral pattern matching (is this transaction pattern similar to known fraud patterns?) is additive.
+
+**LLM application backends**
+Any application built on top of an LLM needs: conversation history (relational), user preferences (relational), retrieved context (vector), usage tracking (OLAP). TiDB handles all four, which simplifies the architecture considerably compared to maintaining separate purpose-built stores.
+
+### Competitive Positioning for AI Workloads
+
+When a prospect is evaluating databases for AI use cases:
+
+**vs. Pinecone / Weaviate / Qdrant (pure vector DBs)**: They lack transactional guarantees, relational filtering is a post-process, and you still need a separate relational DB for application state. TiDB does hybrid queries natively. The question to ask: "How do you keep your vector index in sync with your application database?"
+
+**vs. pgvector (PostgreSQL extension)**: Same approach — vector as an extension on a single-node relational DB. Doesn't scale horizontally. At high write throughput, PostgreSQL's MVCC and vacuum overhead become painful. TiDB scales compute and storage independently, handles hot-spot splitting automatically.
+
+**vs. maintaining separate OLTP + vector DB**: Operational complexity (dual writes, consistency guarantees, separate SLAs), higher cost, harder debugging. TiDB consolidates.
+
+### Discovery Questions for AI-Active Accounts
+- "What does your current embedding pipeline look like — where are you storing vectors today?"
+- "When your recommendation model retrieves similar items, does it do metadata filtering before or after the vector search? How does that affect latency?"
+- "How do you keep your vector index in sync with your operational database?"
+- "Are you building any RAG pipelines? What's your retrieval latency target?"
+- "Do your ML engineers need to join embedding results with transactional data? How do you handle that today?"
+
+### Fit Signal Indicators
+Strong AI fit signals in external research:
+- Job postings mentioning "embedding," "vector database," "RAG," "LLM infrastructure," "AI platform"
+- Engineering blog posts about recommendation systems, real-time ML, or feature stores
+- Products that involve personalization, search, or generative AI features
+- Use of LangChain, LlamaIndex, OpenAI, or Hugging Face in their stack
+- Companies that already run MySQL/Aurora for their app DB and are adding an AI layer — strongest possible conversation: "you can do vectors in the same database you already trust"
+"""
+
 # Complete SYSTEM_SE_ANALYSIS now that TIDB_EXPERT_CONTEXT is defined
 SYSTEM_SE_ANALYSIS = SYSTEM_SE_ANALYSIS + "\n\n" + TIDB_EXPERT_CONTEXT
 

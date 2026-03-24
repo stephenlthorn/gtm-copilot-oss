@@ -9,97 +9,207 @@ export async function POST(request) {
 
   const { company, callSummaries = [], callCount = 0, contacts = [], lastStage = '' } = await request.json();
 
-  const callContext = callSummaries.length
-    ? `INTERNAL CALL HISTORY (${callCount} total calls, ${callSummaries.length} with notes shown — most recent first):
-${callSummaries.map((s, i) => `Call ${i + 1}: ${s}`).join('\n\n')}
+  // ── Step 1: Build call intelligence block ─────────────────────────────────
+  let callIntelligence = '';
+  if (callSummaries.length) {
+    callIntelligence = `
+═══════════════════════════════════════════════════════
+INTERNAL CALL INTELLIGENCE — ${callCount} total calls on record
+${callSummaries.length} calls with notes (newest first):
+═══════════════════════════════════════════════════════
+${callSummaries.map((s, i) => `── Call ${i + 1} ──\n${s}`).join('\n\n')}
 
-CRITICAL: Analyze these calls carefully. Extract:
-- Overall relationship sentiment (positive / neutral / at-risk / negative)
-- Specific objections, blockers, or concerns raised by the customer
-- Security, compliance, or trust issues mentioned
-- Whether they expressed unhappiness, frustration, or intent to not proceed
-- Champion strength and engagement level
-- Any explicit statements about competing solutions or switching costs
-These call signals MUST directly affect the fit_score, buy_signals, and opening_pitch.`
-    : 'No internal call history available — base analysis on external research only.';
+MANDATORY CALL ANALYSIS — before writing any field, extract and weigh:
+① RELATIONSHIP SENTIMENT: Is the customer engaged, lukewarm, frustrated, or hostile? Look for explicit language ("not interested", "concerned about X", "happy with the POC").
+② OBJECTIONS & BLOCKERS: List every specific objection raised (security, compliance, price, performance, vendor lock-in, migration risk, team bandwidth).
+③ TRUST SIGNALS: Did they give us access to their stack? Share internal architecture? Intro us to their team? These are positive trust signals.
+④ COMPETITOR MENTIONS: Any database or cloud vendor mentioned as an alternative or incumbent.
+⑤ CHAMPION STATUS: Is there a clear internal champion? Are they senior enough to drive a decision? Are they still engaged?
+⑥ DEAL VELOCITY: Is the deal moving? Stalled? Getting colder based on call frequency and recency?
+
+These extracted signals are the HIGHEST PRIORITY inputs. External research fills gaps — it does NOT override what we heard on calls.`;
+  } else {
+    callIntelligence = 'No internal call history — base full analysis on external research.';
+  }
 
   const contactContext = contacts.length
     ? `Known contacts from our calls: ${contacts.join(', ')}`
     : '';
 
-  const prompt = `You are a TiDB Cloud sales engineer preparing an honest, actionable account intelligence profile for "${company}".
+  const prompt = `You are a senior TiDB Cloud sales engineer and account strategist preparing a deep-research intelligence brief for "${company}".
 
-${callContext}
+${callIntelligence}
 
-${contactContext}
+${contactContext ? `Known contacts: ${contactContext}` : ''}
 ${lastStage ? `Current deal stage: ${lastStage}` : ''}
 
-Research this company thoroughly. Then synthesize BOTH external research AND the internal call history above to produce a realistic assessment. Do NOT default to a high fit score if the calls show unhappiness, security concerns, or blockers — the calls are ground truth.
+═══════════════════════════════════════════════════════
+RESEARCH INSTRUCTIONS
+═══════════════════════════════════════════════════════
+Conduct thorough external research across these signal sources:
 
-Return ONLY a valid JSON object (no markdown, no code fences, no explanation):
+COMPANY FUNDAMENTALS
+• Official website, product pages, pricing pages
+• Crunchbase / PitchBook for funding, investors, headcount trajectory
+• LinkedIn for headcount, hiring velocity, key engineering hires
+• Recent press releases, blog posts, customer announcements
+
+TECHNICAL INTELLIGENCE (highest value signals)
+• Engineering blog / tech blog — architecture decisions, scale numbers, DB migrations
+• Job postings — search for database, infrastructure, data engineering, AND AI/ML roles. Keywords: "vector database", "embedding", "RAG", "LLM infrastructure", "feature store", "real-time ML", "recommendation engine". DB keywords reveal stack; AI keywords reveal new TiDB vector opportunity.
+• GitHub org — open source repos reveal languages, frameworks, database dependencies, AI/ML tooling (LangChain, LlamaIndex, Hugging Face, OpenAI SDK)
+• StackShare, DB-Engines, Siftery / G2 stack profiles
+• Conference talks (QCon, ScaleConf, re:Invent, NeurIPS, MLOps World) where their engineers have presented
+• Product features — does their product use personalization, search, recommendations, or generative AI? These are TiDB vector/HTAP opportunities.
+
+GROWTH & SCALE SIGNALS
+• Annual reports or S-1 (if public) — transaction volumes, user counts, data growth
+• Case studies where they cite infrastructure scale (requests/sec, TPS, data size)
+• Customer count, ARR estimates from analyst reports or press
+
+COMPETITIVE CONTEXT
+• Who else they're evaluating (AWS RDS, Aurora, PlanetScale, Vitess, CockroachDB, Neon, Yugabyte, SingleStore)
+• Recent database migrations they've announced
+• Cloud provider relationships (AWS credits, Google partnership, Azure committed spend)
+
+═══════════════════════════════════════════════════════
+OUTPUT REQUIREMENTS
+═══════════════════════════════════════════════════════
+Synthesize everything above into a single valid JSON object. No markdown. No code fences. No explanation. Just the JSON.
 
 {
-  "company": "full company name",
-  "domain": "website domain",
+  "company": "Full legal or brand name",
+  "domain": "primarydomain.com",
   "hq": "City, State/Country",
-  "founded": "year or ~year",
-  "sector": "Technology / SaaS",
-  "funding": "Series X, $XXM or Public: TICKER",
-  "employees": "X,XXX",
-  "fit_score": 8.5,
+  "founded": "YYYY",
+  "sector": "Primary sector / subsector",
+  "funding": "Series X — $XXM raised (lead investor) OR NASDAQ: TICKER",
+  "employees": "X,XXX (and trajectory: +20% YoY if known)",
+  "fit_score": 7.2,
   "relationship_health": "strong | neutral | at-risk | negative",
-  "overview_1": "2-3 sentence company description with specific products, scale, and what makes them technically interesting",
-  "overview_2": "Honest assessment of where this deal stands — reference actual call themes, relationship status, and strategic relevance right now",
+
+  "overview_1": "2-3 sentences: what the company does, their scale (TPM/users/ARR if findable), and what makes them technically interesting to TiDB. Be specific — cite actual products, customer counts, or data volumes.",
+  "overview_2": "2-3 sentences: honest deal status synthesis. Where do we stand based on calls + research? What is the single most important thing we need to address or capitalize on right now? Reference actual call themes or market moments.",
+
   "kpis": [
-    { "value": "1,200", "label": "Employees" },
-    { "value": "$150M", "label": "Raised" },
-    { "value": "2015", "label": "Founded" },
-    { "value": "Series C", "label": "Stage" }
+    { "value": "X,XXX", "label": "Employees" },
+    { "value": "$XXXM", "label": "Raised" },
+    { "value": "YYYY", "label": "Founded" },
+    { "value": "Series X", "label": "Stage" }
   ],
+
   "stack": {
-    "databases": ["MySQL", "Redis"],
-    "cloud": ["AWS"],
-    "ai": ["PyTorch"],
-    "languages": ["Go", "Python"],
-    "compatibility": "MySQL-compatible — zero-code migration path to TiDB Cloud Starter"
+    "databases": ["MySQL 8.0", "Redis", "DynamoDB"],
+    "cloud": ["AWS us-east-1", "GCP"],
+    "ai": ["PyTorch", "OpenAI API"],
+    "languages": ["Go", "Python", "TypeScript"],
+    "compatibility": "One specific sentence: their primary DB, why it creates friction at their scale, and the exact TiDB Cloud migration path (e.g. 'MySQL 8.0 on RDS — zero-code migration via TiDB Cloud Starter, MySQL wire compatible, same drivers')"
   },
+
   "pain_points": [
-    { "title": "Short descriptive title", "pain": "Specific pain their engineers feel", "solution": "How TiDB Cloud directly resolves this", "severity": "high" },
-    { "title": "Short descriptive title", "pain": "Specific pain", "solution": "TiDB Cloud solution", "severity": "high" },
-    { "title": "Short descriptive title", "pain": "Specific pain", "solution": "TiDB Cloud solution", "severity": "medium" },
-    { "title": "Short descriptive title", "pain": "Specific pain", "solution": "TiDB Cloud solution", "severity": "medium" }
+    {
+      "title": "Concise pain name (5 words max)",
+      "pain": "Specific, technical pain their engineers actually feel at their current scale — cite evidence from job postings, blog posts, or calls. No generic statements.",
+      "solution": "The exact TiDB Cloud capability that resolves this — be technically precise. Reference HTAP, TiFlash, auto-sharding, distributed transactions, TiCDC, TiProxy, or RU-based autoscaling as appropriate.",
+      "severity": "high"
+    },
+    {
+      "title": "Second pain",
+      "pain": "Specific pain with evidence",
+      "solution": "Precise TiDB solution",
+      "severity": "high"
+    },
+    {
+      "title": "Third pain",
+      "pain": "Specific pain",
+      "solution": "Precise TiDB solution",
+      "severity": "medium"
+    },
+    {
+      "title": "Fourth pain",
+      "pain": "Specific pain",
+      "solution": "Precise TiDB solution",
+      "severity": "medium"
+    }
   ],
+
   "buy_signals": [
-    { "title": "Signal title", "text": "Specific evidence from research or calls", "urgency": "high" },
-    { "title": "Risk or blocker title", "text": "Specific concern raised in calls that must be addressed", "urgency": "risk" },
-    { "title": "Signal title", "text": "Specific evidence", "urgency": "medium" },
-    { "title": "Signal title", "text": "Specific evidence", "urgency": "low" }
+    {
+      "title": "Signal or risk name",
+      "text": "One specific, evidence-backed sentence. For positive signals: cite the source (job posting, blog post, press release, call quote). For risks: quote or paraphrase the exact concern from calls.",
+      "urgency": "high | medium | low | risk"
+    }
   ],
+
   "workloads": [
-    { "name": "Workload name", "desc": "Why this workload matters for them", "priority": "P1" },
-    { "name": "Workload name", "desc": "Description", "priority": "P1" },
-    { "name": "Workload name", "desc": "Description", "priority": "P2" }
+    {
+      "name": "Workload name",
+      "desc": "Why this specific workload is painful for them at their current scale, and why TiDB Cloud handles it better than their current solution. Be technically specific.",
+      "priority": "P1"
+    },
+    { "name": "Workload 2", "desc": "Specific technical rationale", "priority": "P1" },
+    { "name": "Workload 3", "desc": "Specific technical rationale", "priority": "P2" }
   ],
+
   "contacts": [
-    { "name": "Full Name", "initials": "FN", "title": "VP Engineering", "angle": "Lead TiDB Cloud trial conversation here" },
-    { "name": "Full Name", "initials": "FN", "title": "CTO", "angle": "Strategic infrastructure direction" }
+    {
+      "name": "Full Name (use real names from calls/LinkedIn if known, otherwise realistic title-based placeholder)",
+      "initials": "XX",
+      "title": "Exact title",
+      "angle": "One sentence: what specifically to lead with for this person based on their role and what we know from calls. Tie to their likely KPIs or pain."
+    }
   ],
-  "opening_pitch": "A 3-4 sentence opener that reflects the REAL relationship state — if they raised concerns in calls, acknowledge and address them. If relationship is strong, build on that. Never pitch as if the calls didn't happen.",
+
+  "next_steps": [
+    "Specific action item #1 — who does what, referencing deal state and call history",
+    "Specific action item #2",
+    "Specific action item #3"
+  ],
+
+  "competitors": [
+    { "name": "Competitor or incumbent DB name", "status": "incumbent | evaluating | preferred | eliminated", "note": "One sentence on their relationship with this vendor and how we position against it" }
+  ],
+
+  "opening_pitch": "3-4 sentences written as if you are the SE sending a follow-up email or opening a call. Must reflect the ACTUAL relationship state — if they raised security concerns, open by addressing them directly. If they're mid-POC, reference it. If they're cold, re-engage with a new angle. Never write as if the calls didn't happen. Sound like a human who read the notes, not a bot that ignored them.",
+
   "sources": [
-    { "url": "https://...", "label": "Source description" },
-    { "url": "https://...", "label": "Source description" }
+    { "url": "https://actual-url.com/page", "label": "What this source revealed" }
   ]
 }
 
-FIT SCORE RULES — apply all that match, cap at 9.9, floor at 1.0:
-Base: 4.0
-Stack signals (add): MySQL/Aurora +2.0, Oracle +1.8, PostgreSQL +1.2, high txn volume +1.4, AI/ML +1.5, real-time analytics +1.0, multi-cloud +1.0, microservices +0.8, SaaS/multi-tenant +0.7
-Relationship penalties (subtract): active security/compliance objection -2.5, customer expressed unhappiness or frustration -1.5, deal stalled >60 days -0.5, lost champion -1.0, explicit no or not interested -3.0, competitor strongly preferred -1.5
-If internal calls show the customer is NOT happy, the fit_score MUST reflect that reality regardless of how good their stack looks.
+═══════════════════════════════════════════════════════
+FIT SCORE CALCULATION — show your work mentally, output only the final number
+═══════════════════════════════════════════════════════
+Start at 4.0. Apply ALL matching adjustments. Floor: 1.0. Cap: 9.9.
 
-buy_signals urgency values: "high" (strong positive signal), "medium" (moderate signal), "low" (weak signal), "risk" (active blocker or concern from calls that needs addressing).
-Always say "TiDB Cloud Starter" (never "TiDB Serverless"). Emphasize HTAP, MySQL wire compatibility, distributed architecture, auto-scale.
-Be specific and honest. If the deal looks bad, say so. Reference real data from both research and calls.`;
+TECHNICAL FIT (add):
++2.0  MySQL or Aurora as primary OLTP DB
++1.8  Oracle Database (strong migration pain)
++1.2  PostgreSQL (compatible path)
++1.4  High transaction volume (>10K TPS or explicit scale language in job postings/blogs)
++1.5  Active AI/ML workloads needing real-time feature serving or vector search
++1.5  Building RAG pipelines, LLM applications, or embedding-based search (TiDB vector opportunity)
++1.0  Recommendation engine, personalization, or fraud detection use case (HTAP + vector fit)
++0.8  Job postings for AI/ML infra, embedding pipelines, or feature store engineering
++1.0  Real-time analytics alongside OLTP (classic HTAP use case)
++1.0  Multi-cloud or cloud portability requirement
++0.8  Microservices architecture with distributed transaction needs
++0.7  SaaS or multi-tenant product (row-level isolation, schema-per-tenant patterns)
++0.5  Active hiring for data infrastructure, DB engineering, or platform roles
++0.5  Recent funding or hypergrowth (scaling pain imminent)
+
+RELATIONSHIP & DEAL RISK (subtract):
+-3.0  Explicit "not interested" or "we're going another direction" in calls
+-2.5  Active security, compliance, or data residency objection not yet resolved
+-2.0  Competitor strongly preferred or actively being POC'd
+-1.5  Customer expressed clear unhappiness, frustration, or distrust
+-1.5  Deal stalled >90 days with no movement
+-1.0  Champion left the company or lost influence
+-1.0  Deal stalled 30-90 days
+-0.5  Budget freeze or procurement blocker mentioned
+
+RULE: If calls contradict the technical fit, calls win. A company with perfect MySQL stack but active security objections scores LOW. Never let a good stack mask a broken deal.`;
+
 
   try {
     const res = await fetch(`${API_BASE}/account-intelligence`, {
