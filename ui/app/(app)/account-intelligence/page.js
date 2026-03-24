@@ -37,7 +37,7 @@ export default async function AccountIntelligencePage() {
         .filter(c => c.meeting_summary)
         .sort((x, y) => (y.date > x.date ? 1 : -1))
         .slice(0, 10)
-        .map(c => `[${c.date}] ${c.meeting_summary.slice(0, 600)}`),
+        .map(c => `[${c.date}] ${c.meeting_summary}`),
     }))
     .sort((a, b) => (b.lastCallDate || '') > (a.lastCallDate || '') ? 1 : -1);
 
