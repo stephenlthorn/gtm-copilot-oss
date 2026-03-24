@@ -20,24 +20,29 @@ app.prepare().then(() => {
     process.exit(1);
   });
 
-  createServer((req, res) => {
-    const { pathname, query } = parse(req.url, true);
-    if (pathname === '/auth/callback') {
-      const code = query.code || '';
-      const state = query.state || '';
-      const target = `http://localhost:${NEXT_PORT}/api/auth/exchange?code=${encodeURIComponent(code)}&state=${encodeURIComponent(state)}`;
-      res.writeHead(302, { Location: target });
-      res.end();
-    } else {
-      res.writeHead(404);
-      res.end('Not found');
-    }
-  }).listen(OAUTH_PORT, '0.0.0.0', () => {
-    console.log(`> OAuth callback receiver ready on http://localhost:${OAUTH_PORT}`);
-  }).on('error', (err) => {
-    console.error(`OAuth server error (port ${OAUTH_PORT}):`, err.message);
-    process.exit(1);
-  });
+  // OAuth callback redirect server — only needed for local development.
+  // In production (Railway/Vercel), Google redirects directly to /api/auth/exchange.
+  if (process.env.SKIP_OAUTH_SERVER !== 'true') {
+    createServer((req, res) => {
+      const { pathname, query } = parse(req.url, true);
+      if (pathname === '/auth/callback') {
+        const code = query.code || '';
+        const state = query.state || '';
+        const target = `http://localhost:${NEXT_PORT}/api/auth/exchange?code=${encodeURIComponent(code)}&state=${encodeURIComponent(state)}`;
+        res.writeHead(302, { Location: target });
+        res.end();
+      } else {
+        res.writeHead(404);
+        res.end('Not found');
+      }
+    }).listen(OAUTH_PORT, '0.0.0.0', () => {
+      console.log(`> OAuth callback receiver ready on http://localhost:${OAUTH_PORT}`);
+    }).on('error', (err) => {
+      console.error(`OAuth server error (port ${OAUTH_PORT}):`, err.message);
+      // Non-fatal in production — OAuth redirect goes directly to /api/auth/exchange
+      if (dev) process.exit(1);
+    });
+  }
 }).catch((err) => {
   console.error('Failed to start server:', err);
   process.exit(1);
