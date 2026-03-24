@@ -97,12 +97,19 @@ def _seed_defaults() -> None:
             "follow_up",
             "Follow-Up Email (Default)",
             (
-                "Draft a follow-up email for my call with {account}.\n\n"
-                "Recipients: To: {email_to} | CC: {email_cc}\n"
-                "Tone: {email_tone}\n"
-                "Call context: {call_context}\n\n"
-                "Include: summary of what was discussed, agreed next steps with owners,"
-                " clear CTA for the next meeting."
+                "FOLLOW-UP EMAIL REQUEST\n\n"
+                "Account: {account}\n"
+                "To: {email_to}\n"
+                "CC: {email_cc}\n"
+                "Tone: {email_tone}\n\n"
+                "--- CALL RECORD ---\n"
+                "{call_context}\n\n"
+                "--- ADDITIONAL NOTES ---\n"
+                "{call_notes}\n\n"
+                "--- TASK ---\n"
+                "Write a specific, deal-advancing follow-up email using the call record, "
+                "additional notes, and any retrieved call evidence below. "
+                "Do not write a generic email — every sentence should be specific to this account and this call."
             ),
         ),
         (

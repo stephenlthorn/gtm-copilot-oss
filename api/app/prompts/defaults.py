@@ -207,23 +207,21 @@ ALL_DEFAULTS: dict[str, dict] = {
         "name": "Follow-Up Email",
         "description": "User-facing template for follow-up email drafting",
         "content": (
-            "Draft a follow-up email for my call with {account}.\n\n"
+            "FOLLOW-UP EMAIL REQUEST\n\n"
+            "Account: {account}\n"
             "To: {email_to}\n"
             "CC: {email_cc}\n"
             "Tone: {email_tone}\n\n"
-            "Call context:\n"
+            "--- CALL RECORD ---\n"
             "{call_context}\n\n"
-            "The email should include:\n"
-            "1. A brief thank-you and summary of what was discussed\n"
-            "2. Agreed next steps with clear owners and dates\n"
-            "3. Any resources or materials promised during the call\n"
-            "4. A clear call-to-action for scheduling the next meeting\n\n"
-            "Keep it concise and professional. Match the {email_tone} tone:\n"
-            "• crisp = brief and direct\n"
-            "• executive = polished and high-level\n"
-            "• technical = detailed and specific"
+            "--- ADDITIONAL NOTES ---\n"
+            "{call_notes}\n\n"
+            "--- TASK ---\n"
+            "Write a specific, deal-advancing follow-up email using the call record, "
+            "additional notes, and any retrieved call evidence below. "
+            "Do not write a generic email — every sentence should be specific to this account and this call."
         ),
-        "variables": '["{account}", "{call_context}", "{email_to}", "{email_cc}", "{email_tone}"]',
+        "variables": '["{account}", "{call_context}", "{call_notes}", "{email_to}", "{email_cc}", "{email_tone}"]',
     },
     "tpl_tal": {
         "category": "template",
