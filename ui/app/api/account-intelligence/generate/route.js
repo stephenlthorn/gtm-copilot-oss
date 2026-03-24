@@ -93,16 +93,17 @@ Be specific and assertive. No "may benefit from" hedging. Reference real data fo
         mode: 'oracle',
         message: prompt,
         user: session.email,
-        web_search_enabled: true,
-        rag_enabled: true,
-        tidb_expert: true,
-        section: 'se_architecture',
+        web_search_enabled: false,
+        rag_enabled: false,
+        tidb_expert: false,
       }),
     });
 
     if (!res.ok) {
       const err = await res.text();
-      return NextResponse.json({ error: `Backend error: ${err.slice(0, 300)}` }, { status: res.status });
+      let detail = err.slice(0, 400);
+      try { detail = JSON.parse(err)?.detail || detail; } catch {}
+      return NextResponse.json({ error: `Backend error: ${detail}` }, { status: res.status });
     }
 
     const envelope = await res.json();
