@@ -32,10 +32,12 @@ export default async function AccountIntelligencePage() {
       lastStage: Array.from(a.stages).pop() || null,
       contacts: Array.from(a.contacts).slice(0, 8),
       reps: Array.from(a.reps),
+      callCount: a.calls.length,
       summaries: a.calls
         .filter(c => c.meeting_summary)
-        .slice(0, 5)
-        .map(c => `${c.date}: ${c.meeting_summary.slice(0, 200)}`),
+        .sort((x, y) => (y.date > x.date ? 1 : -1))
+        .slice(0, 10)
+        .map(c => `[${c.date}] ${c.meeting_summary.slice(0, 600)}`),
     }))
     .sort((a, b) => (b.lastCallDate || '') > (a.lastCallDate || '') ? 1 : -1);
 

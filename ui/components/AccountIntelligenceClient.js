@@ -93,6 +93,11 @@ function ProfileView({ profile, company, onClose }) {
               </div>
             </div>
             <div style={{ fontSize: 11, color: '#8b949e', textTransform: 'uppercase', letterSpacing: '0.08em', fontWeight: 600, marginTop: 8 }}>TiDB Fit Score</div>
+            {profile.relationship_health && (() => {
+              const h = profile.relationship_health.toLowerCase();
+              const rColor = h === 'strong' ? '#3fb950' : h === 'neutral' ? '#58a6ff' : h === 'at-risk' ? '#d29922' : '#f85149';
+              return <div style={{ marginTop: 6, fontSize: 11, fontWeight: 700, color: rColor, background: `${rColor}18`, border: `1px solid ${rColor}40`, borderRadius: 20, padding: '2px 10px', textTransform: 'capitalize' }}>{profile.relationship_health}</div>;
+            })()}
           </div>
         </div>
 
@@ -162,8 +167,8 @@ function ProfileView({ profile, company, onClose }) {
                   <div key={i} style={{ display: 'flex', gap: 12, padding: '14px 0', borderBottom: i < profile.buy_signals.length - 1 ? '1px solid #30363d' : 'none' }}>
                     <div style={{
                       width: 10, height: 10, borderRadius: '50%', marginTop: 5, flexShrink: 0,
-                      background: s.urgency === 'high' ? '#f85149' : s.urgency === 'medium' ? '#d29922' : '#3fb950',
-                      boxShadow: `0 0 6px ${s.urgency === 'high' ? 'rgba(248,81,73,0.5)' : s.urgency === 'medium' ? 'rgba(210,153,34,0.5)' : 'rgba(63,185,80,0.5)'}`,
+                      background: s.urgency === 'risk' ? '#ff7b72' : s.urgency === 'high' ? '#f85149' : s.urgency === 'medium' ? '#d29922' : '#3fb950',
+                      boxShadow: `0 0 6px ${s.urgency === 'risk' ? 'rgba(255,123,114,0.6)' : s.urgency === 'high' ? 'rgba(248,81,73,0.5)' : s.urgency === 'medium' ? 'rgba(210,153,34,0.5)' : 'rgba(63,185,80,0.5)'}`,
                     }} />
                     <div style={{ fontSize: 13, lineHeight: 1.65, color: '#8b949e' }}>
                       <strong style={{ color: '#e6edf3' }}>{s.title}</strong> — {s.text}
@@ -172,6 +177,7 @@ function ProfileView({ profile, company, onClose }) {
                 ))}
               </div>
               <div style={{ display: 'flex', gap: 16, padding: '10px 18px', background: '#1c2333', borderTop: '1px solid #30363d', fontSize: 11, color: '#8b949e' }}>
+                <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}><span style={{ width: 8, height: 8, borderRadius: '50%', background: '#ff7b72', display: 'inline-block' }} /> Risk / Blocker</span>
                 <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}><span style={{ width: 8, height: 8, borderRadius: '50%', background: '#f85149', display: 'inline-block' }} /> High urgency</span>
                 <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}><span style={{ width: 8, height: 8, borderRadius: '50%', background: '#d29922', display: 'inline-block' }} /> Medium urgency</span>
                 <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}><span style={{ width: 8, height: 8, borderRadius: '50%', background: '#3fb950', display: 'inline-block' }} /> Low urgency</span>
@@ -466,6 +472,7 @@ export default function AccountIntelligenceClient({ accounts }) {
         body: JSON.stringify({
           company: account.name,
           callSummaries: account.summaries,
+          callCount: account.callCount,
           contacts: account.contacts,
           lastStage: account.lastStage,
         }),
