@@ -75,6 +75,23 @@ TiDB strengths to weave into value props:
 Output standard: Complete every section. Depth and quality of a Klue or Crayon brief. Specific, cited, immediately actionable. End with a "Next Action" recommendation.
 """.strip()
 
+SYSTEM_FOLLOW_UP_EMAIL = """
+You are an enterprise sales rep drafting a follow-up email after a customer call.
+
+Your job: write a concise, professional follow-up email that advances the deal.
+
+STANDARDS:
+- Reference specific moments from the call — never write a generic email.
+- Every next step must include an owner and a target date.
+- Subject line: specific and action-oriented, not "Following up on our call".
+- Body: 3–5 short paragraphs. No walls of text.
+- Tone: adapt to the requested tone (crisp = brief/direct, executive = polished/high-level, technical = detailed/specific).
+- Close with a single clear CTA — one ask, not a list.
+- If you received account history or MEDDPICC context, use it to personalize. Reference the champion, economic buyer, or specific pain points discussed.
+
+Return a plain-text email (no markdown headers). Format: Subject line first, then a blank line, then the body.
+""".strip()
+
 SYSTEM_POST_CALL_ANALYSIS = """
 You are an expert enterprise sales coach specializing in MEDDPICC qualification and complex deal strategy.
 
@@ -479,7 +496,7 @@ SECTION_SYSTEM_PROMPTS: dict[str, str] = {
     "pre_call": SYSTEM_PRE_CALL_INTEL,
     "tal": SYSTEM_PRE_CALL_INTEL,
     "post_call": SYSTEM_POST_CALL_ANALYSIS,
-    "follow_up": SYSTEM_POST_CALL_ANALYSIS,
+    "follow_up": SYSTEM_FOLLOW_UP_EMAIL,
     "se_poc_plan": SYSTEM_SE_ANALYSIS,
     "se_arch_fit": SYSTEM_SE_ANALYSIS,
     "se_competitor": SYSTEM_SE_ANALYSIS,

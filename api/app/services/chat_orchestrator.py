@@ -290,14 +290,16 @@ class ChatOrchestrator:
             return []
 
     def run(self, *, mode: str, user: str, message: str, top_k: int, filters: dict, context: dict, rag_enabled: bool = True, web_search_enabled: bool = True, section: str | None = None, tidb_expert: bool = False) -> tuple[dict, dict]:
-        blocked = self._guardrail_external_messaging(message)
-        if blocked:
-            payload = {
-                "answer": blocked,
-                "citations": [],
-                "follow_up_questions": ["Do you want an internal-only draft to @example.com recipients instead?"],
-            }
-            return payload, {"top_k": 0, "results": []}
+        # Draft sections (follow_up) are not outbound sends — skip external email guardrail
+        if section not in ("follow_up",):
+            blocked = self._guardrail_external_messaging(message)
+            if blocked:
+                payload = {
+                    "answer": blocked,
+                    "citations": [],
+                    "follow_up_questions": ["Do you want an internal-only draft to @example.com recipients instead?"],
+                }
+                return payload, {"top_k": 0, "results": []}
 
         if self.db is None or self.retriever is None:
             if mode == "oracle":
