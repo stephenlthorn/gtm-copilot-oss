@@ -28,8 +28,8 @@ services:
 
   api:
     build:
-      context: ../../api
-      dockerfile: Dockerfile
+      context: ../..
+      dockerfile: api/Dockerfile
     restart: unless-stopped
     env_file: .env
     environment:
@@ -39,8 +39,8 @@ services:
 
   worker:
     build:
-      context: ../../api
-      dockerfile: Dockerfile
+      context: ../..
+      dockerfile: api/Dockerfile
     restart: unless-stopped
     command: celery -A app.worker.celery_app worker --loglevel=info --concurrency=2
     env_file: .env
@@ -51,8 +51,8 @@ services:
 
   beat:
     build:
-      context: ../../api
-      dockerfile: Dockerfile
+      context: ../..
+      dockerfile: api/Dockerfile
     restart: unless-stopped
     command: celery -A app.worker.celery_app beat --loglevel=info
     env_file: .env
@@ -63,8 +63,8 @@ services:
 
   ui:
     build:
-      context: ../../ui
-      dockerfile: Dockerfile
+      context: ../..
+      dockerfile: ui/Dockerfile
       args:
         - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID}
         - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET}
