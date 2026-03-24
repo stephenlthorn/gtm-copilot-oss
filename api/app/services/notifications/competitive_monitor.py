@@ -85,58 +85,58 @@ class CompetitiveMonitorService:
 
     def _scrape_news(self, competitor: TrackedCompetitor) -> list[CompetitorIntelResult]:
         try:
-            from app.services.connectors.firecrawl import FirecrawlConnector
+            from app.services.connectors.web_scraper import WebScraper
 
-            connector = FirecrawlConnector()
-            search_query = f"{competitor.name} news announcements"
-            raw_results = connector.search(query=search_query, limit=5)
+            scraper = WebScraper()
+            news_urls = [
+                f"https://news.google.com/search?q={competitor.name}+announcements&hl=en-US",
+            ]
+            results = scraper.scrape_urls(news_urls)
 
             items: list[CompetitorIntelResult] = []
-            for result in raw_results:
-                items.append(
-                    CompetitorIntelResult(
-                        competitor_name=competitor.name,
-                        intel_type=IntelType.news.value,
-                        title=result.get("title", "News Item"),
-                        summary=result.get("description", "")[:500],
-                        source_url=result.get("url", ""),
-                        is_notable=False,
-                        raw_content=result.get("content", "")[:2000],
+            for result in results:
+                if result.content and not result.metadata.get("error"):
+                    items.append(
+                        CompetitorIntelResult(
+                            competitor_name=competitor.name,
+                            intel_type=IntelType.news.value,
+                            title=result.title or "News Item",
+                            summary=result.content[:500],
+                            source_url=result.url,
+                            is_notable=False,
+                            raw_content=result.content[:2000],
+                        )
                     )
-                )
             return items
-        except ImportError:
-            logger.warning("FirecrawlConnector not available; skipping news scrape")
-            return []
         except Exception:
             logger.exception("Failed to scrape news for %s", competitor.name)
             return []
 
     def _check_reviews(self, competitor: TrackedCompetitor) -> list[CompetitorIntelResult]:
         try:
-            from app.services.connectors.firecrawl import FirecrawlConnector
+            from app.services.connectors.web_scraper import WebScraper
 
-            connector = FirecrawlConnector()
-            search_query = f"{competitor.name} G2 reviews TrustRadius"
-            raw_results = connector.search(query=search_query, limit=3)
+            scraper = WebScraper()
+            review_urls = [
+                f"https://www.g2.com/products/{competitor.name.lower().replace(' ', '-')}/reviews",
+            ]
+            results = scraper.scrape_urls(review_urls)
 
             items: list[CompetitorIntelResult] = []
-            for result in raw_results:
-                items.append(
-                    CompetitorIntelResult(
-                        competitor_name=competitor.name,
-                        intel_type=IntelType.review.value,
-                        title=result.get("title", "Review"),
-                        summary=result.get("description", "")[:500],
-                        source_url=result.get("url", ""),
-                        is_notable=False,
-                        raw_content=result.get("content", "")[:2000],
+            for result in results:
+                if result.content and not result.metadata.get("error"):
+                    items.append(
+                        CompetitorIntelResult(
+                            competitor_name=competitor.name,
+                            intel_type=IntelType.review.value,
+                            title=result.title or "Review",
+                            summary=result.content[:500],
+                            source_url=result.url,
+                            is_notable=False,
+                            raw_content=result.content[:2000],
+                        )
                     )
-                )
             return items
-        except ImportError:
-            logger.warning("FirecrawlConnector not available; skipping review check")
-            return []
         except Exception:
             logger.exception("Failed to check reviews for %s", competitor.name)
             return []
@@ -146,26 +146,23 @@ class CompetitiveMonitorService:
             return []
 
         try:
-            from app.services.connectors.firecrawl import FirecrawlConnector
+            from app.services.connectors.web_scraper import WebScraper
 
-            connector = FirecrawlConnector()
-            raw_result = connector.scrape(url=competitor.website)
+            scraper = WebScraper()
+            result = scraper.scrape_url(competitor.website)
 
-            if raw_result:
+            if result.content:
                 return [
                     CompetitorIntelResult(
                         competitor_name=competitor.name,
                         intel_type=IntelType.other.value,
                         title=f"{competitor.name} Website Update",
-                        summary=raw_result.get("description", "")[:500],
+                        summary=result.content[:500],
                         source_url=competitor.website,
                         is_notable=False,
-                        raw_content=raw_result.get("content", "")[:2000],
+                        raw_content=result.content[:2000],
                     )
                 ]
-            return []
-        except ImportError:
-            logger.warning("FirecrawlConnector not available; skipping website check")
             return []
         except Exception:
             logger.exception("Failed to check website for %s", competitor.name)

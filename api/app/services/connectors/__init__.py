@@ -6,7 +6,7 @@ from app.services.connectors.zoominfo import ZoomInfoConnector
 from app.services.connectors.linkedin import LinkedInConnector
 from app.services.connectors.calendar import CalendarConnector
 from app.services.connectors.gmail import GmailConnector
-from app.services.connectors.firecrawl import FirecrawlConnector
+from app.services.connectors.web_scraper import WebScraper
 
 __all__ = [
     "ChorusConnector",
@@ -15,5 +15,5 @@ __all__ = [
     "LinkedInConnector",
     "CalendarConnector",
     "GmailConnector",
-    "FirecrawlConnector",
+    "WebScraper",
 ]

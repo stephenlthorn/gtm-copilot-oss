@@ -23,7 +23,7 @@ from app.models import (
 )
 from app.core.settings import get_settings
 from app.models.entities import Account
-from app.services.connectors.firecrawl import FirecrawlConnector
+from app.services.connectors.web_scraper import WebScraper
 from app.services.research.account_brief_researcher import AccountBriefResearcher
 from app.prompts.personas import get_default_persona_prompt, normalize_persona
 from app.retrieval.service import HybridRetriever
@@ -268,20 +268,17 @@ class GTMModuleService:
         account_industry = account_record.industry if account_record else None
         account_employee_count = account_record.employee_count if account_record else None
 
-        # Run concurrent Firecrawl research if key is configured
-        settings = get_settings()
+        # Run concurrent web research for account brief
         research_context = None
-        if settings.firecrawl_api_key:
-            try:
-                connector = FirecrawlConnector(api_key=settings.firecrawl_api_key)
-                researcher = AccountBriefResearcher(connector)
-                research_context = await researcher.research(
-                    account_name=account,
-                    website=effective_website,
-                    linkedin_url=linkedin_url,
-                )
-            except Exception:
-                pass
+        try:
+            researcher = AccountBriefResearcher(WebScraper())
+            research_context = await researcher.research(
+                account_name=account,
+                website=effective_website,
+                linkedin_url=linkedin_url,
+            )
+        except Exception:
+            pass
 
         llm_payload = self.llm.answer_rep_account_brief(
             account=account,

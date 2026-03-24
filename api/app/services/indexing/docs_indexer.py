@@ -119,28 +119,20 @@ class DocsIndexer:
 
     async def _try_firecrawl(self, pages: list[dict]) -> bool:
         try:
-            from firecrawl import FirecrawlApp
+            from app.services.connectors.web_scraper import WebScraper
 
-            app = FirecrawlApp()
+            scraper = WebScraper()
             for path in _SEED_PATHS:
                 url = urljoin(_DOCS_BASE_URL, path)
                 try:
-                    result = app.scrape_url(url, params={"formats": ["markdown"]})
-                    content = ""
-                    title = url
-                    if isinstance(result, dict):
-                        content = result.get("markdown") or result.get("content") or ""
-                        title = result.get("metadata", {}).get("title") or url
-                    if content.strip():
-                        pages.append({"url": url, "title": title, "content": content})
+                    result = scraper.scrape_url(url)
+                    if result.content.strip():
+                        pages.append({"url": url, "title": result.title, "content": result.content})
                 except Exception as exc:
-                    logger.warning("Firecrawl failed for %s: %s", url, exc)
+                    logger.warning("Scrape failed for %s: %s", url, exc)
             return True
-        except ImportError:
-            logger.info("firecrawl-py not available, falling back to httpx")
-            return False
         except Exception as exc:
-            logger.warning("Firecrawl init failed: %s, falling back to httpx", exc)
+            logger.warning("WebScraper init failed: %s, falling back to httpx", exc)
             return False
 
     async def _crawl_httpx(self, pages: list[dict]) -> None:

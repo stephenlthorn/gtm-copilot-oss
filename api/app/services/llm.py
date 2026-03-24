@@ -961,47 +961,25 @@ class LLMService:
             return m.group(2).strip(), m.group(1).strip()
         return "unknown company", "unknown contact"
 
-    @staticmethod
-    def _get_firecrawl_api_key() -> str | None:
-        """Read Firecrawl API key from env or the CLI credentials file."""
-        key = os.environ.get("FIRECRAWL_API_KEY") or get_settings().firecrawl_api_key
-        if key:
-            return key
-        creds_path = Path.home() / "Library" / "Application Support" / "firecrawl-cli" / "credentials.json"
-        if creds_path.exists():
-            try:
-                data = json.loads(creds_path.read_text())
-                return data.get("apiKey") or None
-            except Exception:
-                pass
-        return None
-
-    def _firecrawl_search(self, query: str, limit: int = 5) -> list[dict]:
-        """Run a single Firecrawl search and return result dicts with url/title/snippet."""
-        api_key = self._get_firecrawl_api_key()
-        if not api_key:
-            return []
+    def _web_search(self, query: str, limit: int = 5) -> list[dict]:
+        """Run a web search via scraping Google and return result dicts with url/title/snippet."""
         try:
-            resp = httpx.post(
-                "https://api.firecrawl.dev/v1/search",
-                headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
-                json={"query": query, "limit": limit},
-                timeout=15,
-            )
-            if resp.status_code != 200:
+            from app.services.connectors.web_scraper import WebScraper
+            import urllib.parse
+
+            scraper = WebScraper()
+            search_url = f"https://www.google.com/search?q={urllib.parse.quote_plus(query)}&num={limit}"
+            result = scraper.scrape_url(search_url)
+            if not result.content:
                 return []
-            data = resp.json()
-            items = data.get("data") or []
-            return [
-                {
-                    "url": r.get("url", ""),
-                    "title": r.get("title", ""),
-                    "snippet": (r.get("description") or r.get("markdown") or "")[:600],
-                }
-                for r in items
-            ]
+            # Extract basic search results from the scraped text
+            lines = [l.strip() for l in result.content.split("\n") if l.strip() and len(l.strip()) > 20]
+            items = []
+            for line in lines[:limit]:
+                items.append({"url": "", "title": line[:100], "snippet": line[:600]})
+            return items
         except Exception as exc:
-            self.logger.warning("Firecrawl search failed: %s", exc)
+            self.logger.warning("Web search failed: %s", exc)
             return []
 
     _SUMMARIZER_SYSTEM = (
@@ -1078,7 +1056,7 @@ class LLMService:
         query_raw_results: list[tuple[str, list[str]]] = []
         research_sections: list[str] = [f"## Research findings for: {contact} at {company}\n"]
         for query, label in queries:
-            results = self._firecrawl_search(query, limit=4)
+            results = self._web_search(query, limit=4)
             research_sections.append(f"### {label}\nQuery: `{query}`")
             if results:
                 snippets_for_query: list[str] = []

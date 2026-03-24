@@ -30,15 +30,9 @@ class SourceResult:
     error: str | None = None
 
 
-def _get_firecrawl(settings) -> Any | None:
-    if not settings.firecrawl_api_key:
-        return None
-    try:
-        from app.services.connectors.firecrawl import FirecrawlConnector
-        return FirecrawlConnector(api_key=settings.firecrawl_api_key)
-    except Exception as exc:
-        logger.warning("Could not init FirecrawlConnector: %s", exc)
-        return None
+def _get_scraper() -> Any:
+    from app.services.connectors.web_scraper import WebScraper
+    return WebScraper()
 
 
 class ResearchSourceRunner:
@@ -207,13 +201,11 @@ class ResearchSourceRunner:
             return SourceResult(source_name="tech_stack", status="failed", error="LLM returned no result")
         return SourceResult(source_name="tech_stack", status="success", data={"summary": result})
 
-    # ── Direct scrape (Firecrawl, optional) ──────────────────────────────
+    # ── Direct scrape (requests + HTML parsing, no API key needed) ───────
 
     async def scrape_company_website(self, website: str) -> SourceResult:
-        fc = _get_firecrawl(self._settings)
-        if not fc:
-            return SourceResult(source_name="company_website", status="skipped", error="FIRECRAWL_API_KEY not set")
-        scraped = await fc.async_scrape_url(website)
+        scraper = _get_scraper()
+        scraped = await scraper.async_scrape_url(website)
         return SourceResult(
             source_name="company_website",
             status="success",
@@ -221,13 +213,11 @@ class ResearchSourceRunner:
         )
 
     async def scrape_custom_urls(self, urls: list[str]) -> SourceResult:
-        fc = _get_firecrawl(self._settings)
-        if not fc:
-            return SourceResult(source_name="custom_urls", status="skipped", error="FIRECRAWL_API_KEY not set")
+        scraper = _get_scraper()
         results = []
         for url in urls:
             try:
-                scraped = await fc.async_scrape_url(url)
+                scraped = await scraper.async_scrape_url(url)
                 results.append({"url": url, "title": scraped.title, "content": scraped.content[:4000]})
             except Exception as exc:
                 results.append({"url": url, "error": str(exc)})
