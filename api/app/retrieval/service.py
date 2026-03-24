@@ -321,8 +321,6 @@ class HybridRetriever:
         if source_filter:
             base_stmt = base_stmt.where(KBDocument.source_type.in_(sorted(source_filter)))
 
-        Runs one KNN query per vector (multi-query fusion) then unions results.
-        """
         rows: list[tuple[KBChunk, KBDocument]] = []
 
         if dialect == "mysql":
