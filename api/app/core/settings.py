@@ -79,6 +79,12 @@ class Settings(BaseSettings):
     firecrawl_api_key: str | None = None
     zoominfo_api_key: str | None = None
 
+    # MiniMax LLM (optional alternative provider)
+    minimax_api_key: str | None = None
+    minimax_base_url: str | None = None
+    minimax_model: str = "MiniMax-Text-01"
+    minimax_group_id: str | None = None
+
     tidb_ssl_ca: str | None = None
     database_backend: str = "auto"
 
