@@ -13,14 +13,6 @@ import SECompetitorFields from './SectionFields/SECompetitorFields';
 // SE sections auto-enable TiDB Expert mode
 const SE_SECTIONS = new Set(['se_poc_plan', 'se_arch_fit', 'se_competitor']);
 
-// Condensed TiDB context users can insert into visible prompt text
-const TIDB_CONTEXT_SNIPPET = `[TiDB Expert Context]
-- MySQL 8.0 wire-compatible: minimal migration from MySQL/Aurora/Vitess, no app rewrite
-- TiKV: distributed key-value store with Raft consensus, horizontal write scaling
-- TiFlash: columnar HTAP — real-time analytics on live OLTP data, no ETL
-- PD: TSO + scheduling coordinator; stateless TiDB SQL layer for unlimited read/write nodes
-- vs CockroachDB: MySQL-native (not PG), columnar HTAP; vs PlanetScale: no sharding middleware; vs Aurora: true horizontal write scaling`;
-
 const SECTIONS = [
   { key: 'pre_call', label: 'Pre-Call Intel' },
   { key: 'post_call', label: 'Post-Call Analysis' },
@@ -242,29 +234,49 @@ export default function ChatWorkspace() {
           <FieldComponent values={fieldValues} onChange={updateField} />
 
           {/* TiDB Expert callout — shown for SE sections */}
-          {tidbExpert && (
+          {SE_SECTIONS.has(section) && (
             <div style={{
-              borderRadius: '6px', border: '1px solid #7c3aed30',
-              background: '#7c3aed08', padding: '0.6rem 0.75rem',
+              borderRadius: '6px', border: `1px solid ${tidbExpert ? '#7c3aed30' : 'var(--border)'}`,
+              background: tidbExpert ? '#7c3aed08' : 'var(--bg-2)', padding: '0.6rem 0.75rem',
               display: 'grid', gap: '0.4rem',
             }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-                <span style={{ fontSize: '0.6rem', color: '#7c3aed' }}>◎</span>
-                <span style={{ fontSize: '0.72rem', fontWeight: 600, color: '#7c3aed' }}>TiDB Expert Active</span>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                  <span style={{ fontSize: '0.6rem', color: tidbExpert ? '#7c3aed' : 'var(--text-3)' }}>◎</span>
+                  <span style={{ fontSize: '0.72rem', fontWeight: 600, color: tidbExpert ? '#7c3aed' : 'var(--text-2)' }}>TiDB Expert</span>
+                </div>
+                <label style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', cursor: 'pointer', fontSize: '0.7rem', color: 'var(--text-2)' }}>
+                  <input type="checkbox" checked={tidbExpert} onChange={e => setTidbExpert(e.target.checked)} style={{ cursor: 'pointer' }} />
+                  {tidbExpert ? 'On' : 'Off'}
+                </label>
               </div>
-              <p style={{ margin: 0, fontSize: '0.7rem', color: 'var(--text-2)', lineHeight: 1.4 }}>
-                Full TiDB architecture context is automatically injected into every response — components, migration paths, competitive differentiators.
-              </p>
-              <button
-                onClick={() => { setChatDraft(d => d ? d + '\n\n' + TIDB_CONTEXT_SNIPPET : TIDB_CONTEXT_SNIPPET); setPopulateSignal(s => s + 1); }}
-                style={{
-                  fontSize: '0.7rem', padding: '0.25rem 0.6rem', borderRadius: '4px',
-                  border: '1px solid #7c3aed50', background: '#7c3aed15',
-                  color: '#7c3aed', cursor: 'pointer', fontWeight: 500, textAlign: 'left',
-                }}
-              >
-                + Insert TiDB context into prompt
-              </button>
+              {tidbExpert && (
+                <>
+                  <p style={{ margin: 0, fontSize: '0.7rem', color: 'var(--text-2)', lineHeight: 1.4 }}>
+                    Full TiDB architecture context is automatically injected into every response — components, migration paths, competitive differentiators.
+                  </p>
+                  <button
+                    onClick={async () => {
+                      try {
+                        const res = await fetch('/api/prompts/tidb_expert');
+                        const data = await res.json();
+                        const content = data?.current_content || data?.content || '';
+                        if (content) {
+                          setChatDraft(d => d ? d + '\n\n' + content : content);
+                          setPopulateSignal(s => s + 1);
+                        }
+                      } catch { /* ignore */ }
+                    }}
+                    style={{
+                      fontSize: '0.7rem', padding: '0.25rem 0.6rem', borderRadius: '4px',
+                      border: '1px solid #7c3aed50', background: '#7c3aed15',
+                      color: '#7c3aed', cursor: 'pointer', fontWeight: 500, textAlign: 'left',
+                    }}
+                  >
+                    + Insert TiDB context into prompt
+                  </button>
+                </>
+              )}
             </div>
           )}
 
