@@ -1,6 +1,6 @@
 {$DOMAIN} {
 	# UI — all routes go to Next.js
-	reverse_proxy localhost:3000
+	reverse_proxy ui:3000
 
 	# Health check
 	respond /health 200
@@ -8,5 +8,5 @@
 
 {$DOMAIN}:8443 {
 	# API — separate port for direct API access if needed
-	reverse_proxy localhost:8000
+	reverse_proxy api:8000
 }
