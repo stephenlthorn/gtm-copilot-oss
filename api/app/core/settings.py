@@ -15,6 +15,9 @@ class Settings(BaseSettings):
     app_host: str = "0.0.0.0"
     app_port: int = 8000
     auto_create_schema: bool = True
+    log_level: str = "INFO"
+    environment: str = "dev"
+    sentry_dsn: str | None = None
     cors_allow_origins: str = "http://localhost:3000,http://127.0.0.1:3000"
 
     database_url: str = "postgresql+psycopg://postgres:postgres@localhost:5432/gtm_copilot"
