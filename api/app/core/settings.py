@@ -80,6 +80,10 @@ class Settings(BaseSettings):
     database_backend: str = "auto"
 
     @property
+    def effective_database_url(self) -> str:
+        return self.database_url
+
+    @property
     def drive_folder_ids(self) -> List[str]:
         return [fid.strip() for fid in self.google_drive_folder_ids.split(",") if fid.strip()]
 
