@@ -453,19 +453,24 @@ class ChatOrchestrator:
 
                 if account_name and self.db is not None:
                     memory = self.db.get(AccountDealMemory, canonicalize_account(account_name))
-                    if memory and (memory.meddpicc or memory.summary):
+                    if memory:
                         memory_context = (
                             f"\n\n=== ACCOUNT HISTORY: {account_name} ===\n"
                             f"Deal stage: {memory.deal_stage or 'Unknown'} | "
                             f"Status: {memory.status} | "
                             f"Calls to date: {memory.call_count}\n"
                         )
+                        if memory.last_call_date:
+                            memory_context += f"Last call: {memory.last_call_date}\n"
                         if memory.summary:
-                            memory_context += f"Summary: {memory.summary}\n"
+                            memory_context += f"Account summary: {memory.summary}\n"
                         if memory.meddpicc:
                             scored = {k: v for k, v in memory.meddpicc.items() if v.get("score", 0) > 0}
+                            unscored = [k for k, v in memory.meddpicc.items() if v.get("score", 0) == 0]
                             if scored:
-                                memory_context += f"MEDDPICC (current state):\n{_json.dumps(scored, indent=2)}\n"
+                                memory_context += f"MEDDPICC — qualified elements:\n{_json.dumps(scored, indent=2)}\n"
+                            if unscored:
+                                memory_context += f"MEDDPICC — not yet qualified: {', '.join(unscored)}\n"
                         if memory.key_contacts:
                             memory_context += f"Key contacts: {_json.dumps(memory.key_contacts)}\n"
                         if memory.tech_stack:
@@ -473,6 +478,10 @@ class ChatOrchestrator:
                             likely = memory.tech_stack.get("likely", [])
                             if confirmed or likely:
                                 memory_context += f"Tech stack — confirmed: {confirmed}, likely: {likely}\n"
+                        if memory.open_items:
+                            open_pending = [i for i in memory.open_items if i.get("status", "open") != "closed"]
+                            if open_pending:
+                                memory_context += f"Open items from prior calls:\n{_json.dumps(open_pending, indent=2)}\n"
                         memory_context += "=== END ACCOUNT HISTORY ===\n"
                         persona_prompt = (persona_prompt or "") + memory_context
             except Exception as exc:
