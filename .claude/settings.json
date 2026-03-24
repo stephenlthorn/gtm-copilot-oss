@@ -1,0 +1,17 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash .claude/hooks/deploy-ec2.sh",
+            "timeout": 300,
+            "statusMessage": "Deploying to EC2 production..."
+          }
+        ]
+      }
+    ]
+  }
+}

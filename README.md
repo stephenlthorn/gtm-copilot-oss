@@ -1131,3 +1131,102 @@ PATCH  /accounts/{account}/memory             Direct rep edit
 - `pending_delta` JSON — AI-proposed update awaiting rep review
 - `pending_review` BOOL — true when a delta is waiting
 - `call_count`, `last_call_date`, `deal_stage`, `is_new_business`, `status`
+
+---
+
+## Account Intelligence Dashboard
+
+A standalone TiDB-fit-scored account intelligence view at `/account-intelligence`, accessible from the main nav.
+
+**How it works:**
+
+All accounts are auto-populated from Chorus call history — no manual entry required. Selecting an account shows call notes, known contacts, deal stage, and team. Clicking **Generate TiDB Intelligence Profile** triggers the AI to research the company (web search + RAG) and produce a full profile.
+
+**Generated profile includes:**
+- TiDB Fit Score (0–10 dial) using the rule-based scoring system (MySQL +2.0, Oracle +1.8, AI/ML +1.5, etc.)
+- Company overview with KPIs (employees, funding, ARR, founded)
+- 4 pain points mapped to TiDB solutions (HTAP, MySQL wire compat, distributed arch)
+- 5 buy signals with urgency indicators (high/medium/low)
+- Tech stack breakdown with TiDB-compatible databases highlighted
+- Target workloads (P1/P2 priority)
+- Key contacts with engagement angles
+- Personalized opening pitch referencing actual stack and scale
+- Source links from research
+
+**How existing data improves profiles:**
+- Call meeting summaries are injected into the AI prompt as internal context
+- Known contacts from Chorus participants seed the contact prompt
+- Deal stage informs the urgency framing
+- ZoomInfo (if connected) enriches firmographics in real time
+
+**Files:**
+```
+ui/app/(app)/account-intelligence/page.js     Server component — fetches calls, groups by account
+ui/components/AccountIntelligenceClient.js    Interactive dashboard (search, cards, profile renderer)
+ui/app/api/account-intelligence/generate/route.js  AI profile generation endpoint
+```
+
+---
+
+## ZoomInfo Per-Rep Authentication
+
+ZoomInfo uses each rep's individual web account credentials (email + password) rather than a shared org API key. The backend exchanges credentials for a JWT via ZoomInfo's `/authenticate` endpoint and stores the token.
+
+**Flow:**
+1. Rep goes to Settings → Connected External Accounts → ZoomInfo → Connect
+2. Enters their ZoomInfo email and password
+3. Backend calls `https://api.zoominfo.com/authenticate`, gets a JWT
+4. JWT stored as the rep's `access_token` in `connected_accounts`
+5. AI uses the rep's token for all ZoomInfo lookups during their session
+
+**ZoomInfo tools available to AI:**
+- `zi_company_search(name)` — firmographics (industry, employees, revenue, HQ)
+- `zi_person_search(name, company)` — contact enrichment (email, phone, title, LinkedIn)
+- `zi_technographics(company_name)` — tech stack from ZoomInfo's data
+
+Each tool call = 1 ZoomInfo credit, on-demand only (no background jobs or bulk pulls).
+
+---
+
+## Production Deployment (AWS EC2)
+
+The primary production environment runs on a single AWS EC2 `t4g.small` (ARM64) with an Elastic IP and free HTTPS via sslip.io.
+
+**Stack:** Caddy (reverse proxy + TLS) + Next.js UI + FastAPI + Celery Worker + Celery Beat + Redis
+
+### Auto-Deploy
+
+Every push to `main` triggers a GitHub Actions workflow that SSHes to EC2 and rebuilds the UI and API containers. Requires three GitHub repository secrets:
+
+| Secret | Value |
+|--------|-------|
+| `EC2_HOST` | `100.49.55.13` |
+| `EC2_USER` | `ec2-user` |
+| `EC2_SSH_KEY` | Contents of your EC2 `.pem` key file |
+
+Workflow file: `.github/workflows/deploy.yml`
+
+### Manual Deploy
+
+```bash
+ssh ec2-user@100.49.55.13
+cd ~/app
+git pull
+docker compose -f infra/aws/docker-compose.prod.yml up -d --build ui api
+```
+
+### Initial EC2 Setup
+
+See `DEPLOY.md` for full EC2 bootstrap instructions (Docker install, Caddy config, `.env` setup, Alembic migrations).
+
+### Key Config (`infra/aws/.env`)
+
+```
+DOMAIN=100.49.55.13.sslip.io
+DATABASE_URL=postgresql+psycopg://...       # TiDB Cloud connection string
+ALLOWED_EMAIL_DOMAIN=pingcap.com
+GOOGLE_CLIENT_ID=...
+GOOGLE_CLIENT_SECRET=...                    # Use the Google Drive OAuth client secret
+NEXT_PUBLIC_APP_URL=https://100.49.55.13.sslip.io
+SECURITY_TRUSTED_HOST_ALLOWLIST=100.49.55.13.sslip.io,localhost,api
+```

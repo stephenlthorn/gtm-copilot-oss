@@ -17,6 +17,8 @@ tests/test.db
 *.sqlite3
 *.sqlite
 .claude/
+!.claude/settings.json
+!.claude/hooks/
 api/service-account.json
 data/fake_drive/github/
 data/fake_calls/*
