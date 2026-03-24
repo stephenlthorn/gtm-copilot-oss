@@ -145,10 +145,14 @@ export default function ChatWorkspace() {
 
     let tpl = getTemplate();
 
-    // Resolve {call_context} from selected calls
+    // Resolve {call_context} from selected calls — include meeting_summary when available
     const callContext = selectedCalls.length > 0
-      ? selectedCalls.map(c => `${c.account || 'Unknown'} (${c.date ? new Date(c.date).toLocaleDateString() : '—'}${c.stage ? ', ' + c.stage : ''}${c.rep_email ? ', rep: ' + c.rep_email : ''})`).join('\n')
-      : '[no call selected]';
+      ? selectedCalls.map(c => {
+          const header = `${c.account || 'Unknown'} | ${c.date ? new Date(c.date).toLocaleDateString() : '—'}${c.stage ? ' | Stage: ' + c.stage : ''}${c.rep_email ? ' | Rep: ' + c.rep_email : ''}${c.se_email ? ' | SE: ' + c.se_email : ''}`;
+          const summary = c.meeting_summary ? `\nCall summary: ${c.meeting_summary}` : '';
+          return header + summary;
+        }).join('\n\n')
+      : '[no call selected — select a call above or add notes below]';
 
     // Substitute all fields
     const substitutions = {
@@ -157,7 +161,8 @@ export default function ChatWorkspace() {
       prospect_name: fieldValues.prospect_name || '[prospect_name]',
       prospect_linkedin: fieldValues.prospect_linkedin || '[prospect_linkedin]',
       call_context: callContext,
-      email_to: fieldValues.email_to || '[email_to]',
+      call_notes: fieldValues.call_notes || '',
+      email_to: fieldValues.email_to || '[fill in recipient]',
       email_cc: fieldValues.email_cc || '',
       email_tone: fieldValues.email_tone || 'crisp',
       regions: fieldValues.regions || '[regions]',
@@ -405,25 +410,21 @@ Competition (what else are they evaluating?):
   3.
 • Recommended next action to advance:`,
 
-  follow_up: `Draft a follow-up email for my call with {account}.
+  follow_up: `FOLLOW-UP EMAIL REQUEST
 
+Account: {account}
 To: {email_to}
 CC: {email_cc}
 Tone: {email_tone}
 
-Call context:
+--- CALL RECORD ---
 {call_context}
 
-The email should include:
-1. A brief thank-you and summary of what was discussed
-2. Agreed next steps with clear owners and dates
-3. Any resources or materials promised during the call
-4. A clear call-to-action for scheduling the next meeting
+--- ADDITIONAL NOTES ---
+{call_notes}
 
-Keep it concise and professional. Match the {email_tone} tone:
-• crisp = brief and direct
-• executive = polished and high-level
-• technical = detailed and specific`,
+--- TASK ---
+Write a specific, deal-advancing follow-up email using the call record, additional notes, and any retrieved call evidence below. Do not write a generic email — every sentence should be specific to this account and this call.`,
 
   tal: `Build a target account list based on the following criteria:
 

@@ -45,6 +45,7 @@ def list_calls(
             "stage": c.stage,
             "rep_email": c.rep_email,
             "se_email": c.se_email,
+            "meeting_summary": c.meeting_summary,
         }
         for c in calls
     ]
