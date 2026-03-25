@@ -33,7 +33,6 @@ flowchart LR
     end
 
     subgraph optional["Optional Connectors"]
-        FC["🔥 Firecrawl\nDirect website scrape"]
         ZI["🔎 ZoomInfo\nContact enrichment"]
     end
 
@@ -69,7 +68,7 @@ flowchart LR
     GD & FS & CT & SF --> kb
     LI & CB & NW & JP & TS --> AB & FS2
     ED & HN --> AB & FS2
-    FC & ZI --> AB & FS2
+    ZI --> AB & FS2
 
     kb --> AB & DQ & FS2 & DR & FD & TAL
     kb --> PP & AF & CC
@@ -94,13 +93,13 @@ flowchart TB
 
     Q --> MODE{Chat mode?}
 
-    MODE -->|"oracle (open Q&A)"| ORACLE_PATH["Skip retrieval\nUse web_search_preview + KB"]
+    MODE -->|"oracle (open Q&A)"| ORACLE_PATH["RAG retrieval (if enabled)\n+ web_search_preview + KB"]
     MODE -->|"call_assistant / rep / se"| RAG_PATH["Full RAG pipeline"]
 
     subgraph rag["RAG Pipeline"]
         RAG_PATH --> REWRITE["Query Rewriter\nDedup terms · append mode keywords\ne.g. + 'transcript risks next steps'"]
 
-        REWRITE --> MULTI["Multi-Query HyDE\nGenerate 3–5 hypothetical\ndocument excerpts (GPT-4.1-mini)\nthen embed each"]
+        REWRITE --> MULTI["Multi-Query HyDE\nGenerate 3–5 hypothetical\ndocument excerpts (gpt-5.4-mini)\nthen embed each"]
 
         MULTI --> HYBRID["Hybrid Retrieval (TiDB)\n━━━━━━━━━━━━━━━━━━━━━━\nVector: VEC_COSINE_DISTANCE()\ntop 20 per query\n+\nFull-text: MATCH AGAINST()\nMerged via Reciprocal Rank Fusion"]
 
@@ -116,7 +115,7 @@ flowchart TB
     ORACLE_PATH --> COMPOSE
     FB --> COMPOSE["Prompt Composition\n━━━━━━━━━━━━━━━━━━━━━\nSystem persona (Rep / SE / Oracle)\n+ Source profile instructions\n+ Retrieved evidence chunks\n+ Past user corrections\n+ User question"]
 
-    COMPOSE --> LLM["LLM Synthesis\nOpenAI Responses API\ngpt-4.1 / o3 / gpt-5.x\n± reasoning effort (low / medium / high)\n± web_search_preview tool"]
+    COMPOSE --> LLM["LLM Synthesis\nOpenAI Responses API\ngpt-5.4 / o3-pro / o3 / o4-mini / gpt-5.4-mini\n± reasoning effort (low / medium / high)\n± web_search_preview tool"]
 
     LLM --> ANS(["Structured answer\n+ Citations (chunk ID · title · quote)\n+ Follow-up questions\n+ Confidence signals"])
 
@@ -175,7 +174,7 @@ graph TB
         MCP_CRM["Salesforce"]
         MCP_INTEL["ZoomInfo / LinkedIn / Crunchbase"]
         MCP_COMM["Slack / Gmail / Calendar"]
-        MCP_CONTENT["Drive / Feishu / GitHub / Firecrawl"]
+        MCP_CONTENT["Drive / Feishu / GitHub"]
     end
 
     subgraph ingest["Ingestion Pipelines"]
@@ -196,7 +195,6 @@ graph TB
         FEISHU_API["Feishu (Lark) API"]
         CALL_API["Call Transcript API"]
         OPENAI["OpenAI API<br/>(Chat + Embeddings)"]
-        FIRECRAWL["Firecrawl API"]
         SMTP_SVC["SMTP Server"]
         SLACK_API["Slack API"]
         SALESFORCE["Salesforce API"]
@@ -243,7 +241,7 @@ graph TB
     WORKER --> DRIVE_ING & TRANSCRIPT_ING & SF_SYNC
 ```
 
-### RAG Query Flow — Oracle Mode (Direct LLM)
+### RAG Query Flow — Oracle Mode (General Chat)
 
 ```mermaid
 sequenceDiagram
@@ -251,31 +249,37 @@ sequenceDiagram
     participant R as POST /chat
     participant O as ChatOrchestrator
     participant G as Guardrail Check
+    participant HR as HybridRetriever
     participant L as LLMService
     participant AI as OpenAI API
     participant A as AuditService
     participant DB as TiDB Cloud
 
-    C->>R: {mode: "oracle", message: "How to position TiDB vs SingleStore?"}
-    R->>O: run(mode="oracle", message, user, top_k, filters, context)
+    C->>R: {mode: "oracle", message: "Can TiDB X merge schema branches?", rag_enabled: true}
+    R->>O: run(mode="oracle", message, user, top_k, filters, rag_enabled=true)
     O->>G: _guardrail_external_messaging(message)
     G-->>O: None (no external recipients detected)
 
-    Note over O: Oracle mode: skip DB retrieval
+    Note over O: rag_enabled=true and message is not conversational<br/>→ perform KB retrieval
 
-    O->>L: answer_oracle(message, hits=[], allow_ungrounded=True, tools=[web_search_preview])
-    L->>AI: responses.create(model="gpt-4.1", input=[SYSTEM_ORACLE, user_msg], tools)
+    O->>HR: search(rewritten_query, top_k=8, filters={source_type: [drive, feishu, chorus, memory]})
+    HR->>DB: Vector + Keyword SQL queries
+    DB-->>HR: candidate chunks
+    HR-->>O: top_k RetrievedChunks
 
-    Note over AI: SYSTEM_ORACLE: "You are an internal<br/>GTM oracle. Use web_search<br/>when needed. Give direct recommendations."
+    O->>L: answer_oracle(message, hits, allow_ungrounded=false, tools=[web_search_preview])
+    L->>AI: responses.create(model="gpt-5.4", input=[SYSTEM_ORACLE, evidence+question], tools)
+
+    Note over AI: SYSTEM_ORACLE adapts response style to question type.<br/>Technical questions → direct answer.<br/>Always searches docs.pingcap.com for TiDB questions.
 
     AI-->>L: {answer, follow_up_questions}
-    L-->>O: {answer, follow_up_questions}
-    O-->>R: ({answer, citations: [], follow_up_questions}, {})
+    L-->>O: {answer, citations, follow_up_questions}
+    O-->>R: ({answer, citations, follow_up_questions}, retrieval_payload)
 
-    R->>A: write_audit_log(actor, action="chat", input, retrieval={}, output, status=OK)
+    R->>A: write_audit_log(actor, action="chat", input, retrieval, output, status=OK)
     A->>DB: INSERT INTO audit_logs
 
-    R-->>C: {answer, citations: [], follow_up_questions}
+    R-->>C: {answer, citations, follow_up_questions}
 ```
 
 ### RAG Query Flow — Call Assistant Mode (Grounded RAG)
@@ -562,7 +566,7 @@ erDiagram
         varchar feishu_folder_token
         bool chorus_enabled
         int retrieval_top_k "default 8"
-        varchar llm_model "default gpt-4.1"
+        varchar llm_model "default gpt-5.4"
         bool web_search_enabled
         bool code_interpreter_enabled
         timestamptz updated_at
@@ -672,7 +676,7 @@ erDiagram
     source_registry {
         uuid id PK
         int org_id FK
-        varchar provider "salesforce | firecrawl | zoominfo | etc"
+        varchar provider "salesforce | zoominfo | etc"
         jsonb config "encrypted credentials"
         bool enabled
         timestamptz created_at
@@ -748,7 +752,7 @@ flowchart TB
 | Embeddings | OpenAI `text-embedding-3-small` (1536 dimensions) · SHA-256 hash fallback |
 | Reverse Proxy | Caddy (automatic HTTPS via sslip.io) |
 | Containerization | Docker Compose |
-| Web Scraping | Firecrawl (optional connector) · built-in web_search_preview |
+| Web Search | Built-in `web_search_preview` tool (no key required) |
 
 ---
 
@@ -825,7 +829,7 @@ The server also reads Codex CLI auth from `~/.codex/auth.json` (mounted into the
 | Variable | Description |
 |---|---|
 | `OPENAI_API_KEY` | Optional OpenAI API key fallback (not required if using Codex OAuth) |
-| `OPENAI_MODEL` | Default model (e.g. `gpt-4.1`; overridden per-request from the UI model picker) |
+| `OPENAI_MODEL` | Default model (e.g. `gpt-5.4`; overridden per-request from the UI model picker) |
 
 ### Security
 
@@ -910,7 +914,7 @@ All users can access all dashboards. Role determines default landing page.
 ### Admin
 - User management: invite users, assign roles
 - Source registry: add/remove/configure global research sources
-- API key management: Firecrawl, ZoomInfo, BuiltWith, etc.
+- API key management: ZoomInfo, BuiltWith, and other optional connectors
 - Sync health: Drive, Feishu, Chorus, Salesforce status
 - AI coaching panel: view all refinements across all users, promote to team, edit, disable, track effectiveness
 - MCP server configuration: enable/disable per server, configure API keys
@@ -934,7 +938,6 @@ MCP servers give the LLM direct tool access to live data during chat. Each enabl
 | Google Calendar MCP (read-only) | Check schedules and meetings | Sales |
 | ZoomInfo MCP | Live prospect and company lookup | Sales, Marketing |
 | LinkedIn Sales Nav MCP | Prospect research, org mapping | Sales |
-| Firecrawl MCP | On-demand web scraping in chat | All |
 | GitHub MCP | TiDB repo search for technical depth | SE |
 | Crunchbase MCP | Funding and growth signals | Sales, Marketing |
 
@@ -948,7 +951,7 @@ MCP servers give the LLM direct tool access to live data during chat. Each enabl
 class ChatOrchestrator:
     def run(*, mode: str, user: str, message: str,
             top_k: int, filters: dict, context: dict) -> tuple[dict, dict]
-    # mode="oracle": LLM-direct (no DB), allow_ungrounded=True
+    # mode="oracle": RAG retrieval (when rag_enabled=True) + web_search_preview, adapts response style to question type
     # mode="call_assistant": QueryRewriter -> HybridRetriever -> LLM with evidence
     # mode="research": GTMModuleService dispatch (account briefs, POC plans, etc.)
     # Returns (response_dict, retrieval_payload)
@@ -1096,7 +1099,7 @@ npm run dev
         refinement_service.py        # User feedback + effectiveness tracking
       /connectors/
         salesforce_sync.py    # CRM account/deal sync
-        firecrawl.py          # On-demand web scraping
+        zoominfo.py           # ZoomInfo prospect enrichment
       /auth/
         google_oauth.py       # Google OAuth + PKCE
       /mcp/                   # 15 MCP server integrations
