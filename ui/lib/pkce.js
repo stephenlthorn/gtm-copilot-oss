@@ -4,15 +4,15 @@ const GOOGLE_AUTH_URL = 'https://accounts.google.com/o/oauth2/v2/auth';
 const GOOGLE_TOKEN_URL = 'https://oauth2.googleapis.com/token';
 
 function getClientId() {
-  return process.env.GOOGLE_CLIENT_ID || process.env.GOOGLE_DRIVE_CLIENT_ID || '';
+  return process.env['GOOGLE_CLIENT_ID'] || process.env['GOOGLE_DRIVE_CLIENT_ID'] || '';
 }
 
 function getClientSecret() {
-  return process.env.GOOGLE_CLIENT_SECRET || process.env.GOOGLE_DRIVE_CLIENT_SECRET || '';
+  return process.env['GOOGLE_CLIENT_SECRET'] || process.env['GOOGLE_DRIVE_CLIENT_SECRET'] || '';
 }
 
 function getRedirectUri() {
-  const base = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
+  const base = process.env['NEXT_PUBLIC_APP_URL'] || process.env['NEXTAUTH_URL'] || 'http://localhost:3000';
   return `${base}/api/auth/exchange`;
 }
 
