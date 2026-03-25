@@ -201,7 +201,7 @@ export default function ChatWorkspace() {
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0.45rem 1rem', borderBottom: '1px solid var(--border)', background: 'var(--bg-2)', flexShrink: 0 }}>
         <span style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--text)' }}>GTM Copilot</span>
         <div style={{ display: 'flex', gap: '0.35rem', alignItems: 'center' }}>
-          <Link href="/account-intelligence" style={{ fontSize: '0.78rem', color: 'var(--text-2)', padding: '0.3rem 0.6rem', borderRadius: '4px', textDecoration: 'none', border: '1px solid var(--border)' }}>◎ Account Intel</Link>
+          <Link href="/account-intelligence" style={{ fontSize: '0.78rem', color: '#d2a8ff', padding: '0.3rem 0.6rem', borderRadius: '4px', textDecoration: 'none', border: '1px solid rgba(188,140,255,0.4)', background: 'rgba(188,140,255,0.08)', boxShadow: '0 0 8px rgba(188,140,255,0.15)', fontWeight: 600 }}>◎ Account Intel</Link>
           <Link href="/settings" style={{ fontSize: '0.78rem', color: 'var(--text-2)', padding: '0.3rem 0.6rem', borderRadius: '4px', textDecoration: 'none', border: '1px solid var(--border)' }}>⚙ Settings</Link>
           <button onClick={handleLogout} disabled={loggingOut} style={{ fontSize: '0.78rem', color: 'var(--text-2)', padding: '0.3rem 0.6rem', borderRadius: '4px', background: 'transparent', border: '1px solid var(--border)', cursor: 'pointer' }}>
             {loggingOut ? 'Signing out…' : '→ Sign out'}
