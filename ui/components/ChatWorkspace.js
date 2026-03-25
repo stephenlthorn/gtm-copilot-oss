@@ -14,6 +14,7 @@ import SECompetitorFields from './SectionFields/SECompetitorFields';
 const SE_SECTIONS = new Set(['se_poc_plan', 'se_arch_fit', 'se_competitor']);
 
 const SECTIONS = [
+  { key: 'oracle', label: 'Oracle Chat (General)' },
   { key: 'pre_call', label: 'Pre-Call Intel' },
   { key: 'post_call', label: 'Post-Call Analysis' },
   { key: 'follow_up', label: 'Follow-Up Email' },
@@ -34,7 +35,7 @@ const FIELD_COMPONENTS = {
 };
 
 export default function ChatWorkspace() {
-  const [section, setSection] = useState('pre_call');
+  const [section, setSection] = useState('oracle');
   const [fieldValues, setFieldValues] = useState({});
   const [templates, setTemplates] = useState({}); // { section_key: { default: '...', users: [{user_email, content, template_name}] } }
   const [allUserTemplates, setAllUserTemplates] = useState([]); // [{user_email, section_key, template_name, content}]
@@ -193,7 +194,7 @@ export default function ChatWorkspace() {
       .map(t => ({ value: t.user_email, label: `${t.user_email.split('@')[0]} — ${t.template_name}` })),
   ];
 
-  const canPopulate = Boolean(fieldValues.account?.trim()) || Boolean(fieldValues.selectedCalls?.length);
+  const canPopulate = section !== 'oracle' && (Boolean(fieldValues.account?.trim()) || Boolean(fieldValues.selectedCalls?.length));
 
   const [loggingOut, setLoggingOut] = useState(false);
   const handleLogout = async () => {
@@ -239,7 +240,7 @@ export default function ChatWorkspace() {
           )}
 
           {/* Dynamic section fields */}
-          <FieldComponent values={fieldValues} onChange={updateField} />
+          {FieldComponent && <FieldComponent values={fieldValues} onChange={updateField} />}
 
           {/* TiDB Expert callout — shown for SE sections */}
           {SE_SECTIONS.has(section) && (
