@@ -36,7 +36,8 @@ export default function CallsPanel() {
       if (!res.ok) throw new Error();
       const updated = await res.json();
       setConfig(updated);
-    } catch {
+    } catch (err) {
+      console.error('Failed to save config:', err);
       setConfig(config);
       setMessage('✗ Failed to update');
     }

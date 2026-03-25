@@ -5,7 +5,8 @@ const API_BASE = process.env.API_BASE_URL || 'http://localhost:8000';
 
 export async function POST(request, { params }) {
   const session = await getSession();
-  const res = await fetch(`${API_BASE}/accounts/${params.account}/memory/dismiss`, {
+  const { account } = await params;
+  const res = await fetch(`${API_BASE}/accounts/${account}/memory/dismiss`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',

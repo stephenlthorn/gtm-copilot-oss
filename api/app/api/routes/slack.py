@@ -220,8 +220,7 @@ def _format_reply(mode: str, data: dict) -> str:
 
 def _generate_account_intel(company: str, user_email: str) -> str:
     """Build an account intelligence brief, pulling call history from the DB."""
-    db: Session = SessionLocal()
-    try:
+    with SessionLocal() as db:
         calls = db.execute(
             select(ChorusCall)
             .where(ChorusCall.account.ilike(f"%{company}%"))
@@ -235,8 +234,6 @@ def _generate_account_intel(company: str, user_email: str) -> str:
             if c.meeting_summary
         ]
         call_count = len(calls)
-    finally:
-        db.close()
 
     if call_summaries:
         call_block = (
@@ -362,42 +359,40 @@ async def _handle_command_async(
             actual_message = f"Competitive coaching for {message} — primary competitor: {competitor}. Cover: TiDB positioning vs {competitor}, top objections with responses, proof points, discovery questions."
             actual_mode = "oracle"
 
-        db: Session = SessionLocal()
-        try:
-            orchestrator = ChatOrchestrator(db)
-            data, retrieval = orchestrator.run(
-                mode=actual_mode,
-                user=user_email,
-                message=actual_message,
-                top_k=8,
-                filters={},
-                context={},
-            )
-            write_audit_log(
-                db,
-                actor=user_email,
-                action="chat_slack_command",
-                input_payload=command_payload,
-                retrieval_payload=retrieval,
-                output_payload=data,
-                status=AuditStatus.OK,
-            )
-            await _send_delayed_response(response_url, _format_reply(actual_mode, data))
-        except Exception as exc:
-            db.rollback()
-            write_audit_log(
-                db,
-                actor=user_email,
-                action="chat_slack_command",
-                input_payload=command_payload,
-                retrieval_payload={},
-                output_payload={},
-                status=AuditStatus.ERROR,
-                error_message=str(exc),
-            )
-            await _send_delayed_response(response_url, f"Command failed: {exc}", in_channel=False)
-        finally:
-            db.close()
+        with SessionLocal() as db:
+            try:
+                orchestrator = ChatOrchestrator(db)
+                data, retrieval = orchestrator.run(
+                    mode=actual_mode,
+                    user=user_email,
+                    message=actual_message,
+                    top_k=8,
+                    filters={},
+                    context={},
+                )
+                write_audit_log(
+                    db,
+                    actor=user_email,
+                    action="chat_slack_command",
+                    input_payload=command_payload,
+                    retrieval_payload=retrieval,
+                    output_payload=data,
+                    status=AuditStatus.OK,
+                )
+                await _send_delayed_response(response_url, _format_reply(actual_mode, data))
+            except Exception as exc:
+                db.rollback()
+                write_audit_log(
+                    db,
+                    actor=user_email,
+                    action="chat_slack_command",
+                    input_payload=command_payload,
+                    retrieval_payload={},
+                    output_payload={},
+                    status=AuditStatus.ERROR,
+                    error_message=str(exc),
+                )
+                await _send_delayed_response(response_url, f"Command failed: {exc}", in_channel=False)
     except Exception as exc:
         try:
             await _send_delayed_response(response_url, f"Command failed: {exc}", in_channel=False)
@@ -547,8 +542,6 @@ async def _handle_slack_event(event_input: dict) -> None:
         message = f"Competitive coaching for {message} — primary competitor: {competitor}. Cover: TiDB positioning vs {competitor}, top objections with responses, proof points, discovery questions."
         mode = "oracle"
 
-    db: Session = SessionLocal()
-    orchestrator = ChatOrchestrator(db)
     input_payload = {
         "mode": mode,
         "source": "slack_event",
@@ -558,43 +551,43 @@ async def _handle_slack_event(event_input: dict) -> None:
         "message": message,
     }
 
-    try:
-        data, retrieval = orchestrator.run(
-            mode=mode,
-            user=user_email,
-            message=message,
-            top_k=8,
-            filters={},
-            context={},
-        )
-        await slack.post_message(
-            channel=channel,
-            text=_format_reply(mode, data),
-            thread_ts=thread_ts,
-        )
-        write_audit_log(
-            db,
-            actor=user_email,
-            action="chat_slack_event",
-            input_payload=input_payload,
-            retrieval_payload=retrieval,
-            output_payload=data,
-            status=AuditStatus.OK,
-        )
-    except Exception as exc:
-        db.rollback()
-        write_audit_log(
-            db,
-            actor=user_email,
-            action="chat_slack_event",
-            input_payload=input_payload,
-            retrieval_payload={},
-            output_payload={},
-            status=AuditStatus.ERROR,
-            error_message=str(exc),
-        )
-    finally:
-        db.close()
+    with SessionLocal() as db:
+        orchestrator = ChatOrchestrator(db)
+        try:
+            data, retrieval = orchestrator.run(
+                mode=mode,
+                user=user_email,
+                message=message,
+                top_k=8,
+                filters={},
+                context={},
+            )
+            await slack.post_message(
+                channel=channel,
+                text=_format_reply(mode, data),
+                thread_ts=thread_ts,
+            )
+            write_audit_log(
+                db,
+                actor=user_email,
+                action="chat_slack_event",
+                input_payload=input_payload,
+                retrieval_payload=retrieval,
+                output_payload=data,
+                status=AuditStatus.OK,
+            )
+        except Exception as exc:
+            db.rollback()
+            write_audit_log(
+                db,
+                actor=user_email,
+                action="chat_slack_event",
+                input_payload=input_payload,
+                retrieval_payload={},
+                output_payload={},
+                status=AuditStatus.ERROR,
+                error_message=str(exc),
+            )
 
 
 # ── Direct message post (used by UI Share buttons) ───────────────────────────

@@ -160,8 +160,8 @@ def list_reports(
         {
             "id": r.id,
             "account_id": r.account_id,
-            "report_type": r.report_type.value if hasattr(r.report_type, "value") else str(r.report_type),
-            "status": r.status.value if hasattr(r.status, "value") else str(r.status),
+            "report_type": r.report_type.value if r.report_type is not None and hasattr(r.report_type, "value") else str(r.report_type) if r.report_type is not None else None,
+            "status": r.status.value if r.status is not None and hasattr(r.status, "value") else str(r.status) if r.status is not None else None,
             "meeting_id": r.meeting_id,
             "created_at": r.created_at.isoformat() if r.created_at else None,
         }
@@ -183,8 +183,8 @@ def get_report(
         "id": report.id,
         "account_id": report.account_id,
         "contact_id": report.contact_id,
-        "report_type": report.report_type.value if hasattr(report.report_type, "value") else str(report.report_type),
-        "status": report.status.value if hasattr(report.status, "value") else str(report.status),
+        "report_type": report.report_type.value if report.report_type is not None and hasattr(report.report_type, "value") else str(report.report_type) if report.report_type is not None else None,
+        "status": report.status.value if report.status is not None and hasattr(report.status, "value") else str(report.status) if report.status is not None else None,
         "meeting_id": report.meeting_id,
         "sections": report.sections or {},
         "raw_sources": report.raw_sources,
@@ -211,7 +211,7 @@ def refine_report(
     if not report:
         raise HTTPException(status_code=404, detail="Report not found")
 
-    output_type = report.report_type.value if hasattr(report.report_type, "value") else str(report.report_type)
+    output_type = report.report_type.value if report.report_type is not None and hasattr(report.report_type, "value") else str(report.report_type) if report.report_type is not None else ""
 
     from app.services.research.refinement_service import RefinementService
 

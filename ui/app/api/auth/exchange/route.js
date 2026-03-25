@@ -33,7 +33,7 @@ export async function GET(request) {
   try {
     tokens = await exchangeCode(code, pkce.verifier);
   } catch (err) {
-    console.error('Token exchange error:', err);
+    console.error('Token exchange error:', err.message || 'Unknown error');
     return NextResponse.redirect(new URL('/login?error=exchange_failed', APP_BASE));
   }
 

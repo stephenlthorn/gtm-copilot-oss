@@ -50,13 +50,16 @@ class ChorusConnector:
         self.api_key = api_key
         # Chorus always lives at chorus.ai; base_url override for testing only
         self.base_url = (base_url or _CHORUS_BASE).rstrip("/")
-        self._client = httpx.AsyncClient(
+        self._headers = {
+            # Chorus uses the plain token — NOT "Bearer <token>"
+            "Authorization": api_key,
+            "Accept": "application/json",
+        }
+
+    def _make_client(self) -> httpx.AsyncClient:
+        return httpx.AsyncClient(
             base_url=self.base_url,
-            headers={
-                # Chorus uses the plain token — NOT "Bearer <token>"
-                "Authorization": api_key,
-                "Accept": "application/json",
-            },
+            headers=self._headers,
             timeout=_DEFAULT_TIMEOUT,
         )
 
@@ -76,36 +79,38 @@ class ChorusConnector:
         calls: list[ChorusCallData] = []
         pages = 0
 
-        while pages < max_pages:
-            resp = await self._client.get("/v3/engagements", params=params)
-            resp.raise_for_status()
-            data = resp.json()
+        async with self._make_client() as client:
+            while pages < max_pages:
+                resp = await client.get("/v3/engagements", params=params)
+                resp.raise_for_status()
+                data = resp.json()
 
-            records = data.get("engagements") or []
-            if not records:
-                logger.info("Chorus /v3/engagements returned 0 records (page %d)", pages)
-                break
+                records = data.get("engagements") or []
+                if not records:
+                    logger.info("Chorus /v3/engagements returned 0 records (page %d)", pages)
+                    break
 
-            logger.info("Chorus page %d: %d engagements", pages, len(records))
-            calls.extend(self._parse_engagement(r) for r in records)
+                logger.info("Chorus page %d: %d engagements", pages, len(records))
+                calls.extend(self._parse_engagement(r) for r in records)
 
-            continuation_key = data.get("continuation_key")
-            if not continuation_key:
-                break
+                continuation_key = data.get("continuation_key")
+                if not continuation_key:
+                    break
 
-            params = {"continuation_key": continuation_key}
-            pages += 1
+                params = {"continuation_key": continuation_key}
+                pages += 1
 
         return calls
 
     async def get_full_call(self, call_id: str) -> ChorusCallData:
         """Fetch the full conversation including utterance-level transcript."""
-        resp = await self._client.get(
-            f"/api/v1/conversations/{call_id}",
-            headers={"Accept": "application/vnd.api+json"},
-        )
-        resp.raise_for_status()
-        data = resp.json()
+        async with self._make_client() as client:
+            resp = await client.get(
+                f"/api/v1/conversations/{call_id}",
+                headers={"Accept": "application/vnd.api+json"},
+            )
+            resp.raise_for_status()
+            data = resp.json()
         return self._parse_conversation(call_id, data)
 
     async def get_transcript(self, call_id: str) -> str:
@@ -121,7 +126,7 @@ class ChorusConnector:
         return await self.get_full_call(call_id)
 
     async def close(self) -> None:
-        await self._client.aclose()
+        pass  # clients are now closed per-request via context manager
 
     # ------------------------------------------------------------------ #
     # Parsing helpers                                                      #

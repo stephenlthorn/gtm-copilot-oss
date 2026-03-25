@@ -69,6 +69,7 @@ export default function ChatWorkspace() {
 
   // Fetch templates on mount
   useEffect(() => {
+    let cancelled = false;
     async function loadTemplates() {
       try {
         const [ownRes, allRes] = await Promise.all([
@@ -77,6 +78,8 @@ export default function ChatWorkspace() {
         ]);
         const own = ownRes.ok ? await ownRes.json() : [];
         const all = allRes.ok ? await allRes.json() : [];
+
+        if (cancelled) return;
 
         // Build templates map: section_key -> { default: content, custom: content, users: [] }
         const map = {};
@@ -90,10 +93,12 @@ export default function ChatWorkspace() {
       } catch { /* use hardcoded defaults */ }
     }
     loadTemplates();
+    return () => { cancelled = true; };
   }, []);
 
   // Fetch templates from Prompt Studio API on mount
   useEffect(() => {
+    let cancelled = false;
     async function loadApiTemplates() {
       try {
         const listRes = await fetch('/api/prompts');
@@ -107,6 +112,7 @@ export default function ChatWorkspace() {
               .catch(() => null)
           )
         );
+        if (cancelled) return;
         const map = {};
         for (const prompt of results) {
           if (!prompt) continue;
@@ -117,6 +123,7 @@ export default function ChatWorkspace() {
       } catch { /* fall through to existing sources */ }
     }
     loadApiTemplates();
+    return () => { cancelled = true; };
   }, []);
 
   const updateField = (key, value) => setFieldValues(prev => ({ ...prev, [key]: value }));

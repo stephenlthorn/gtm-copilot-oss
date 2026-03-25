@@ -9,6 +9,7 @@ export default function ManualCallModal({ onClose, onSuccess }) {
   async function handleSubmit(e) {
     e.preventDefault();
     if (!form.account || !form.notes) { setError('Account and notes are required.'); return; }
+    if (form.date && isNaN(new Date(form.date).getTime())) { setError('Please enter a valid date.'); return; }
     setSaving(true);
     setError('');
     try {

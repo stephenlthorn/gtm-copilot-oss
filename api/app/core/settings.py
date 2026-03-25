@@ -74,6 +74,7 @@ class Settings(BaseSettings):
     slack_bot_token: str | None = None
     slack_signing_secret: str | None = None
     slack_default_channel: str | None = None
+    chorus_webhook_secret: str | None = None
 
     # OSINT / research connectors
     firecrawl_api_key: str | None = None
@@ -87,6 +88,7 @@ class Settings(BaseSettings):
 
     tidb_ssl_ca: str | None = None
     database_backend: str = "auto"
+    fernet_key: str | None = None
 
     @property
     def effective_database_url(self) -> str:
@@ -94,7 +96,15 @@ class Settings(BaseSettings):
 
     @property
     def drive_folder_ids(self) -> List[str]:
+        if not self.google_drive_folder_ids:
+            return []
         return [fid.strip() for fid in self.google_drive_folder_ids.split(",") if fid.strip()]
+
+    @property
+    def drive_folder_ids_list(self) -> List[str]:
+        if not self.google_drive_folder_ids:
+            return []
+        return [x.strip() for x in self.google_drive_folder_ids.split(",") if x.strip()]
 
     @property
     def domain_allowlist(self) -> List[str]:

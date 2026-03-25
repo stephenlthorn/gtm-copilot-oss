@@ -10,8 +10,8 @@ export async function POST(request) {
   const headers = {
     'Content-Type': 'application/json',
   };
-  if (session?.access_token) {
-    headers['X-OpenAI-Token'] = session.access_token;
+  if (session?.email) {
+    headers['X-User-Email'] = session.email;
   }
   const res = await fetch(`${API_BASE}/chat`, {
     method: 'POST',

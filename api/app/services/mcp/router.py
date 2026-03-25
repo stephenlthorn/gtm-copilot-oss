@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import threading
 from typing import Any
 
 from app.core.settings import Settings, get_settings
@@ -119,11 +120,14 @@ class MCPRouter:
 
 
 _router_instance: MCPRouter | None = None
+_router_lock = threading.Lock()
 
 
 def get_mcp_router() -> MCPRouter:
     """Return the singleton MCPRouter instance."""
     global _router_instance
     if _router_instance is None:
-        _router_instance = MCPRouter()
+        with _router_lock:
+            if _router_instance is None:
+                _router_instance = MCPRouter()
     return _router_instance

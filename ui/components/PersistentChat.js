@@ -23,7 +23,7 @@ export default function PersistentChat({ draft, populateSignal, ragEnabled = tru
         setHistoryLoaded(true);
       })
       .catch(() => setHistoryLoaded(true));
-  }, []);
+  }, [model]);
 
   useEffect(() => {
     if (populateSignal > 0 && draft) setInput(draft);
@@ -55,6 +55,10 @@ export default function PersistentChat({ draft, populateSignal, ragEnabled = tru
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ mode: 'oracle', message: q, top_k: topK, rag_enabled: ragEnabled, web_search_enabled: webSearchEnabled, tidb_expert: tidbExpert, section: section || 'oracle' }),
       });
+      if (res.status === 401) {
+        window.location.href = '/login';
+        return;
+      }
       const data = await res.json();
       if (!res.ok) throw new Error(data?.error || 'Request failed');
       const assistantMsg = {

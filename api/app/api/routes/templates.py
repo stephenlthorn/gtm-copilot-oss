@@ -23,8 +23,7 @@ class TemplateUpsert(BaseModel):
 @router.get("/all")
 def get_all_templates(request: Request) -> list[dict]:
     """Return all non-default user templates (for the picker dropdown)."""
-    db: Session = SessionLocal()
-    try:
+    with SessionLocal() as db:
         rows = (
             db.execute(
                 select(UserTemplate).where(UserTemplate.is_default == False)  # noqa: E712
@@ -42,8 +41,6 @@ def get_all_templates(request: Request) -> list[dict]:
             }
             for r in rows
         ]
-    finally:
-        db.close()
 
 
 @user_router.get("")
@@ -51,8 +48,7 @@ def get_my_templates(request: Request) -> list[dict]:
     user_email = request.headers.get("X-User-Email", "")
     if not user_email:
         raise HTTPException(status_code=401, detail="Not authenticated")
-    db: Session = SessionLocal()
-    try:
+    with SessionLocal() as db:
         rows = (
             db.execute(
                 select(UserTemplate).where(
@@ -75,8 +71,6 @@ def get_my_templates(request: Request) -> list[dict]:
             }
             for r in rows
         ]
-    finally:
-        db.close()
 
 
 @user_router.put("/{section_key}")
@@ -84,8 +78,7 @@ def upsert_template(section_key: str, body: TemplateUpsert, request: Request) ->
     user_email = request.headers.get("X-User-Email", "")
     if not user_email:
         raise HTTPException(status_code=401, detail="Not authenticated")
-    db: Session = SessionLocal()
-    try:
+    with SessionLocal() as db:
         existing = db.execute(
             select(UserTemplate).where(
                 UserTemplate.user_email == user_email,
@@ -111,5 +104,3 @@ def upsert_template(section_key: str, body: TemplateUpsert, request: Request) ->
             db.add(row)
             db.commit()
         return {"section_key": section_key, "ok": True}
-    finally:
-        db.close()

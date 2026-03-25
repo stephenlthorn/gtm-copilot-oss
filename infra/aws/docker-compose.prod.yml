@@ -16,15 +16,32 @@ services:
     environment:
       - DOMAIN=${DOMAIN}
     depends_on:
-      - ui
-      - api
+      ui:
+        condition: service_healthy
+      api:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          memory: 256m
+          cpus: '0.5'
 
   redis:
     image: redis:7-alpine
     restart: unless-stopped
-    command: redis-server --maxmemory 64mb --maxmemory-policy allkeys-lru
+    command: redis-server --maxmemory 256mb --maxmemory-policy allkeys-lru
     volumes:
       - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          memory: 300m
+          cpus: '0.5'
 
   api:
     build:
@@ -37,7 +54,19 @@ services:
     volumes:
       - ~/.codex:/root/.codex
     depends_on:
-      - redis
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      start_period: 60s
+      retries: 3
+    deploy:
+      resources:
+        limits:
+          memory: 1g
+          cpus: '1.0'
 
   worker:
     build:
@@ -51,7 +80,13 @@ services:
     volumes:
       - ~/.codex:/root/.codex
     depends_on:
-      - redis
+      redis:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          memory: 1g
+          cpus: '1.0'
 
   beat:
     build:
@@ -63,16 +98,19 @@ services:
     environment:
       - REDIS_URL=redis://redis:6379/0
     depends_on:
-      - redis
+      redis:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          memory: 256m
+          cpus: '0.25'
 
   ui:
     build:
       context: ../..
       dockerfile: ui/Dockerfile
       args:
-        - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID}
-        - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET}
-        - NEXTAUTH_SECRET=${NEXTAUTH_SECRET}
         - NEXTAUTH_URL=https://${DOMAIN}
         - NEXT_PUBLIC_APP_URL=https://${DOMAIN}
     restart: unless-stopped
@@ -88,7 +126,19 @@ services:
       - SKIP_OAUTH_SERVER=true
       - PORT=3000
     depends_on:
-      - api
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3000/"]
+      interval: 30s
+      timeout: 10s
+      start_period: 30s
+      retries: 3
+    deploy:
+      resources:
+        limits:
+          memory: 512m
+          cpus: '0.5'
 
 volumes:
   caddy_data:

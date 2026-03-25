@@ -4,7 +4,7 @@ const API_BASE = process.env.API_BASE_URL || 'http://localhost:8000';
 
 export async function GET(_request, { params }) {
   const session = await getSession();
-  const jobId = params?.jobId;
+  const { jobId } = await params;
   const res = await fetch(`${API_BASE}/admin/sync/drive/jobs/${encodeURIComponent(jobId)}`, {
     headers: session
       ? {

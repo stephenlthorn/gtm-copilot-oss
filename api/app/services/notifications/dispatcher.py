@@ -126,18 +126,31 @@ class NotificationDispatcher:
             return None
 
         metadata = notification.metadata
+        if not isinstance(metadata, dict):
+            logger.warning(
+                "Notification metadata is not a dict (got %s); skipping formatter",
+                type(metadata).__name__,
+            )
+            return None
 
-        if notification.type == NotificationType.PRE_CALL_READY and metadata.get("report"):
-            return self._slack.format_precall_notification(metadata["report"])
+        try:
+            if notification.type == NotificationType.PRE_CALL_READY and metadata.get("report"):
+                return self._slack.format_precall_notification(metadata["report"])
 
-        if notification.type == NotificationType.POST_CALL_READY and metadata.get("report"):
-            return self._slack.format_postcall_notification(metadata["report"])
+            if notification.type == NotificationType.POST_CALL_READY and metadata.get("report"):
+                return self._slack.format_postcall_notification(metadata["report"])
 
-        if notification.type == NotificationType.DEAL_RISK and metadata.get("risk"):
-            return self._slack.format_deal_risk_notification(metadata["risk"])
+            if notification.type == NotificationType.DEAL_RISK and metadata.get("risk"):
+                return self._slack.format_deal_risk_notification(metadata["risk"])
 
-        if notification.type == NotificationType.COMPETITIVE_INTEL and metadata.get("intel"):
-            return self._slack.format_competitive_intel(metadata["intel"])
+            if notification.type == NotificationType.COMPETITIVE_INTEL and metadata.get("intel"):
+                return self._slack.format_competitive_intel(metadata["intel"])
+        except (KeyError, TypeError, AttributeError):
+            logger.warning(
+                "Malformed metadata for notification type %s; falling back to default formatter",
+                notification.type,
+            )
+            return None
 
         return None
 

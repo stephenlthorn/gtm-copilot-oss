@@ -4,7 +4,7 @@ const API_BASE = process.env.API_BASE_URL || 'http://localhost:8000';
 
 export async function POST(request, { params }) {
   const session = await getSession();
-  const { id } = params;
+  const { id } = await params;
   const res = await fetch(`${API_BASE}/admin/feedback-suggestions/${id}/apply`, {
     method: 'POST',
     headers: session ? { 'X-OpenAI-Token': session.access_token } : {},

@@ -30,7 +30,7 @@ def _build_connect_args(url: str) -> dict:
         # TiDB Serverless auto-pauses; allow up to 120s for cold-start wakeup.
         args["read_timeout"] = 120
         args["write_timeout"] = 120
-        args["connect_timeout"] = 60
+        args["connect_timeout"] = 120
         import ssl as _ssl
 
         ssl_ca = os.environ.get("TIDB_SSL_CA")
@@ -52,8 +52,8 @@ if "tidbcloud.com" in _db_url:
     pool_kwargs = {
         "pool_size": 5,
         "max_overflow": 10,
-        "pool_timeout": 30,
-        "pool_recycle": 300,
+        "pool_timeout": 120,
+        "pool_recycle": 1800,
     }
 
 engine = create_engine(

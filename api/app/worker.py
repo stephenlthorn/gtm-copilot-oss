@@ -17,6 +17,8 @@ celery_app.conf.update(
     result_serializer="json",
     accept_content=["json"],
     timezone="UTC",
+    task_acks_late=True,
+    worker_prefetch_multiplier=1,
     beat_schedule={
         "daily-ingestion": {
             "task": "daily_ingestion",

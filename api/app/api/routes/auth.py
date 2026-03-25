@@ -1,11 +1,15 @@
 from __future__ import annotations
 
+import logging
+
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.api.deps import db_session
 from app.core.settings import get_settings
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 settings = get_settings()
@@ -85,7 +89,8 @@ def google_auth_callback(
             },
         }
     except Exception as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
+        logger.error("Google OAuth callback failed", exc_info=exc)
+        raise HTTPException(status_code=400, detail="Authentication failed")
 
 
 @router.post("/openai-key")
@@ -106,16 +111,21 @@ def save_openai_key(
 
     try:
         from cryptography.fernet import Fernet
-        import os
 
-        key = os.environ.get("ENCRYPTION_KEY", Fernet.generate_key().decode())
-        fernet = Fernet(key.encode() if isinstance(key, str) else key)
+        raw_key = settings.fernet_key
+        if not raw_key:
+            logger.error("FERNET_KEY is not configured; cannot encrypt OpenAI API key")
+            raise HTTPException(status_code=500, detail="Encryption not configured")
+        fernet = Fernet(raw_key.encode() if isinstance(raw_key, str) else raw_key)
         user.openai_api_key_encrypted = fernet.encrypt(req.api_key.encode())
         db.commit()
         return {"status": "saved"}
+    except HTTPException:
+        raise
     except Exception as exc:
+        logger.error("Failed to save OpenAI API key", exc_info=exc)
         db.rollback()
-        raise HTTPException(status_code=500, detail=str(exc))
+        raise HTTPException(status_code=500, detail="Failed to save API key")
 
 
 @router.get("/me")
@@ -202,9 +212,11 @@ def connect_provider(
             if not access_token:
                 raise HTTPException(status_code=400, detail="ZoomInfo authentication succeeded but returned no token")
         except _httpx.HTTPStatusError as exc:
-            raise HTTPException(status_code=400, detail=f"ZoomInfo authentication failed: {exc.response.text}")
+            logger.error("ZoomInfo authentication failed: HTTP %s", exc.response.status_code, exc_info=exc)
+            raise HTTPException(status_code=400, detail="ZoomInfo authentication failed")
         except Exception as exc:
-            raise HTTPException(status_code=400, detail=f"ZoomInfo authentication error: {exc}")
+            logger.error("ZoomInfo authentication error", exc_info=exc)
+            raise HTTPException(status_code=400, detail="ZoomInfo authentication error")
 
     if not access_token:
         raise HTTPException(status_code=400, detail="access_token or username+password required")

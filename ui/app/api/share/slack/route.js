@@ -17,23 +17,25 @@ export async function POST(request) {
     return NextResponse.json({ error: 'invalid channel name' }, { status: 400 });
   }
 
+  const sanitizeSlack = (s) => String(s).replace(/[<>&]/g, '');
+
   try {
     const res = await fetch(`${API_BASE}/slack/send`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         channel: cleanChannel,
-        text: `*Shared by ${session.name || session.email}:*\n\n${text}`,
+        text: `*Shared by ${sanitizeSlack(session.name || session.email)}:*\n\n${text}`,
       }),
     });
 
     if (!res.ok) {
-      const err = await res.text();
-      return NextResponse.json({ error: err.slice(0, 300) }, { status: res.status });
+      return NextResponse.json({ error: 'Failed to send message' }, { status: res.status });
     }
 
     return NextResponse.json({ ok: true });
   } catch (err) {
-    return NextResponse.json({ error: String(err) }, { status: 500 });
+    console.error('Slack share error:', err.message || 'Unknown error');
+    return NextResponse.json({ error: 'Failed to send message' }, { status: 500 });
   }
 }

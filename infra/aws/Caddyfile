@@ -10,6 +10,7 @@
 }
 
 {$DOMAIN}:8443 {
+	tls internal
 	# API — separate port for direct API access if needed
 	reverse_proxy api:8000 {
 		header_up X-Forwarded-Proto {scheme}

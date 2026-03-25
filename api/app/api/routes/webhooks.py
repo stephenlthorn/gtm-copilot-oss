@@ -1,12 +1,20 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Body, HTTPException
+from fastapi import APIRouter, Body, HTTPException, Request
+
+from app.core.settings import get_settings
 
 router = APIRouter()
 
 
 @router.post("/chorus")
-def chorus_webhook(body: dict = Body(...)) -> dict:
+def chorus_webhook(request: Request, body: dict = Body(...)) -> dict:
+    settings = get_settings()
+    if settings.chorus_webhook_secret:
+        webhook_secret = request.headers.get("X-Webhook-Secret", "")
+        if webhook_secret != settings.chorus_webhook_secret:
+            raise HTTPException(status_code=401, detail="Unauthorized")
+
     event = body.get("event", "")
     if event != "recording.completed":
         return {"status": "ignored", "event": event}
