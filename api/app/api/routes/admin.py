@@ -852,18 +852,37 @@ def create_feedback_suggestion(
         f"Query: {ex.query_text}\nResponse: {ex.original_response}"
         for ex in examples
     )
-    system = "You are a prompt engineering assistant. Analyze failure patterns and suggest precise edits to improve an AI system prompt."
+    system = (
+        "You are a senior prompt engineer specializing in enterprise GTM AI systems for PingCAP (TiDB). "
+        "Your job is to diagnose failure patterns in AI prompts and suggest precise, minimal edits that fix the root cause without introducing regressions.\n\n"
+        "ANALYSIS FRAMEWORK:\n"
+        "1. Pattern identification: What specific failure pattern do the examples share? (hallucination, wrong format, missed context, generic output, incorrect TiDB positioning, etc.)\n"
+        "2. Root cause: Which section of the prompt allowed or caused this failure? (missing guardrail, ambiguous instruction, no example, wrong scoring, etc.)\n"
+        "3. Minimal fix: What is the smallest edit that fixes the root cause? Do NOT rewrite the entire prompt — target the specific section that caused the failure.\n"
+        "4. Regression check: Does your edit preserve all existing behavior for non-failing cases?\n\n"
+        "CONSTRAINTS:\n"
+        "- Preserve the prompt's existing structure, tone, and non-failing behavior.\n"
+        "- Do NOT add generic instructions that don't directly address the failure pattern.\n"
+        "- Do NOT remove existing guardrails or scoring rubrics unless they directly caused the failure.\n"
+        "- The suggested_prompt must be the COMPLETE prompt text (not a diff), ready to deploy.\n"
+        "- If the failure cannot be fixed via prompt edit alone (e.g., requires tool changes or data fixes), state this in reasoning."
+    )
     user = f"""Mode: {body.mode}
 Failure category: {body.failure_category}
 Threshold: {len(examples)} users flagged this as '{body.failure_category}'
 
-Recent failing queries and responses:
+Recent failing queries and responses (analyze these for shared patterns):
 {formatted_examples}
 
 Current {body.prompt_type} prompt:
 {current_prompt}
 
-Suggest a specific edit to reduce '{body.failure_category}' failures. Return JSON: {{"reasoning": "2-3 sentence explanation", "suggested_prompt": "full revised prompt text"}}"""
+Return strict JSON with exactly these keys:
+- "failure_pattern" (string — 1 sentence describing the shared pattern across failing examples)
+- "root_cause" (string — which specific section or missing guardrail in the current prompt caused this)
+- "reasoning" (string — 2-3 sentence explanation of the fix and why it addresses the root cause without regression)
+- "suggested_prompt" (string — the COMPLETE revised prompt text, ready to deploy)
+- "confidence" (string — "high" if pattern is clear and fix is targeted, "medium" if pattern is ambiguous, "low" if insufficient examples to diagnose)"""
 
     # 4. Call GPT-4o
     settings = get_settings()
