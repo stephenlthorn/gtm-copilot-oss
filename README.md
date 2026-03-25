@@ -744,29 +744,47 @@ flowchart TB
 | Backend | Python 3.11 / FastAPI |
 | Database | TiDB Cloud (vector search + full-text + relational) |
 | Background Jobs | Celery + Redis |
-| LLM | OpenAI (user-provided API key, extensible) |
-| Embeddings | OpenAI `text-embedding-3-small` (1536 dimensions) |
-| Web Scraping | Firecrawl API |
+| LLM | Codex OAuth (ChatGPT subscription) · OpenAI API key (optional fallback) · Anthropic/MiniMax |
+| Embeddings | OpenAI `text-embedding-3-small` (1536 dimensions) · SHA-256 hash fallback |
+| Reverse Proxy | Caddy (automatic HTTPS via sslip.io) |
 | Containerization | Docker Compose |
+| Web Scraping | Firecrawl (optional connector) · built-in web_search_preview |
 
 ---
 
-## Quick Start
+## Quick Start (EC2 / Production)
 
 ```bash
+# 1. Clone and enter the infra directory
+git clone https://github.com/stephenlthorn/gtm-copilot-oss.git app
+cd app/infra/aws
+
+# 2. Configure environment
 cp .env.example .env
-# Fill in required keys (see Configuration section below)
-docker compose -f infra/docker-compose.yml up -d
-# Frontend: http://localhost:3000
-# API docs: http://localhost:8000/docs
+nano .env   # fill in required values (see Configuration below)
+
+# 3. Generate required secrets
+SECRET_KEY=$(openssl rand -hex 32)
+NEXTAUTH_SECRET=$(openssl rand -hex 32)
+FERNET_KEY=$(python3 -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())")
+echo "SECRET_KEY=$SECRET_KEY" >> .env
+echo "NEXTAUTH_SECRET=$NEXTAUTH_SECRET" >> .env
+echo "FERNET_KEY=$FERNET_KEY" >> .env
+
+# 4. Start everything
+docker compose -f docker-compose.prod.yml up -d --build
 ```
 
-Trigger initial knowledge sync:
+The UI is served at `https://<DOMAIN>` (port 443) and the API at `https://<DOMAIN>:8443`.
+
+Trigger initial knowledge sync after startup:
 
 ```bash
-curl -X POST "http://localhost:8000/admin/sync/drive"
-curl -X POST "http://localhost:8000/admin/sync/calls"
+curl -X POST "https://<DOMAIN>:8443/admin/sync/drive"
+curl -X POST "https://<DOMAIN>:8443/admin/sync/calls"
 ```
+
+For local development, see the [Development](#development) section below.
 
 ---
 
@@ -774,59 +792,55 @@ curl -X POST "http://localhost:8000/admin/sync/calls"
 
 Copy `.env.example` to `.env` and fill in the values below.
 
-### Core
+### Required — Domain & Auth
 
 | Variable | Description |
 |---|---|
-| `APP_ENV` | Environment (`dev` / `prod`) |
-| `APP_PORT` | API port (default `8000`) |
-| `CORS_ALLOW_ORIGINS` | Comma-separated allowed origins for CORS |
+| `DOMAIN` | Your Elastic IP + `.sslip.io` — e.g. `34.56.78.90.sslip.io` |
+| `SECRET_KEY` | Backend session secret — `openssl rand -hex 32` |
+| `NEXTAUTH_SECRET` | NextAuth secret — `openssl rand -hex 32` |
+| `FERNET_KEY` | Encryption key for stored OAuth tokens — `python3 -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"` |
+| `GOOGLE_CLIENT_ID` | Google OAuth client ID (login + Drive) |
+| `GOOGLE_CLIENT_SECRET` | Google OAuth client secret |
+| `ALLOWED_EMAIL_DOMAIN` | Restrict login to this email domain (e.g. `pingcap.com`) |
 
-### Database
-
-| Variable | Description |
-|---|---|
-| `TIDB_HOST` | TiDB Cloud host |
-| `TIDB_PORT` | TiDB Cloud port (default `4000`) |
-| `TIDB_USER` | TiDB Cloud username |
-| `TIDB_PASSWORD` | TiDB Cloud password |
-| `TIDB_DATABASE` | TiDB Cloud database name |
-| `TIDB_SSL_CA` | Path to TiDB Cloud CA certificate |
-| `REDIS_URL` | Redis connection string |
-
-### LLM / Embeddings
+### Required — Database
 
 | Variable | Description |
 |---|---|
-| `OPENAI_API_KEY` | OpenAI API key |
-| `OPENAI_BASE_URL` | Optional custom endpoint (Azure, self-hosted) |
-| `OPENAI_MODEL` | Chat model (default `gpt-4.1`) |
-| `OPENAI_EMBEDDING_MODEL` | Embedding model (default `text-embedding-3-small`) |
-| `EMBEDDING_DIMENSIONS` | Embedding vector size (default `1536`) |
-| `RETRIEVAL_TOP_K` | Number of chunks to retrieve per query (default `8`) |
+| `DATABASE_URL` | Full TiDB Cloud connection string: `mysql+pymysql://USER:PASS@gateway01.us-east-1.prod.aws.tidbcloud.com:4000/DB?ssl_verify_cert=true&ssl_verify_identity=true` |
+
+> **Note:** The DB pool is configured for TiDB Cloud's 120-second cold-start timeout. Do not change `pool_timeout` without understanding this.
+
+### LLM
+
+The LLM layer supports three auth methods, tried in order:
+
+1. **Codex OAuth** (primary) — user's ChatGPT subscription JWT forwarded per-request. No API key needed.
+2. **OpenAI API Key** (fallback) — set `OPENAI_API_KEY` if you want a server-level key.
+3. **MiniMax / Anthropic** — optional, set `MINIMAX_API_KEY` or `ANTHROPIC_API_KEY`.
+
+The server also reads Codex CLI auth from `~/.codex/auth.json` (mounted into the container). Run `codex auth login` on the EC2 host to populate this.
+
+| Variable | Description |
+|---|---|
+| `OPENAI_API_KEY` | Optional OpenAI API key fallback (not required if using Codex OAuth) |
+| `OPENAI_MODEL` | Default model (e.g. `gpt-4.1`; overridden per-request from the UI model picker) |
 
 ### Security
 
 | Variable | Description |
 |---|---|
-| `ENTERPRISE_MODE` | Enable enterprise security controls |
-| `SECURITY_REQUIRE_PRIVATE_LLM_ENDPOINT` | Require non-public LLM base URL |
-| `SECURITY_ALLOWED_LLM_BASE_URLS` | Allowlist of permitted LLM endpoints |
-| `SECURITY_REDACT_BEFORE_LLM` | Redact PII before sending to LLM |
-| `SECURITY_REDACT_AUDIT_LOGS` | Redact sensitive data in audit logs |
+| `CORS_ALLOW_ORIGINS` | Comma-separated allowed origins, e.g. `https://100.49.55.13.sslip.io` |
 | `SECURITY_TRUSTED_HOST_ALLOWLIST` | Comma-separated trusted host headers |
 | `INTERNAL_DOMAIN_ALLOWLIST` | Domains permitted for outbound messaging |
+| `ENVIRONMENT` / `APP_ENV` | Set to `production` in prod |
 
-### Google Drive
+### Google Drive Sync
 
 | Variable | Description |
 |---|---|
-| `GOOGLE_DRIVE_CLIENT_ID` | Google OAuth client ID |
-| `GOOGLE_DRIVE_CLIENT_SECRET` | Google OAuth client secret |
-| `GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON` | Path to service account JSON (optional) |
-| `GOOGLE_DRIVE_TOKEN_ENCRYPTION_KEY` | AES key for encrypting stored OAuth tokens |
-| `GOOGLE_DRIVE_ROOT_FOLDER_ID` | Root folder to sync (optional) |
-| `GOOGLE_DRIVE_FOLDER_IDS` | Comma-separated folder IDs to index |
+| `GOOGLE_DRIVE_FOLDER_IDS` | Comma-separated folder IDs to index (optional) |
 
 ### Feishu / Lark
 
@@ -862,6 +876,13 @@ Copy `.env.example` to `.env` and fill in the values below.
 ## Features by Role
 
 All users can access all dashboards. Role determines default landing page.
+
+### Oracle Chat (all roles)
+- RAG-grounded answers with citations from the knowledge base
+- Per-chat model selector: choose from GPT-5.4, o3-pro, o3, o4-mini, GPT-5.4 mini, and more
+- Per-chat thinking depth: High / Medium / Low (reasoning models only)
+- Per-chat KB and web search toggles
+- AI Power score updates live as you change settings
 
 ### Sales Rep
 - Pre-call hub: upcoming meetings with auto-generated research status
@@ -1209,24 +1230,51 @@ Workflow file: `.github/workflows/deploy.yml`
 ### Manual Deploy
 
 ```bash
-ssh ec2-user@100.49.55.13
-cd ~/app
-git pull
-docker compose -f infra/aws/docker-compose.prod.yml up -d --build ui api
+ssh ec2-user@<EC2_HOST>
+cd ~/app && git pull
+cd infra/aws && docker compose -f docker-compose.prod.yml up -d --build
+```
+
+To rebuild only the UI (faster when only frontend changed):
+```bash
+docker compose -f docker-compose.prod.yml up -d --build ui
 ```
 
 ### Initial EC2 Setup
 
-See `DEPLOY.md` for full EC2 bootstrap instructions (Docker install, Caddy config, `.env` setup, Alembic migrations).
+```bash
+# 1. Install Docker (Amazon Linux 2023)
+sudo dnf install -y docker git
+sudo systemctl enable --now docker
+sudo usermod -aG docker $USER
+# Log out and back in
+
+# 2. Clone repo
+git clone https://github.com/stephenlthorn/gtm-copilot-oss.git ~/app
+cd ~/app/infra/aws
+
+# 3. Configure and launch
+cp .env.example .env && nano .env
+docker compose -f docker-compose.prod.yml up -d --build
+```
 
 ### Key Config (`infra/aws/.env`)
 
 ```
 DOMAIN=100.49.55.13.sslip.io
-DATABASE_URL=postgresql+psycopg://...       # TiDB Cloud connection string
+DATABASE_URL=mysql+pymysql://USER:PASS@gateway01.us-east-1.prod.aws.tidbcloud.com:4000/DB?ssl_verify_cert=true&ssl_verify_identity=true
 ALLOWED_EMAIL_DOMAIN=pingcap.com
 GOOGLE_CLIENT_ID=...
-GOOGLE_CLIENT_SECRET=...                    # Use the Google Drive OAuth client secret
-NEXT_PUBLIC_APP_URL=https://100.49.55.13.sslip.io
+GOOGLE_CLIENT_SECRET=...
+SECRET_KEY=<openssl rand -hex 32>
+NEXTAUTH_SECRET=<openssl rand -hex 32>
+FERNET_KEY=<python3 -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())">
 SECURITY_TRUSTED_HOST_ALLOWLIST=100.49.55.13.sslip.io,localhost,api
+CORS_ALLOW_ORIGINS=https://100.49.55.13.sslip.io
+```
+
+**Google Cloud Console** — add these to your OAuth client's authorized redirect URIs:
+```
+https://<DOMAIN>/api/auth/exchange
+https://<DOMAIN>/api/auth/callback/google
 ```
