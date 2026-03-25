@@ -60,3 +60,8 @@ def startup() -> None:
 @app.get("/")
 def root() -> dict:
     return {"service": settings.app_name, "status": "ok"}
+
+
+@app.get("/health")
+def health() -> dict:
+    return {"status": "ok"}
