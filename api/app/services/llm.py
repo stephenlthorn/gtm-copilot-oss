@@ -1295,6 +1295,16 @@ class LLMService:
             followups = llm.get("follow_up_questions") or self._fallback_followups("oracle")
             return {"answer": llm["answer"], "follow_up_questions": followups[:7]}
         if llm is None:
+            # _responses_json failed (Codex may not support json_object format) — retry with _responses_text
+            text_prompt = (
+                f"{message}\n\n"
+                "Use the following evidence from internal call transcripts and knowledge base to answer:\n\n"
+                f"{context}\n\n"
+                "Be specific and cite evidence from the transcripts above. Reference actual quotes, dates, and participants."
+            )
+            text_answer = self._responses_text(system_prompt, text_prompt, model=model, tools=tools, reasoning_effort=reasoning_effort)
+            if text_answer:
+                return {"answer": text_answer, "follow_up_questions": self._fallback_followups("oracle")}
             return {
                 "answer": self._local_oracle_synthesis(message, hits),
                 "citations": [],
