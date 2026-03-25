@@ -321,10 +321,94 @@ def _parse_slack_form(body: bytes) -> dict[str, str]:
     return {k: values[-1] if values else "" for k, values in parsed.items()}
 
 
+# ── Async response helper (Slack requires <3s, LLM takes longer) ─────────────
+
+async def _send_delayed_response(response_url: str, text: str, in_channel: bool = True) -> None:
+    """Post the real answer to Slack's response_url after the initial ack."""
+    import httpx
+    payload = {
+        "response_type": "in_channel" if in_channel else "ephemeral",
+        "text": text,
+        "replace_original": True,
+    }
+    async with httpx.AsyncClient(timeout=30) as client:
+        await client.post(response_url, json=payload)
+
+
+async def _handle_command_async(
+    mode: str,
+    message: str,
+    extra: str | None,
+    user_email: str,
+    response_url: str,
+    command_payload: dict,
+) -> None:
+    """Background handler for all slash commands — posts result to response_url."""
+    try:
+        if mode == "account_intel":
+            reply = _generate_account_intel(message, user_email)
+            await _send_delayed_response(response_url, reply)
+            return
+
+        actual_mode = mode
+        actual_message = message
+
+        if mode == "precall":
+            actual_message = f"Produce a concise pre-call research brief for a sales call with {message}. Cover: company overview, tech stack hypothesis, pain signals, TiDB value props, and meeting goal."
+            actual_mode = "oracle"
+
+        if mode == "competitor":
+            competitor = extra or "unknown"
+            actual_message = f"Competitive coaching for {message} — primary competitor: {competitor}. Cover: TiDB positioning vs {competitor}, top objections with responses, proof points, discovery questions."
+            actual_mode = "oracle"
+
+        db: Session = SessionLocal()
+        try:
+            orchestrator = ChatOrchestrator(db)
+            data, retrieval = orchestrator.run(
+                mode=actual_mode,
+                user=user_email,
+                message=actual_message,
+                top_k=8,
+                filters={},
+                context={},
+            )
+            write_audit_log(
+                db,
+                actor=user_email,
+                action="chat_slack_command",
+                input_payload=command_payload,
+                retrieval_payload=retrieval,
+                output_payload=data,
+                status=AuditStatus.OK,
+            )
+            await _send_delayed_response(response_url, _format_reply(actual_mode, data))
+        except Exception as exc:
+            db.rollback()
+            write_audit_log(
+                db,
+                actor=user_email,
+                action="chat_slack_command",
+                input_payload=command_payload,
+                retrieval_payload={},
+                output_payload={},
+                status=AuditStatus.ERROR,
+                error_message=str(exc),
+            )
+            await _send_delayed_response(response_url, f"Command failed: {exc}", in_channel=False)
+        finally:
+            db.close()
+    except Exception as exc:
+        try:
+            await _send_delayed_response(response_url, f"Command failed: {exc}", in_channel=False)
+        except Exception:
+            pass
+
+
 # ── Slash command endpoint ───────────────────────────────────────────────────
 
 @router.post("/command")
-async def slack_command(request: Request) -> dict:
+async def slack_command(request: Request, background_tasks: BackgroundTasks) -> dict:
     body = await request.body()
     slack = SlackService()
     try:
@@ -339,27 +423,13 @@ async def slack_command(request: Request) -> dict:
     if mode == "help" or not message:
         return {"response_type": "ephemeral", "text": HELP_TEXT}
 
+    response_url = payload.get("response_url", "")
+    if not response_url:
+        return {"response_type": "ephemeral", "text": "Missing response_url — cannot process async."}
+
     user_email = await slack.resolve_user_email(payload.get("user_id"), payload.get("user_name"))
 
-    if mode == "account_intel":
-        try:
-            reply = _generate_account_intel(message, user_email)
-            return {"response_type": "in_channel", "text": reply}
-        except Exception as exc:
-            return {"response_type": "ephemeral", "text": f"Account intel failed: {exc}"}
-
-    if mode == "precall":
-        message = f"Produce a concise pre-call research brief for a sales call with {message}. Cover: company overview, tech stack hypothesis, pain signals, TiDB value props, and meeting goal."
-        mode = "oracle"
-
-    if mode == "competitor":
-        competitor = extra or "unknown"
-        message = f"Competitive coaching for {message} — primary competitor: {competitor}. Cover: TiDB positioning vs {competitor}, top objections with responses, proof points, discovery questions."
-        mode = "oracle"
-
-    db: Session = SessionLocal()
-    orchestrator = ChatOrchestrator(db)
-    input_payload = {
+    command_payload = {
         "mode": mode,
         "source": "slack_command",
         "command": command,
@@ -369,43 +439,19 @@ async def slack_command(request: Request) -> dict:
         "message": message,
     }
 
-    try:
-        data, retrieval = orchestrator.run(
-            mode=mode,
-            user=user_email,
-            message=message,
-            top_k=8,
-            filters={},
-            context={},
-        )
-        write_audit_log(
-            db,
-            actor=user_email,
-            action="chat_slack_command",
-            input_payload=input_payload,
-            retrieval_payload=retrieval,
-            output_payload=data,
-            status=AuditStatus.OK,
-        )
-        return {"response_type": "in_channel", "text": _format_reply(mode, data)}
-    except Exception as exc:
-        db.rollback()
-        write_audit_log(
-            db,
-            actor=user_email,
-            action="chat_slack_command",
-            input_payload=input_payload,
-            retrieval_payload={},
-            output_payload={},
-            status=AuditStatus.ERROR,
-            error_message=str(exc),
-        )
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="GTM Copilot Slack command failed.",
-        ) from exc
-    finally:
-        db.close()
+    background_tasks.add_task(
+        _handle_command_async,
+        mode, message, extra, user_email, response_url, command_payload,
+    )
+
+    thinking = {
+        "account_intel": f"Generating Account Intelligence brief for *{message}*...",
+        "precall": f"Researching *{message}* for your pre-call brief...",
+        "competitor": f"Building competitive coaching for *{message}*...",
+        "call_assistant": "Analyzing call history...",
+    }.get(mode, "Thinking...")
+
+    return {"response_type": "ephemeral", "text": thinking}
 
 
 # ── Event subscription (bot @mentions) ───────────────────────────────────────
