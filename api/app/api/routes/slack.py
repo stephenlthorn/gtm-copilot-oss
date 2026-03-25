@@ -413,13 +413,9 @@ async def slack_command(request: Request) -> dict:
 @router.post("/events")
 async def slack_events(request: Request, background_tasks: BackgroundTasks) -> dict:
     body = await request.body()
-    slack = SlackService()
 
-    try:
-        slack.verify_signature(request.headers, body)
-    except ValueError as exc:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=str(exc)) from exc
-
+    # Handle URL verification challenge BEFORE signature check —
+    # Slack sends this during initial setup and expects an immediate response.
     try:
         payload = json.loads(body.decode("utf-8"))
     except json.JSONDecodeError as exc:
@@ -427,6 +423,13 @@ async def slack_events(request: Request, background_tasks: BackgroundTasks) -> d
 
     if payload.get("type") == "url_verification":
         return {"challenge": payload.get("challenge")}
+
+    # For all other events, verify signature
+    slack = SlackService()
+    try:
+        slack.verify_signature(request.headers, body)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=str(exc)) from exc
 
     if payload.get("type") != "event_callback":
         return {"ok": True}
