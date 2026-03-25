@@ -137,6 +137,60 @@ function CopyButton({ text }) {
   );
 }
 
+function SlackShareButton({ text }) {
+  const [state, setState] = useState('idle');
+  const [channel, setChannel] = useState('');
+  const [showInput, setShowInput] = useState(false);
+
+  const share = useCallback(async () => {
+    if (!channel.trim()) return;
+    setState('sending');
+    try {
+      const res = await fetch('/api/share/slack', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ channel: channel.trim(), text }),
+      });
+      if (res.ok) {
+        setState('sent');
+        setTimeout(() => { setState('idle'); setShowInput(false); }, 2000);
+      } else {
+        setState('error');
+        setTimeout(() => setState('idle'), 3000);
+      }
+    } catch {
+      setState('error');
+      setTimeout(() => setState('idle'), 3000);
+    }
+  }, [channel, text]);
+
+  if (!showInput) {
+    return (
+      <button onClick={() => setShowInput(true)} className="msg-copy-btn" title="Share to Slack">
+        Share
+      </button>
+    );
+  }
+
+  return (
+    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+      <input
+        type="text"
+        value={channel}
+        onChange={e => setChannel(e.target.value)}
+        placeholder="#channel"
+        onKeyDown={e => e.key === 'Enter' && share()}
+        style={{ fontSize: '0.72rem', padding: '2px 6px', borderRadius: 4, border: '1px solid var(--border)', background: 'var(--bg-2)', color: 'var(--text)', width: 120 }}
+        autoFocus
+      />
+      <button onClick={share} className="msg-copy-btn" disabled={state === 'sending'}>
+        {state === 'sending' ? '...' : state === 'sent' ? '✓ Sent' : state === 'error' ? '✗ Failed' : 'Send'}
+      </button>
+      <button onClick={() => setShowInput(false)} className="msg-copy-btn">✕</button>
+    </span>
+  );
+}
+
 function MarkdownBody({ content }) {
   const html = useMemo(() => {
     if (typeof window === 'undefined') return '';
@@ -204,6 +258,7 @@ function ChatMessage({ msg, mode }) {
 
       <div className="msg-actions">
         <CopyButton text={msg.content} />
+        <SlackShareButton text={msg.content} />
         <FeedbackButtons message={msg.content} query={msg.queryText || ''} mode={mode} />
       </div>
     </div>

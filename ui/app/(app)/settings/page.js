@@ -7,9 +7,11 @@ import CallsPanel from '../../../components/CallsPanel';
 import SourceProfilesPanel from '../../../components/SourceProfilesPanel';
 import PromptStudio from '../../../components/PromptStudio';
 import IntelBriefSettingsPanel from '../../../components/IntelBriefSettingsPanel';
+import ExternalAccountsPanel from '../../../components/ExternalAccountsPanel';
 
 const NAV = [
   ['#account', 'Account'],
+  ['#connections', 'Connections'],
   ['#knowledge', 'Knowledge'],
   ['#ai', 'AI Behavior'],
   ['#prompts', 'Prompt Studio'],
@@ -126,6 +128,10 @@ export default async function SettingsPage() {
             </div>
           </div>
         </div>
+
+        {/* ── External Connections ─────────────────────────── */}
+        <SectionLabel id="connections">External Connections</SectionLabel>
+        <ExternalAccountsPanel />
 
         {/* ── Knowledge Sources ─────────────────────────────── */}
         <SectionLabel id="knowledge">Knowledge Sources</SectionLabel>

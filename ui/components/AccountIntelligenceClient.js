@@ -42,6 +42,100 @@ function scoreColor(score) {
   return '#f85149';
 }
 
+// ── Profile sharing helpers ──────────────────────────────────────────────────
+
+function profileToText(profile, company) {
+  const name = profile.company || company;
+  const lines = [
+    `${name} — TiDB Account Intelligence Profile`,
+    `Fit Score: ${profile.fit_score}/10 | Relationship: ${profile.relationship_health || 'N/A'}`,
+    '',
+    profile.overview_1 || '',
+    profile.overview_2 || '',
+    '',
+    'Stack: ' + (profile.stack?.databases || []).join(', '),
+    'Cloud: ' + (profile.stack?.cloud || []).join(', '),
+    profile.stack?.compatibility || '',
+  ];
+  if (profile.pain_points?.length) {
+    lines.push('', 'Pain Points:');
+    profile.pain_points.forEach(p => lines.push(`- [${p.severity}] ${p.title}: ${p.pain} → ${p.solution}`));
+  }
+  if (profile.buy_signals?.length) {
+    lines.push('', 'Buy Signals:');
+    profile.buy_signals.forEach(s => lines.push(`- [${s.urgency}] ${s.title}: ${s.text}`));
+  }
+  if (profile.next_steps?.length) {
+    lines.push('', 'Next Steps:');
+    profile.next_steps.forEach(s => lines.push(`- ${s}`));
+  }
+  if (profile.opening_pitch) {
+    lines.push('', 'Opening Pitch:', profile.opening_pitch);
+  }
+  return lines.join('\n');
+}
+
+function CopyProfileButton({ profile, company }) {
+  const [copied, setCopied] = useState(false);
+  const copy = () => {
+    navigator.clipboard.writeText(profileToText(profile, company)).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    });
+  };
+  return (
+    <button onClick={copy} style={{ background: copied ? 'rgba(63,185,80,0.2)' : 'transparent', border: '1px solid #30363d', color: copied ? '#3fb950' : '#8b949e', padding: '0.3rem 0.75rem', borderRadius: 6, cursor: 'pointer', fontSize: '0.78rem' }}>
+      {copied ? '✓ Copied' : 'Copy Brief'}
+    </button>
+  );
+}
+
+function SlackProfileButton({ profile, company }) {
+  const [state, setState] = useState('idle');
+  const [channel, setChannel] = useState('');
+  const [showInput, setShowInput] = useState(false);
+
+  const share = async () => {
+    if (!channel.trim()) return;
+    setState('sending');
+    try {
+      const res = await fetch('/api/share/slack', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ channel: channel.trim(), text: profileToText(profile, company) }),
+      });
+      setState(res.ok ? 'sent' : 'error');
+      setTimeout(() => { setState('idle'); setShowInput(false); }, 2000);
+    } catch {
+      setState('error');
+      setTimeout(() => setState('idle'), 3000);
+    }
+  };
+
+  if (!showInput) {
+    return (
+      <button onClick={() => setShowInput(true)} style={{ background: 'transparent', border: '1px solid #30363d', color: '#8b949e', padding: '0.3rem 0.75rem', borderRadius: 6, cursor: 'pointer', fontSize: '0.78rem' }}>
+        Share to Slack
+      </button>
+    );
+  }
+
+  return (
+    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+      <input
+        type="text" value={channel} onChange={e => setChannel(e.target.value)}
+        placeholder="#channel" onKeyDown={e => e.key === 'Enter' && share()}
+        style={{ fontSize: '0.72rem', padding: '3px 8px', borderRadius: 4, border: '1px solid #30363d', background: '#0d1117', color: '#e6edf3', width: 120 }}
+        autoFocus
+      />
+      <button onClick={share} style={{ background: 'transparent', border: '1px solid #30363d', color: state === 'sent' ? '#3fb950' : state === 'error' ? '#f85149' : '#8b949e', padding: '0.3rem 0.5rem', borderRadius: 6, cursor: 'pointer', fontSize: '0.72rem' }} disabled={state === 'sending'}>
+        {state === 'sending' ? '...' : state === 'sent' ? '✓ Sent' : state === 'error' ? '✗ Failed' : 'Send'}
+      </button>
+      <button onClick={() => setShowInput(false)} style={{ background: 'transparent', border: 'none', color: '#8b949e', cursor: 'pointer', fontSize: '0.78rem' }}>✕</button>
+    </span>
+  );
+}
+
 // ── Profile View (rendered when AI generates a profile) ──────────────────────
 
 function ProfileView({ profile, company, onClose }) {
@@ -64,9 +158,13 @@ function ProfileView({ profile, company, onClose }) {
             <div style={{ fontSize: '0.72rem', color: '#8b949e' }}>TiDB Account Intelligence Profile</div>
           </div>
         </div>
-        <button onClick={onClose} style={{ background: 'transparent', border: '1px solid #30363d', color: '#8b949e', padding: '0.3rem 0.75rem', borderRadius: 6, cursor: 'pointer', fontSize: '0.78rem' }}>
-          ✕ Close
-        </button>
+        <div style={{ display: 'flex', gap: 6 }}>
+          <CopyProfileButton profile={profile} company={company} />
+          <SlackProfileButton profile={profile} company={company} />
+          <button onClick={onClose} style={{ background: 'transparent', border: '1px solid #30363d', color: '#8b949e', padding: '0.3rem 0.75rem', borderRadius: 6, cursor: 'pointer', fontSize: '0.78rem' }}>
+            ✕ Close
+          </button>
+        </div>
       </div>
 
       {/* Hero */}
