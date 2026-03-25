@@ -263,3 +263,25 @@ async def _handle_slack_event(event_input: dict) -> None:
         )
     finally:
         db.close()
+
+
+from pydantic import BaseModel
+
+
+class SlackSendRequest(BaseModel):
+    channel: str
+    text: str
+    thread_ts: str | None = None
+
+
+@router.post("/send")
+async def slack_send(req: SlackSendRequest) -> dict:
+    """Post a message to a Slack channel. Used by the UI Share feature."""
+    slack = SlackService()
+    if not slack.bot_token:
+        raise HTTPException(status_code=503, detail="Slack bot token not configured. Set SLACK_BOT_TOKEN.")
+    try:
+        await slack.post_message(req.channel, req.text, thread_ts=req.thread_ts)
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Slack API error: {exc}") from exc
+    return {"ok": True}
