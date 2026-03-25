@@ -7,7 +7,25 @@ import IntelMeter from './IntelMeter';
 // Configure marked once — GFM tables, line breaks, no mangling
 marked.setOptions({ gfm: true, breaks: true });
 
-export default function PersistentChat({ draft, populateSignal, ragEnabled = true, webSearchEnabled = true, tidbExpert = false, topK = 8, model = 'gpt-5.4', thinking = 'medium', section }) {
+const MODELS = [
+  { value: 'gpt-5.4',          label: 'GPT-5.4' },
+  { value: 'o3-pro',           label: 'o3-pro' },
+  { value: 'o3',               label: 'o3' },
+  { value: 'gpt-5.3-codex',    label: 'GPT-5.3 Codex' },
+  { value: 'gpt-5.1-codex',    label: 'GPT-5.1 Codex' },
+  { value: 'o4-mini',          label: 'o4-mini' },
+  { value: 'o3-mini',          label: 'o3-mini' },
+  { value: 'gpt-5.4-mini',     label: 'GPT-5.4 mini' },
+  { value: 'gpt-5-codex-mini', label: 'GPT-5 Codex mini' },
+  { value: 'gpt-5.4-nano',     label: 'GPT-5.4 nano' },
+];
+
+const REASONING_MODELS = new Set([
+  'gpt-5.4', 'gpt-5.4-mini', 'gpt-5.3-codex', 'o4-mini',
+  'o3', 'o3-pro', 'o3-mini', 'gpt-5.1-codex',
+]);
+
+export default function PersistentChat({ draft, populateSignal, ragEnabled = true, webSearchEnabled = true, tidbExpert = false, topK = 8, model = 'gpt-5.4', thinking = 'medium', section, onModelChange, onThinkingChange, onRagChange, onWebSearchChange }) {
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
@@ -53,7 +71,7 @@ export default function PersistentChat({ draft, populateSignal, ragEnabled = tru
       const res = await fetch('/api/oracle', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ mode: 'oracle', message: q, top_k: topK, rag_enabled: ragEnabled, web_search_enabled: webSearchEnabled, tidb_expert: tidbExpert, section: section || 'oracle' }),
+        body: JSON.stringify({ mode: 'oracle', message: q, top_k: topK, rag_enabled: ragEnabled, web_search_enabled: webSearchEnabled, tidb_expert: tidbExpert, section: section || 'oracle', model, thinking }),
       });
       if (res.status === 401) {
         window.location.href = '/login';
@@ -109,6 +127,56 @@ export default function PersistentChat({ draft, populateSignal, ragEnabled = tru
           {loading ? '…' : '→'}
         </button>
       </div>
+      {/* Model / settings picker */}
+      <div style={{
+        display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap',
+        padding: '5px 1rem', borderTop: '1px solid var(--border)',
+        background: 'var(--bg-2)', fontSize: '0.72rem',
+      }}>
+        {/* Model */}
+        <label style={{ color: 'var(--text-3)', fontSize: '0.65rem', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.07em', flexShrink: 0 }}>Model</label>
+        <select
+          value={model}
+          onChange={e => onModelChange?.(e.target.value)}
+          style={{ fontSize: '0.72rem', padding: '2px 6px', borderRadius: 4, border: '1px solid var(--border)', background: 'var(--bg)', color: 'var(--text)', cursor: 'pointer' }}
+        >
+          {MODELS.map(m => <option key={m.value} value={m.value}>{m.label}</option>)}
+        </select>
+
+        <div style={{ width: 1, height: 14, background: 'var(--border)', flexShrink: 0 }} />
+
+        {/* Thinking — only for reasoning models */}
+        <label style={{ color: 'var(--text-3)', fontSize: '0.65rem', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.07em', flexShrink: 0, opacity: REASONING_MODELS.has(model) ? 1 : 0.35 }}>Think</label>
+        <select
+          value={thinking}
+          onChange={e => onThinkingChange?.(e.target.value)}
+          disabled={!REASONING_MODELS.has(model)}
+          style={{ fontSize: '0.72rem', padding: '2px 6px', borderRadius: 4, border: '1px solid var(--border)', background: 'var(--bg)', color: 'var(--text)', cursor: REASONING_MODELS.has(model) ? 'pointer' : 'not-allowed', opacity: REASONING_MODELS.has(model) ? 1 : 0.35 }}
+        >
+          <option value="high">High</option>
+          <option value="medium">Medium</option>
+          <option value="low">Low</option>
+        </select>
+
+        <div style={{ width: 1, height: 14, background: 'var(--border)', flexShrink: 0 }} />
+
+        {/* KB toggle */}
+        <button
+          onClick={() => onRagChange?.(!ragEnabled)}
+          style={{ fontSize: '0.68rem', padding: '2px 8px', borderRadius: 4, border: `1px solid ${ragEnabled ? 'var(--success)' : 'var(--border)'}`, background: ragEnabled ? 'var(--success)15' : 'var(--bg)', color: ragEnabled ? 'var(--success)' : 'var(--text-3)', cursor: 'pointer', fontWeight: 600 }}
+        >
+          KB {ragEnabled ? 'On' : 'Off'}
+        </button>
+
+        {/* Web toggle */}
+        <button
+          onClick={() => onWebSearchChange?.(!webSearchEnabled)}
+          style={{ fontSize: '0.68rem', padding: '2px 8px', borderRadius: 4, border: `1px solid ${webSearchEnabled ? '#3b82f6' : 'var(--border)'}`, background: webSearchEnabled ? '#3b82f615' : 'var(--bg)', color: webSearchEnabled ? '#3b82f6' : 'var(--text-3)', cursor: 'pointer', fontWeight: 600 }}
+        >
+          Web {webSearchEnabled ? 'On' : 'Off'}
+        </button>
+      </div>
+
       <IntelMeter model={model} thinking={thinking} ragEnabled={ragEnabled} webSearchEnabled={webSearchEnabled} />
     </div>
   );
