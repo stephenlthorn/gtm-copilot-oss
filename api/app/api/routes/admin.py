@@ -541,6 +541,24 @@ def get_kb_config(db: Session = Depends(db_session)):
     return config
 
 
+@router.get("/backfill-status")
+def get_backfill_status(db: Session = Depends(db_session)):
+    from sqlalchemy import func, select
+    from app.models.entities import KBChunk, KnowledgeIndex
+
+    kb_count = db.execute(select(func.count()).select_from(KBChunk)).scalar() or 0
+    ki_count = db.execute(select(func.count()).select_from(KnowledgeIndex)).scalar() or 0
+    config = db.execute(select(KBConfig).limit(1)).scalar_one_or_none()
+    cutover = config.retrieval_cutover if config is not None else False
+
+    return {
+        "kb_chunks_count": kb_count,
+        "knowledge_index_count": ki_count,
+        "cutover_complete": cutover,
+        "backfill_remaining": max(0, kb_count - ki_count),
+    }
+
+
 @router.put("/kb-config", response_model=KBConfigRead)
 def update_kb_config(update: KBConfigUpdate, db: Session = Depends(db_session)):
     config = db.get(KBConfig, 1)
