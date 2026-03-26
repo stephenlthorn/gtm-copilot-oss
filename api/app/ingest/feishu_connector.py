@@ -240,7 +240,7 @@ class FeishuConnector:
 
     def get_wiki_node(self, node_token: str) -> dict[str, Any]:
         """Get wiki node info by token — returns space_id, obj_token, obj_type, etc."""
-        url = self.base_url + "/wiki/v2/nodes"
+        url = self.base_url + "/wiki/v2/spaces/get_node"
         resp = httpx.get(url, headers=self._headers(), params={"token": node_token}, timeout=20)
         resp.raise_for_status()
         data = resp.json()
