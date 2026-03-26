@@ -136,3 +136,77 @@ def full_reindex(org_id: int = 1) -> dict:
         results["github"] = {"error": str(exc)}
 
     return results
+
+
+import json as _json
+
+
+@celery_app.task(name="backfill_knowledge_index", bind=True, max_retries=None, rate_limit="10/m")
+def backfill_knowledge_index(self, offset: int = 0, batch_size: int = 500) -> dict:
+    """Migrate kb_chunks rows to knowledge_index in batches. Self-chains until done."""
+    init_db()
+    from sqlalchemy import select
+    from app.models.entities import KBChunk, KBDocument, KnowledgeIndex, KBConfig
+
+    with SessionLocal() as db:
+        rows = db.execute(
+            select(KBChunk, KBDocument.source_type, KBDocument.source_id, KBDocument.title, KBDocument.url)
+            .join(KBDocument, KBChunk.document_id == KBDocument.id)
+            .order_by(KBChunk.id)
+            .offset(offset)
+            .limit(batch_size)
+        ).all()
+
+        if not rows:
+            config = db.execute(select(KBConfig).limit(1)).scalar_one_or_none()
+            if config is not None:
+                config.retrieval_cutover = True
+                db.commit()
+            logger.info("Backfill complete — retrieval_cutover=True (total processed: %d)", offset)
+            return {"status": "complete", "total_processed": offset}
+
+        new_rows = []
+        for chunk, source_type, source_id, title, url in rows:
+            existing = db.execute(
+                select(KnowledgeIndex).where(
+                    KnowledgeIndex.source_ref == source_id,
+                    KnowledgeIndex.chunk_index == chunk.chunk_index,
+                    KnowledgeIndex.org_id == 1,
+                )
+            ).scalar_one_or_none()
+            if existing is not None:
+                continue
+
+            emb = chunk.embedding
+            if emb is None:
+                embedding_val = None
+            elif isinstance(emb, str):
+                embedding_val = emb
+            else:
+                embedding_val = _json.dumps(emb)
+
+            source_type_str = source_type.value if hasattr(source_type, "value") else str(source_type)
+
+            new_rows.append(KnowledgeIndex(
+                source_type=source_type_str,
+                source_ref=source_id,
+                title=title or "",
+                chunk_text=chunk.text or "",
+                chunk_index=chunk.chunk_index,
+                embedding=embedding_val,
+                embedding_model="text-embedding-3-small",
+                metadata_=chunk.metadata_json or {},
+                org_id=1,
+            ))
+
+        if new_rows:
+            db.add_all(new_rows)
+            db.commit()
+
+        logger.info("Backfill: offset=%d new=%d skipped=%d", offset, len(new_rows), len(rows) - len(new_rows))
+
+    backfill_knowledge_index.apply_async(
+        kwargs={"offset": offset + batch_size, "batch_size": batch_size},
+        countdown=2,
+    )
+    return {"status": "running", "offset": offset, "new_rows": len(new_rows)}
