@@ -599,83 +599,43 @@ def update_kb_config(update: KBConfigUpdate, db: Session = Depends(db_session)):
 
 @router.post("/sync/feishu")
 def sync_feishu(request: Request, db: Session = Depends(db_session)) -> dict:
-    settings = get_settings()
-    kb_config: KBConfig | None = db.get(KBConfig, 1)
+    import asyncio
+    from app.services.indexing.feishu_indexer import FeishuIndexer
+    from app.services.indexing.embedder import EmbeddingService
+
     user_email = _request_user_email(request)
-    app_id, app_secret = _resolve_feishu_creds(kb_config)
-    roots = _resolve_feishu_roots(kb_config)
-    global_mode = False
-    if not roots:
-        # Global mode: list all Feishu files visible to the current token.
-        roots = [""]
-        global_mode = True
 
-    oauth_mode = bool(kb_config.feishu_oauth_enabled if kb_config else False)
-    cred_service = FeishuCredentialService(db)
+    embedding_service = EmbeddingService()
+    indexer = FeishuIndexer(db, embedding_service)
 
-    if oauth_mode:
-        if not user_email:
-            return {
-                "status": "error",
-                "message": "Missing signed-in user email for Feishu OAuth mode.",
-            }
-        if not app_id or not app_secret:
-            return {
-                "status": "error",
-                "message": "Feishu OAuth app_id / app_secret not configured.",
-            }
-        try:
-            access_token = cred_service.get_access_token(
-                user_email,
-                app_id=app_id,
-                app_secret=app_secret,
-                base_url=settings.feishu_base_url,
-            )
-        except RuntimeError as exc:
-            return {
-                "status": "error",
-                "message": f"Feishu OAuth is not connected for {user_email}. {exc}",
-            }
-        ingestor = FeishuIngestor(
-            db,
-            app_id=app_id,
-            app_secret=app_secret,
-            access_token=access_token,
-            user_email=user_email,
-        )
-    else:
-        if not app_id or not app_secret:
-            return {"status": "error", "message": "Feishu app_id / app_secret not configured."}
-        ingestor = FeishuIngestor(db, app_id=app_id, app_secret=app_secret)
+    try:
+        loop = asyncio.get_event_loop()
+    except RuntimeError:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+    result = loop.run_until_complete(indexer.sync(org_id=1))
 
-    result = ingestor.sync_roots(roots, recursive=True)
-    if oauth_mode and user_email:
-        cred_service.update_last_synced(user_email)
-    indexed = int(result.get("added", 0)) + int(result.get("updated", 0))
-    errors = int(result.get("errors", 0))
+    indexed = result.docs_indexed
+    errors = len(result.errors)
     status_value = "ok"
     message: str | None = None
     if errors > 0 and indexed == 0:
         status_value = "error"
-        message = "Feishu sync failed due to permissions or content access errors."
+        message = "Feishu sync failed. Check worker logs for details."
     elif errors > 0:
         status_value = "partial"
-        message = "Feishu sync completed with some document-level errors."
+        message = "Feishu sync completed with some errors."
+
     write_audit_log(
         db,
         actor=user_email or "system",
         action="sync_feishu",
-        input_payload={
-            "roots": roots,
-            "oauth_mode": oauth_mode,
-            "global_mode": global_mode,
-            "user_email": user_email,
-        },
+        input_payload={"user_email": user_email},
         retrieval_payload={},
-        output_payload=result,
+        output_payload={"docs_indexed": indexed, "errors": errors},
         status=AuditStatus.OK,
     )
-    return {"status": status_value, "message": message, **result}
+    return {"status": status_value, "message": message, "indexed": indexed, "skipped": 0}
 
 
 SUGGESTION_THRESHOLD_DEFAULT = 3
