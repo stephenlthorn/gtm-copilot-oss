@@ -36,11 +36,21 @@ class HybridRetrievalService:
         top_k: int = 10,
         source_types: list[str] | None = None,
     ) -> list[RetrievalResult]:
+        from sqlalchemy import select as sa_select
+        from app.models.entities import KBConfig
+
+        config = self.db.execute(sa_select(KBConfig).limit(1)).scalar_one_or_none()
+        cutover = config.retrieval_cutover if config is not None else False
+
         query_embeddings = await self.embedding_service.embed_chunks([query])
         query_vec = query_embeddings[0] if query_embeddings else []
 
         vector_results = self._vector_search(query_vec, org_id, source_types)
         fulltext_results = self._fulltext_search(query, org_id, source_types)
+
+        if not cutover:
+            vector_results = vector_results + self._legacy_vector_search(query_vec, top_k * 2)
+            fulltext_results = fulltext_results + self._legacy_fulltext_search(query, top_k * 2)
 
         fused = self._reciprocal_rank_fusion(vector_results, fulltext_results)
 
@@ -263,6 +273,82 @@ class HybridRetrievalService:
                 )
             )
         return results
+
+    def _legacy_vector_search(self, query_vec: list[float], limit: int = 20) -> list[RetrievalResult]:
+        """Fan-out vector search to kb_chunks during migration transition."""
+        if not query_vec:
+            return []
+        try:
+            import json as _json
+            from sqlalchemy import select as sa_select
+            from app.models.entities import KBChunk, KBDocument
+
+            rows = self.db.execute(
+                sa_select(KBChunk, KBDocument.title, KBDocument.source_type, KBDocument.source_id)
+                .join(KBDocument, KBChunk.document_id == KBDocument.id)
+                .where(KBChunk.embedding.isnot(None))
+                .limit(200)
+            ).all()
+
+            scored: list[tuple[float, object, str, object, str]] = []
+            for chunk, title, source_type, source_id in rows:
+                emb = chunk.embedding
+                if emb is None:
+                    continue
+                if isinstance(emb, str):
+                    try:
+                        emb = _json.loads(emb)
+                    except Exception:
+                        continue
+                score = self._cosine_similarity(query_vec, emb)
+                scored.append((score, chunk, title or "", source_type, source_id or ""))
+
+            scored.sort(key=lambda x: x[0], reverse=True)
+            results = []
+            for score, chunk, title, source_type, source_id in scored[:limit]:
+                st = source_type.value if hasattr(source_type, "value") else str(source_type)
+                results.append(RetrievalResult(
+                    chunk_text=chunk.text or "",
+                    source_type=st,
+                    source_ref=source_id,
+                    title=title,
+                    score=score,
+                    metadata=chunk.metadata_json or {},
+                ))
+            return results
+        except Exception as exc:
+            logger.warning("Legacy vector search failed: %s", exc)
+            return []
+
+    def _legacy_fulltext_search(self, query: str, limit: int = 20) -> list[RetrievalResult]:
+        """Fan-out fulltext search to kb_chunks during migration transition."""
+        try:
+            from sqlalchemy import select as sa_select
+            from app.models.entities import KBChunk, KBDocument
+
+            like_term = f"%{query}%"
+            rows = self.db.execute(
+                sa_select(KBChunk, KBDocument.title, KBDocument.source_type, KBDocument.source_id)
+                .join(KBDocument, KBChunk.document_id == KBDocument.id)
+                .where(KBChunk.text.ilike(like_term))
+                .limit(limit)
+            ).all()
+
+            results = []
+            for chunk, title, source_type, source_id in rows:
+                st = source_type.value if hasattr(source_type, "value") else str(source_type)
+                results.append(RetrievalResult(
+                    chunk_text=chunk.text or "",
+                    source_type=st,
+                    source_ref=source_id or "",
+                    title=title or "",
+                    score=0.5,
+                    metadata=chunk.metadata_json or {},
+                ))
+            return results
+        except Exception as exc:
+            logger.warning("Legacy fulltext search failed: %s", exc)
+            return []
 
     @staticmethod
     def _reciprocal_rank_fusion(
