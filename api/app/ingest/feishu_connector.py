@@ -214,8 +214,8 @@ class FeishuConnector:
         logger.info("Feishu wiki: found %d spaces", len(spaces))
         return spaces
 
-    def list_wiki_nodes(self, space_id: str) -> list[dict[str, Any]]:
-        """Return all nodes (flat list) from a wiki space."""
+    def list_wiki_nodes(self, space_id: str, parent_node_token: str | None = None) -> list[dict[str, Any]]:
+        """Return direct children of parent_node_token in the given space (paged)."""
         url = self.base_url + _LIST_WIKI_NODES_URL.format(space_id=space_id)
         nodes: list[dict[str, Any]] = []
         page_token: str | None = None
@@ -224,11 +224,18 @@ class FeishuConnector:
             params: dict[str, Any] = {"page_size": 50}
             if page_token:
                 params["page_token"] = page_token
+            if parent_node_token:
+                params["parent_node_token"] = parent_node_token
             resp = httpx.get(url, headers=self._headers(), params=params, timeout=20)
-            resp.raise_for_status()
+            if not resp.is_success:
+                logger.warning(
+                    "Feishu list_wiki_nodes HTTP %s space=%s parent=%s: %s",
+                    resp.status_code, space_id, parent_node_token, resp.text[:500],
+                )
+                break
             data = resp.json()
             if data.get("code") != 0:
-                logger.warning("Feishu list_wiki_nodes error for space %s: %s", space_id, data)
+                logger.warning("Feishu list_wiki_nodes error space=%s: %s", space_id, data)
                 break
             payload = data.get("data", {})
             nodes.extend(payload.get("items") or [])
@@ -237,6 +244,38 @@ class FeishuConnector:
             page_token = payload.get("page_token")
 
         return nodes
+
+    def _collect_wiki_docs(self, space_id: str, root_node_token: str, seen_docs: set[str]) -> list[dict[str, Any]]:
+        """BFS-collect all doc nodes reachable under root_node_token."""
+        docs: list[dict[str, Any]] = []
+        queue: list[str] = [root_node_token]
+        seen_nodes: set[str] = set()
+
+        while queue:
+            parent_token = queue.pop(0)
+            if parent_token in seen_nodes:
+                continue
+            seen_nodes.add(parent_token)
+
+            children = self.list_wiki_nodes(space_id, parent_node_token=parent_token)
+            for child in children:
+                obj_type = (child.get("obj_type") or "").strip().lower()
+                obj_token = (child.get("obj_token") or "").strip()
+                node_token = (child.get("node_token") or "").strip()
+
+                if obj_token and obj_token not in seen_docs and obj_type in {"docx", "doc"}:
+                    seen_docs.add(obj_token)
+                    docs.append({
+                        "token": obj_token,
+                        "name": child.get("title") or obj_token,
+                        "_source": "wiki",
+                        "_space_id": space_id,
+                    })
+
+                if node_token and node_token not in seen_nodes:
+                    queue.append(node_token)
+
+        return docs
 
     def get_wiki_node(self, node_token: str) -> dict[str, Any]:
         """Get wiki node info by token — returns space_id, obj_token, obj_type, etc."""
@@ -259,27 +298,28 @@ class FeishuConnector:
         seen_docs: set[str] = set()
 
         if root_tokens:
-            seen_spaces: set[str] = set()
             for token in root_tokens:
                 try:
                     node = self.get_wiki_node(token)
                     space_id = (node.get("space_id") or "").strip()
-                    if not space_id or space_id in seen_spaces:
+                    node_token = (node.get("node_token") or token).strip()
+                    if not space_id:
                         continue
-                    seen_spaces.add(space_id)
-                    nodes = self.list_wiki_nodes(space_id)
-                    for n in nodes:
-                        obj_type = (n.get("obj_type") or "").strip().lower()
-                        obj_token = (n.get("obj_token") or "").strip()
-                        if obj_type not in {"docx", "doc"} or not obj_token or obj_token in seen_docs:
-                            continue
+
+                    # Include root node itself if it's a doc
+                    obj_type = (node.get("obj_type") or "").strip().lower()
+                    obj_token = (node.get("obj_token") or "").strip()
+                    if obj_type in {"docx", "doc"} and obj_token and obj_token not in seen_docs:
                         seen_docs.add(obj_token)
                         docs.append({
                             "token": obj_token,
-                            "name": n.get("title") or obj_token,
+                            "name": node.get("title") or obj_token,
                             "_source": "wiki",
                             "_space_id": space_id,
                         })
+
+                    # Recursively collect all docs under this node
+                    docs.extend(self._collect_wiki_docs(space_id, node_token, seen_docs))
                 except Exception as exc:
                     logger.warning("Feishu wiki: failed to resolve root token %s: %s", token, exc)
             logger.info("Feishu wiki: found %d docs via %d root tokens", len(docs), len(root_tokens))
