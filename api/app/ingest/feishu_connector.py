@@ -281,7 +281,12 @@ class FeishuConnector:
         """Get wiki node info by token — returns space_id, obj_token, obj_type, etc."""
         url = self.base_url + "/wiki/v2/spaces/get_node"
         resp = httpx.get(url, headers=self._headers(), params={"token": node_token}, timeout=20)
-        resp.raise_for_status()
+        if not resp.is_success:
+            logger.warning(
+                "Feishu get_wiki_node HTTP %s token=%s: %s",
+                resp.status_code, node_token, resp.text[:500],
+            )
+            resp.raise_for_status()
         data = resp.json()
         if data.get("code") != 0:
             raise RuntimeError(f"Feishu get_wiki_node error: {data}")
