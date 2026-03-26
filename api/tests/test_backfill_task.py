@@ -73,6 +73,4 @@ def test_backfill_skips_already_indexed_chunks():
         from app.tasks.indexing_tasks import backfill_knowledge_index
         result = backfill_knowledge_index(offset=0, batch_size=500)
 
-    # add_all should be called with empty list
-    call_args = mock_db.add_all.call_args
-    assert call_args is None or len(call_args[0][0]) == 0
+    mock_db.add_all.assert_not_called()

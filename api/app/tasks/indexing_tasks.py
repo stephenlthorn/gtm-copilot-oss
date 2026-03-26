@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json as _json
 import logging
 
 from app.db.init_db import init_db
@@ -136,9 +137,6 @@ def full_reindex(org_id: int = 1) -> dict:
         results["github"] = {"error": str(exc)}
 
     return results
-
-
-import json as _json
 
 
 @celery_app.task(name="backfill_knowledge_index", bind=True, max_retries=None, rate_limit="10/m")
