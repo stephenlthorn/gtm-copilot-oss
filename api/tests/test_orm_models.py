@@ -1,6 +1,3 @@
-import pytest
-
-
 def test_sync_source_type_has_expected_values():
     from app.models.entities import SyncSourceType
     assert SyncSourceType.feishu.value == "feishu"
@@ -33,3 +30,15 @@ def test_sync_status_can_be_instantiated():
     from app.models.entities import SyncStatus, SyncStatusEnum
     ss = SyncStatus(source_type="feishu", org_id=1, status=SyncStatusEnum.idle)
     assert ss.org_id == 1
+
+
+def test_sync_source_type_has_all_five_members():
+    from app.models.entities import SyncSourceType
+    values = {m.value for m in SyncSourceType}
+    assert values == {"feishu", "google_drive", "chorus", "tidb_docs", "github"}
+
+
+def test_sync_status_status_attribute_is_set():
+    from app.models.entities import SyncStatus, SyncStatusEnum
+    ss = SyncStatus(source_type="feishu", org_id=1, status=SyncStatusEnum.syncing)
+    assert ss.status == SyncStatusEnum.syncing
