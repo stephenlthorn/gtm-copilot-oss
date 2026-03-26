@@ -17,7 +17,7 @@ depends_on = None
 def upgrade() -> None:
     op.add_column(
         "kb_config",
-        sa.Column("source_profiles_json", sa.JSON, nullable=False, server_default="{}"),
+        sa.Column("source_profiles_json", sa.JSON, nullable=True),
     )
 
 

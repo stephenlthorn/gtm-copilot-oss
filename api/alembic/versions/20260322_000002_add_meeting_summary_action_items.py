@@ -19,7 +19,7 @@ def upgrade() -> None:
     op.add_column("chorus_calls", sa.Column("meeting_summary", sa.Text, nullable=True))
     op.add_column(
         "chorus_calls",
-        sa.Column("action_items", sa.JSON, nullable=False, server_default=sa.text("('[]')")),
+        sa.Column("action_items", sa.JSON, nullable=True),
     )
 
 

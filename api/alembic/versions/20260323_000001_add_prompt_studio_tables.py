@@ -21,10 +21,10 @@ def upgrade() -> None:
         sa.Column("id", sa.String(64), primary_key=True),
         sa.Column("category", sa.String(32), nullable=False),
         sa.Column("name", sa.String(128), nullable=False),
-        sa.Column("description", sa.Text, nullable=False, server_default=""),
+        sa.Column("description", sa.Text, nullable=True),
         sa.Column("default_content", sa.Text, nullable=False),
         sa.Column("current_content", sa.Text, nullable=False),
-        sa.Column("variables", sa.Text, nullable=False, server_default="[]"),
+        sa.Column("variables", sa.Text, nullable=True),
         sa.Column("updated_by", sa.String(255), nullable=True),
         sa.Column(
             "updated_at",
