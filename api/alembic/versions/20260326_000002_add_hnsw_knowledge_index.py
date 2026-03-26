@@ -19,11 +19,13 @@ def upgrade() -> None:
     op.execute("ALTER TABLE knowledge_index DROP COLUMN embedding;")
     op.execute("ALTER TABLE knowledge_index ADD COLUMN embedding VECTOR(1536);")
     # TiDB-specific HNSW index using cosine distance.
+    # ADD_COLUMNAR_REPLICA_ON_DEMAND creates the TiFlash replica automatically.
     op.execute(
         "ALTER TABLE knowledge_index "
         "ADD VECTOR INDEX idx_ki_embedding "
         "((VEC_COSINE_DISTANCE(embedding))) "
-        "USING HNSW;"
+        "USING HNSW "
+        "ADD_COLUMNAR_REPLICA_ON_DEMAND;"
     )
 
 
