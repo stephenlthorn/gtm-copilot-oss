@@ -8,6 +8,7 @@ import SourceProfilesPanel from '../../../components/SourceProfilesPanel';
 import PromptStudio from '../../../components/PromptStudio';
 import IntelBriefSettingsPanel from '../../../components/IntelBriefSettingsPanel';
 import ExternalAccountsPanel from '../../../components/ExternalAccountsPanel';
+import FeishuPanel from '../../../components/FeishuPanel';
 
 const NAV = [
   ['#account', 'Account'],
@@ -137,6 +138,7 @@ export default async function SettingsPage() {
         <SectionLabel id="knowledge">Knowledge Sources</SectionLabel>
 
         <CallsPanel />
+        <FeishuPanel />
 
         {/* ── AI Behavior ───────────────────────────────────── */}
         <SectionLabel id="ai">AI Behavior</SectionLabel>
