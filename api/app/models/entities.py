@@ -238,6 +238,7 @@ class KBConfig(Base):
     feishu_folder_token: Mapped[str | None] = mapped_column(String(255))
     feishu_app_id: Mapped[str | None] = mapped_column(String(255))
     feishu_app_secret: Mapped[str | None] = mapped_column(String(255))
+    retrieval_cutover: Mapped[bool] = mapped_column(default=False, nullable=False, server_default="false")
     chorus_enabled: Mapped[bool] = mapped_column(default=False, nullable=False)
     retrieval_top_k: Mapped[int] = mapped_column(Integer, default=8, nullable=False)
     llm_model: Mapped[str] = mapped_column(String(100), default="gpt-5.3-codex", nullable=False, server_default="gpt-5.3-codex")

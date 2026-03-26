@@ -42,3 +42,12 @@ def test_sync_status_status_attribute_is_set():
     from app.models.entities import SyncStatus, SyncStatusEnum
     ss = SyncStatus(source_type="feishu", org_id=1, status=SyncStatusEnum.syncing)
     assert ss.status == SyncStatusEnum.syncing
+
+
+def test_kb_config_has_retrieval_cutover():
+    from app.models.entities import KBConfig
+    config = KBConfig()
+    assert hasattr(config, "retrieval_cutover")
+    # SA2 mapped_column(default=False) is a column INSERT default, not a Python __init__ default.
+    # The attribute is None on a bare instantiation; the DB applies False on INSERT.
+    assert config.retrieval_cutover in (False, None)
