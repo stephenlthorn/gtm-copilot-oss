@@ -238,12 +238,55 @@ class FeishuConnector:
 
         return nodes
 
-    def list_wiki_documents(self) -> list[dict[str, Any]]:
-        """Return all docx/doc items from all wiki spaces (flat, deduplicated)."""
-        spaces = self.list_wiki_spaces()
-        docs: list[dict[str, Any]] = []
-        seen: set[str] = set()
+    def get_wiki_node(self, node_token: str) -> dict[str, Any]:
+        """Get wiki node info by token — returns space_id, obj_token, obj_type, etc."""
+        url = self.base_url + "/wiki/v2/nodes"
+        resp = httpx.get(url, headers=self._headers(), params={"token": node_token}, timeout=20)
+        resp.raise_for_status()
+        data = resp.json()
+        if data.get("code") != 0:
+            raise RuntimeError(f"Feishu get_wiki_node error: {data}")
+        return data.get("data", {}).get("node", {})
 
+    def list_wiki_documents(self, root_tokens: list[str] | None = None) -> list[dict[str, Any]]:
+        """Return all docx/doc items from wiki spaces (flat, deduplicated).
+
+        If root_tokens are provided, resolve each to a space_id via the nodes API
+        and list that space's nodes directly — bypasses space enumeration permission.
+        Falls back to auto-discovering all accessible spaces when no tokens given.
+        """
+        docs: list[dict[str, Any]] = []
+        seen_docs: set[str] = set()
+
+        if root_tokens:
+            seen_spaces: set[str] = set()
+            for token in root_tokens:
+                try:
+                    node = self.get_wiki_node(token)
+                    space_id = (node.get("space_id") or "").strip()
+                    if not space_id or space_id in seen_spaces:
+                        continue
+                    seen_spaces.add(space_id)
+                    nodes = self.list_wiki_nodes(space_id)
+                    for n in nodes:
+                        obj_type = (n.get("obj_type") or "").strip().lower()
+                        obj_token = (n.get("obj_token") or "").strip()
+                        if obj_type not in {"docx", "doc"} or not obj_token or obj_token in seen_docs:
+                            continue
+                        seen_docs.add(obj_token)
+                        docs.append({
+                            "token": obj_token,
+                            "name": n.get("title") or obj_token,
+                            "_source": "wiki",
+                            "_space_id": space_id,
+                        })
+                except Exception as exc:
+                    logger.warning("Feishu wiki: failed to resolve root token %s: %s", token, exc)
+            logger.info("Feishu wiki: found %d docs via %d root tokens", len(docs), len(root_tokens))
+            return docs
+
+        # Auto-discovery fallback
+        spaces = self.list_wiki_spaces()
         for space in spaces:
             space_id = (space.get("space_id") or "").strip()
             if not space_id:
@@ -252,9 +295,9 @@ class FeishuConnector:
             for node in nodes:
                 obj_type = (node.get("obj_type") or "").strip().lower()
                 obj_token = (node.get("obj_token") or "").strip()
-                if obj_type not in {"docx", "doc"} or not obj_token or obj_token in seen:
+                if obj_type not in {"docx", "doc"} or not obj_token or obj_token in seen_docs:
                     continue
-                seen.add(obj_token)
+                seen_docs.add(obj_token)
                 docs.append({
                     "token": obj_token,
                     "name": node.get("title") or obj_token,
