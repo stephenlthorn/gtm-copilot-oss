@@ -6,6 +6,7 @@ from celery import Celery
 
 from app.core.settings import get_settings
 from app.db.init_db import init_db
+import app.tasks.indexing_tasks  # noqa: F401 — registers v2 Celery tasks
 from app.db.session import SessionLocal
 from app.ingest.drive_ingestor import DriveIngestor
 from app.ingest.transcript_ingestor import TranscriptIngestor
@@ -20,8 +21,8 @@ celery_app.conf.update(
     task_acks_late=True,
     worker_prefetch_multiplier=1,
     beat_schedule={
-        "daily-ingestion": {
-            "task": "daily_ingestion",
+        "daily-ingestion-v2": {
+            "task": "full_reindex_v2",
             "schedule": 24 * 60 * 60,
         }
     },

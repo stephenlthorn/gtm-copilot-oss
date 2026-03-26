@@ -54,7 +54,7 @@ class Settings(BaseSettings):
     feishu_app_secret: str = ""
     feishu_base_url: str = "https://open.feishu.cn/open-apis"
     feishu_oauth_state_ttl_seconds: int = 600
-    feishu_oauth_scopes: str = "offline_access drive:drive:readonly docs:document:readonly"
+    feishu_oauth_scopes: str = "offline_access drive:drive:readonly docs:document:readonly wiki:wiki:readonly"
 
     call_provider: str = "generic"
     call_api_key: str | None = None
