@@ -6,6 +6,37 @@ Built and maintained by Stephen Thorn.
 
 ---
 
+## Contents
+
+**Getting started**
+- [Quick Start (EC2 / Production)](#quick-start-ec2--production)
+- [Configuration](#configuration)
+- [Development](#development)
+- [Production Deployment (AWS EC2)](#production-deployment-aws-ec2)
+
+**Using the tool**
+- [Chat Sections Reference](#chat-sections-reference)
+  - [1. Oracle Chat (General)](#1-oracle-chat-general)
+  - [2. Pre-Call Intel](#2-pre-call-intel)
+  - [3. Post-Call Analysis — MEDDPICC Deal Coach](#3-post-call-analysis-meddpicc-deal-coach)
+  - [4. Follow-Up Email](#4-follow-up-email)
+  - [5. Market Research / TAL](#5-market-research--tal)
+  - [6. SE: POC Plan](#6-se-poc-plan)
+  - [7. SE: Architecture Fit](#7-se-architecture-fit)
+  - [8. SE: Competitor Coach](#8-se-competitor-coach)
+- [Features by Role](#features-by-role)
+- [Account Deal Memory](#account-deal-memory)
+- [Account Intelligence Dashboard](#account-intelligence-dashboard)
+- [MCP Integrations](#mcp-integrations)
+
+**How it works**
+- [How It Works](#how-it-works)
+- [Architecture](#architecture)
+- [Tech Stack](#tech-stack)
+- [Key Functions Reference](#key-functions-reference)
+
+---
+
 ## How It Works
 
 ### Data Sources → AI Outputs
