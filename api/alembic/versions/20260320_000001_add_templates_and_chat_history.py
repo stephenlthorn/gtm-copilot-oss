@@ -11,6 +11,23 @@ import uuid
 from alembic import op
 import sqlalchemy as sa
 from sqlalchemy import text
+from sqlalchemy.exc import OperationalError
+
+
+def _safe_create_table(name, *args, **kwargs):
+    try:
+        op.create_table(name, *args, **kwargs)
+    except OperationalError as e:
+        if getattr(e.orig, "args", (None,))[0] != 1050:
+            raise
+
+
+def _safe_create_index(name, table, cols, **kwargs):
+    try:
+        op.create_index(name, table, cols, **kwargs)
+    except OperationalError as e:
+        if getattr(e.orig, "args", (None,))[0] != 1061:
+            raise
 
 
 revision = "20260320_000001"
@@ -20,7 +37,7 @@ depends_on = None
 
 
 def upgrade() -> None:
-    op.create_table(
+    _safe_create_table(
         "user_templates",
         sa.Column("id", sa.String(36), primary_key=True),
         sa.Column("user_email", sa.String(255), nullable=False),
@@ -36,9 +53,9 @@ def upgrade() -> None:
         ),
         sa.UniqueConstraint("user_email", "section_key", name="uq_user_section"),
     )
-    op.create_index("ix_user_templates_section_key", "user_templates", ["section_key"])
+    _safe_create_index("ix_user_templates_section_key", "user_templates", ["section_key"])
 
-    op.create_table(
+    _safe_create_table(
         "chat_messages",
         sa.Column("id", sa.String(36), primary_key=True),
         sa.Column("user_email", sa.String(255), nullable=False),
@@ -51,7 +68,7 @@ def upgrade() -> None:
             server_default=sa.func.now(),
         ),
     )
-    op.create_index(
+    _safe_create_index(
         "ix_chat_messages_user_created",
         "chat_messages",
         ["user_email", "created_at"],
@@ -212,7 +229,7 @@ def _seed_defaults() -> None:
         safe_name = template_name.replace("'", "''")
         op.execute(
             text(
-                f"INSERT INTO user_templates (id, user_email, section_key, template_name, content, is_default)"
+                f"INSERT IGNORE INTO user_templates (id, user_email, section_key, template_name, content, is_default)"
                 f" VALUES ('{row_id}', 'system', '{section_key}', '{safe_name}', '{safe_content}', TRUE)"
             )
         )

@@ -7,6 +7,7 @@ Create Date: 2026-03-16
 
 from alembic import op
 import sqlalchemy as sa
+from sqlalchemy.exc import OperationalError
 
 revision = "20260316_000001"
 down_revision = "20260302_000005"
@@ -14,13 +15,29 @@ branch_labels = None
 depends_on = None
 
 
+def _safe_add_column(table: str, col: sa.Column) -> None:
+    try:
+        op.add_column(table, col)
+    except OperationalError as e:
+        if getattr(e.orig, "args", (None,))[0] != 1060:
+            raise
+
+
+def _safe_create_table(name: str, *args, **kwargs) -> None:
+    try:
+        op.create_table(name, *args, **kwargs)
+    except OperationalError as e:
+        if getattr(e.orig, "args", (None,))[0] != 1050:  # 1050 = Table already exists
+            raise
+
+
 def upgrade() -> None:
-    op.add_column(
+    _safe_add_column(
         "kb_config",
         sa.Column("reasoning_effort", sa.String(16), nullable=False, server_default="medium"),
     )
 
-    op.create_table(
+    _safe_create_table(
         "user_preferences",
         sa.Column("user_email", sa.String(255), primary_key=True),
         sa.Column("llm_model", sa.String(64), nullable=True),

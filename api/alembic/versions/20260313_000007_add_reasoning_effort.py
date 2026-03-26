@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from alembic import op
 import sqlalchemy as sa
+from sqlalchemy.exc import OperationalError
 
 
 revision = "20260313_000007"
@@ -17,8 +18,16 @@ branch_labels = None
 depends_on = None
 
 
+def _safe_add_column(table: str, col: sa.Column) -> None:
+    try:
+        op.add_column(table, col)
+    except OperationalError as e:
+        if getattr(e.orig, "args", (None,))[0] != 1060:  # 1060 = Duplicate column name
+            raise
+
+
 def upgrade() -> None:
-    op.add_column("kb_config", sa.Column("reasoning_effort", sa.String(20), nullable=True))
+    _safe_add_column("kb_config", sa.Column("reasoning_effort", sa.String(20), nullable=True))
 
 
 def downgrade() -> None:
