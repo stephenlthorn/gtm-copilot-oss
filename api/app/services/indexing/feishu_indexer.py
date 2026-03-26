@@ -48,6 +48,7 @@ class FeishuIndexer:
                 app_id=self._app_id,
                 app_secret=self._app_secret,
                 base_url=self.settings.feishu_base_url,
+                access_token=self.settings.feishu_access_token or None,
             )
 
             root_tokens = self._get_root_tokens()
