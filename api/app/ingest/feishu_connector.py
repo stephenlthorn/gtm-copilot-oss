@@ -10,6 +10,8 @@ logger = logging.getLogger(__name__)
 _TENANT_TOKEN_URL = "/auth/v3/tenant_access_token/internal"
 _LIST_FILES_URL = "/drive/v1/files"
 _DOC_CONTENT_URL = "/docx/v1/documents/{doc_token}/raw_content"
+_LIST_WIKI_SPACES_URL = "/wiki/v2/spaces"
+_LIST_WIKI_NODES_URL = "/wiki/v2/spaces/{space_id}/nodes"
 
 
 class FeishuConnector:
@@ -183,6 +185,85 @@ class FeishuConnector:
     def list_folder(self, folder_token: str) -> list[dict[str, Any]]:
         """Backward-compatible single-root listing."""
         return self.list_documents([folder_token], recursive=False)
+
+    # ------------------------------------------------------------------
+    # Wiki
+    # ------------------------------------------------------------------
+
+    def list_wiki_spaces(self) -> list[dict[str, Any]]:
+        """Return all wiki spaces the app has access to."""
+        url = self.base_url + _LIST_WIKI_SPACES_URL
+        spaces: list[dict[str, Any]] = []
+        page_token: str | None = None
+
+        while True:
+            params: dict[str, Any] = {"page_size": 50}
+            if page_token:
+                params["page_token"] = page_token
+            resp = httpx.get(url, headers=self._headers(), params=params, timeout=20)
+            resp.raise_for_status()
+            data = resp.json()
+            if data.get("code") != 0:
+                raise RuntimeError(f"Feishu list_wiki_spaces error: {data}")
+            payload = data.get("data", {})
+            spaces.extend(payload.get("items") or [])
+            if not payload.get("has_more"):
+                break
+            page_token = payload.get("page_token")
+
+        logger.info("Feishu wiki: found %d spaces", len(spaces))
+        return spaces
+
+    def list_wiki_nodes(self, space_id: str) -> list[dict[str, Any]]:
+        """Return all nodes (flat list) from a wiki space."""
+        url = self.base_url + _LIST_WIKI_NODES_URL.format(space_id=space_id)
+        nodes: list[dict[str, Any]] = []
+        page_token: str | None = None
+
+        while True:
+            params: dict[str, Any] = {"page_size": 50}
+            if page_token:
+                params["page_token"] = page_token
+            resp = httpx.get(url, headers=self._headers(), params=params, timeout=20)
+            resp.raise_for_status()
+            data = resp.json()
+            if data.get("code") != 0:
+                logger.warning("Feishu list_wiki_nodes error for space %s: %s", space_id, data)
+                break
+            payload = data.get("data", {})
+            nodes.extend(payload.get("items") or [])
+            if not payload.get("has_more"):
+                break
+            page_token = payload.get("page_token")
+
+        return nodes
+
+    def list_wiki_documents(self) -> list[dict[str, Any]]:
+        """Return all docx/doc items from all wiki spaces (flat, deduplicated)."""
+        spaces = self.list_wiki_spaces()
+        docs: list[dict[str, Any]] = []
+        seen: set[str] = set()
+
+        for space in spaces:
+            space_id = (space.get("space_id") or "").strip()
+            if not space_id:
+                continue
+            nodes = self.list_wiki_nodes(space_id)
+            for node in nodes:
+                obj_type = (node.get("obj_type") or "").strip().lower()
+                obj_token = (node.get("obj_token") or "").strip()
+                if obj_type not in {"docx", "doc"} or not obj_token or obj_token in seen:
+                    continue
+                seen.add(obj_token)
+                docs.append({
+                    "token": obj_token,
+                    "name": node.get("title") or obj_token,
+                    "_source": "wiki",
+                    "_space_id": space_id,
+                })
+
+        logger.info("Feishu wiki: found %d docs across %d spaces", len(docs), len(spaces))
+        return docs
 
     # ------------------------------------------------------------------
     # Content
