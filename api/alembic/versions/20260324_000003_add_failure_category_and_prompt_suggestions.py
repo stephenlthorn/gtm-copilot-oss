@@ -19,7 +19,7 @@ def upgrade() -> None:
     bind = op.get_bind()
     dialect = bind.dialect.name
     if dialect == "mysql":
-        uuid_col = sa.BINARY(16)
+        uuid_col = sa.String(36)
     else:
         uuid_col = sa.Text()
 

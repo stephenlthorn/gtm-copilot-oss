@@ -18,9 +18,9 @@ depends_on = None
 def upgrade() -> None:
     bind = op.get_bind()
     dialect = bind.dialect.name
-    # UUID column type: BINARY(16) for MySQL/TiDB, TEXT for others
+    # UUID column type: String(36) for MySQL/TiDB (matches kb_chunks.id), Text for others
     if dialect == "mysql":
-        uuid_col = sa.BINARY(16)
+        uuid_col = sa.String(36)
     else:
         uuid_col = sa.Text()
 
