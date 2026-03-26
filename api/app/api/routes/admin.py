@@ -605,8 +605,11 @@ def sync_feishu(request: Request, db: Session = Depends(db_session)) -> dict:
 
     user_email = _request_user_email(request)
 
+    kb_config: KBConfig | None = db.get(KBConfig, 1)
+    app_id, app_secret = _resolve_feishu_creds(kb_config)
+
     embedding_service = EmbeddingService()
-    indexer = FeishuIndexer(db, embedding_service)
+    indexer = FeishuIndexer(db, embedding_service, app_id=app_id, app_secret=app_secret)
 
     try:
         loop = asyncio.get_event_loop()

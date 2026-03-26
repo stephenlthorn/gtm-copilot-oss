@@ -16,9 +16,17 @@ logger = logging.getLogger(__name__)
 
 
 class FeishuIndexer:
-    def __init__(self, db: Session, embedding_service: EmbeddingService | None = None) -> None:
+    def __init__(
+        self,
+        db: Session,
+        embedding_service: EmbeddingService | None = None,
+        app_id: str | None = None,
+        app_secret: str | None = None,
+    ) -> None:
         self.db = db
         self.settings = get_settings()
+        self._app_id = app_id or self.settings.feishu_app_id
+        self._app_secret = app_secret or self.settings.feishu_app_secret
         self.embedding_service = embedding_service or EmbeddingService()
         self.index_manager = IndexManager(db, self.embedding_service)
 
@@ -37,8 +45,8 @@ class FeishuIndexer:
 
         try:
             connector = FeishuConnector(
-                app_id=self.settings.feishu_app_id,
-                app_secret=self.settings.feishu_app_secret,
+                app_id=self._app_id,
+                app_secret=self._app_secret,
                 base_url=self.settings.feishu_base_url,
             )
 
