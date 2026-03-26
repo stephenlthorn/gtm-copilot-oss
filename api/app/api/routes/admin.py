@@ -619,7 +619,7 @@ def sync_feishu(request: Request, db: Session = Depends(db_session)) -> dict:
     result = loop.run_until_complete(indexer.sync(org_id=1))
 
     indexed = result.docs_indexed
-    errors = len(result.errors)
+    errors = len(result.errors or [])
     status_value = "ok"
     message: str | None = None
     if errors > 0 and indexed == 0:
