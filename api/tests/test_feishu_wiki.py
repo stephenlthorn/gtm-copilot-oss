@@ -99,3 +99,35 @@ def test_list_wiki_documents_skips_non_docx_nodes(connector):
 
     assert len(docs) == 1
     assert docs[0]["token"] == "doc_1"
+
+
+def test_feishu_indexer_sync_includes_wiki_docs():
+    """Indexer should call list_wiki_documents and index those docs too."""
+    import asyncio
+    from unittest.mock import AsyncMock, MagicMock, patch
+
+    mock_db = MagicMock()
+    mock_db.execute.return_value.scalar_one_or_none.return_value = None  # no KBConfig
+
+    with patch("app.services.indexing.feishu_indexer.FeishuConnector") as MockConnector, \
+         patch("app.services.indexing.feishu_indexer.IndexManager") as MockIndexManager:
+
+        instance = MockConnector.return_value
+        instance.list_documents.return_value = []
+        instance.list_wiki_documents.return_value = [
+            {"token": "wiki_doc_1", "name": "Wiki Page 1", "_source": "wiki"}
+        ]
+        instance.get_doc_content.return_value = "Some wiki content"
+
+        mock_index = MockIndexManager.return_value
+        mock_index.update_sync_status = MagicMock()
+        mock_index.index_document = AsyncMock(return_value=2)
+
+        from app.services.indexing.feishu_indexer import FeishuIndexer
+        indexer = FeishuIndexer(db=mock_db)
+
+        result = asyncio.run(indexer.sync(org_id=1))
+
+    instance.list_wiki_documents.assert_called_once()
+    mock_index.index_document.assert_called_once()
+    assert result.docs_indexed == 1

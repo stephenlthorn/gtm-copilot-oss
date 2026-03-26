@@ -45,7 +45,17 @@ class FeishuIndexer:
             root_tokens = self._get_root_tokens()
             doc_items = connector.list_documents(root_tokens, recursive=True)
 
-            for item in doc_items:
+            wiki_items: list = []
+            try:
+                wiki_items = connector.list_wiki_documents()
+            except Exception as exc:
+                msg = f"Feishu wiki listing failed: {exc}"
+                logger.warning(msg)
+                errors.append(msg)
+
+            all_items = doc_items + wiki_items
+
+            for item in all_items:
                 token = item.get("token", "")
                 title = item.get("name") or item.get("title") or token
 
