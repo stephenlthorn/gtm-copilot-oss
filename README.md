@@ -877,6 +877,247 @@ The server also reads Codex CLI auth from `~/.codex/auth.json` (mounted into the
 
 ---
 
+## Chat Sections Reference
+
+The chat interface has eight sections. Each maps to a dedicated system prompt in `api/app/prompts/templates.py`. Selecting a section changes the AI's persona, output format, and retrieval strategy for that conversation.
+
+---
+
+### 1. Oracle Chat (General)
+
+**Prompt:** `SYSTEM_ORACLE`
+**Best for:** Free-form questions — technical TiDB questions, product clarifications, quick research, anything that doesn't fit a structured template.
+
+**What it does:**
+- Adapts response style to the question type. Technical or factual questions ("How does TiFlash work?") get a direct, concise answer. Deal or account questions ("How should I position against CockroachDB for Acme?") get a structured Context / Insight / Recommendation format.
+- Proactively searches **docs.pingcap.com** for any TiDB feature, SQL compatibility, configuration, or behavior question — official docs take precedence over training data.
+- Applies TiDB's "database for AI agents" narrative when agent or AI topics come up.
+- Performs KB retrieval (Google Drive, Feishu, call transcripts) when RAG is enabled. Short conversational inputs skip retrieval automatically.
+- Web search toggle controls access to `web_search_preview`. Citations shown for all retrieved sources.
+
+**Inputs needed:** Just type. No fields to fill.
+
+**Outputs:**
+- Direct answer, structured analysis, or a mix depending on question type
+- Source citations (KB hits and/or web URLs)
+- Follow-up question suggestions when relevant
+
+**When to use instead:** If you're researching a specific company before a call, switch to Pre-Call Intel. If you're analyzing a transcript, use Post-Call Analysis.
+
+---
+
+### 2. Pre-Call Intel
+
+**Prompt:** `SYSTEM_PRE_CALL_INTEL`
+**Best for:** Preparing for any first or follow-up meeting with a prospect — company research, persona mapping, and generating ready-to-send outbound messages.
+
+**What it does:**
+
+Deep company intelligence brief across 10 sections:
+
+| Section | What it produces |
+|---|---|
+| 1. Prospect | Name, role, tenure, LinkedIn URL — verified via live search |
+| 2. Company | Industry, size, funding, investors, growth signals |
+| 3. Architecture Hypothesis | Current databases (job postings, GitHub, BuiltWith, engineering blogs) with confidence ratings |
+| 4. AI & Agent Signals | Is the company building agentic systems? Urgency rating: High / Medium / Low |
+| 5. Pain Hypotheses | 3–5 ranked pains with signal source, what to listen for, TiDB connection |
+| 6. ICP Persona Map | 2–3 most relevant personas for this company (Head of AI, CTO, Platform Eng), each with tailored value prop and engagement angle |
+| 7. TiDB Value Props | 3 tailored props — leads with agent/AI framing if signals exist, falls back to database scaling |
+| 8. Discovery Questions | 5 MEDDPICC-labeled questions with rationale |
+| 9. Meeting Goal | One specific qualification milestone to achieve — not "learn their stack" |
+| 10. Outbound Messaging | Cold email, LinkedIn CR, LinkedIn follow-up, voicemail script, and a full 16-step multi-channel sequence |
+
+**Primary narrative:** Every output leads with "TiDB is the database for AI agents." Agent memory, agent state, multi-agent coordination, and agent-scale concurrency are surfaced before any database feature talk. GTM framework (pain → value prop → discovery) is applied second.
+
+**Accuracy rules:**
+- Executes live web searches (Crunchbase, LinkedIn, SEC filings, job boards, GitHub) before writing any section
+- Marks any claim it cannot verify as `"Unverified — [what was searched]"`
+- If a distributed SQL competitor is found (YugabyteDB, CockroachDB, Spanner, AlloyDB), a **COMPETITIVE ALERT** block appears at the top and the meeting goal is reframed as competitive displacement
+- Will NOT invent financial data, employee counts, or technology stack
+
+**Inputs needed:** Company name + contact name (or just company name — it will research the contact).
+
+**Outputs:** Full 10-section brief + complete outbound messaging suite.
+
+---
+
+### 3. Post-Call Analysis (MEDDPICC Deal Coach)
+
+**Prompt:** `SYSTEM_POST_CALL_ANALYSIS`
+**Best for:** After any discovery, evaluation, or negotiation call — transcript analysis, deal qualification, coaching, and follow-up email draft.
+
+**What it does:**
+
+Full 8-section MEDDPICC Deal Coach output:
+
+| Section | What it produces |
+|---|---|
+| 1. Executive Summary | 4–6 sentence deal snapshot: situation, key pains, business impact, urgency, current stage, qualification verdict (Qualified / Not Qualified / Conditional) |
+| 2. MEDDPICC Breakdown | All 8 elements scored 1–5 with transcript evidence quote, what's missing, and exact action to close each gap |
+| 3. Sales Process Stage Assessment | Maps to one of 7 stages (Identify → Qualify → Establish Value → Validate → Contracting → Close → Implement), lists exit criteria, and gives a ready/not-ready verdict |
+| 4. Risks & Red Flags | All risks rated High / Medium / Low — weak champion, missing economic buyer, competitive exposure, deal structure risks |
+| 5. Missing Discovery & Required Questions | Exact words of questions to ask, organized by MEDDPICC element |
+| 6. Coaching Recommendations | Segmented: Qualification Gaps · Deal Strategy · Stakeholder & Champion Strategy · Next Call Plan (with exact phrasing, not descriptions) |
+| 7. Recommended Next Steps | 3–5 actions: Owner + Deliverable + Date. Never vague. |
+| 8. Follow-Up Email | Ready-to-send draft: opens with prospect's top pain, reflects call commitments, includes TiDB value prop aligned to their situation, one clear CTA |
+
+**Stance:** Rigorous and critical. Calls out unqualified deals explicitly. Does not assume deal viability. Every coaching point uses SBI format (Situation → Behavior → Impact) and includes a transcript quote.
+
+**Sales process stages understood:**
+`Identify Opportunity` → `Qualify Opportunity` → `Establish Value` → `Validate` → `Contracting & Negotiations` → `Close` → `Implement`
+
+**MEDDPICC scoring rubric:**
+- 1 = Not mentioned
+- 2 = Mentioned but vague
+- 3 = Qualified — prospect described it (requires transcript quote)
+- 4 = Documented — rep confirmed it (requires transcript quote)
+- 5 = Confirmed with corroboration
+
+**Inputs needed:** Paste the call transcript or call notes into the chat. The more detail the better — partial transcripts still produce a best-effort analysis with clear gap flags.
+
+**Outputs:** All 8 sections above, ready to copy into CRM or share with deal team.
+
+---
+
+### 4. Follow-Up Email
+
+**Prompt:** `SYSTEM_FOLLOW_UP_EMAIL`
+**Best for:** Drafting a deal-specific follow-up email after any call — not a template, a specific email that gets replied to.
+
+**What it does:**
+
+Three-phase process before outputting anything:
+
+1. **Pre-write analysis** — identifies the single most important call outcome, what the recipient needs to hear to take the next action, which MEDDPICC gaps the email can help close, and whether there's a deal risk to quietly address
+2. **Email construction** — enforces strict quality rules: no pleasantries, no "great speaking with you" openers, subject line bans ("follow-up", "touching base"), one CTA only, every action item has owner + deliverable + date
+3. **Quality check** — auto-rejects and rewrites if any of the banned patterns appear
+
+**Subject line format:**
+`[Account] — [topic 1] + [topic 2]` or `[Account] — [key outcome]: [next action]`
+
+**Body structure:**
+- Para 1: What this call established (specific language from the call, their exact terminology)
+- Para 2: All committed actions — owner + action + date for every item
+- Para 3 (when applicable): One MEDDPICC bridge question planted naturally (Champion, Decision Process, Decision Criteria, Competition, or Paper Process)
+- Close: One ask only — specific date, person, or deliverable
+
+**Tone modes:** Adapts between crisp/executive/technical based on the recipient role.
+
+**Inputs needed:** Call notes or transcript pasted into the chat. Providing account history and deal stage improves output significantly.
+
+**Outputs:** Subject line + ready-to-send email body. Plain text, no markdown headers.
+
+---
+
+### 5. Market Research / TAL
+
+**Prompt:** `SYSTEM_MARKET_RESEARCH`
+**Best for:** Building target account lists, territory planning, ICP scoring batches, and market opportunity analysis.
+
+**What it does:**
+
+ICP scoring engine + territory strategy. Scores each account across 5 criteria (1–5 each, total out of 25):
+
+| Criterion | Signal | Top Score |
+|---|---|---|
+| Company size fit | 500–10K employees, $50M–$5B revenue | 5 |
+| Industry fit | Fintech, Ad-tech, SaaS, Gaming, E-Commerce = Tier 1 | 5 |
+| Tech stack match | MySQL / Aurora / Vitess in stack = direct migration path | 5 |
+| Growth signal | Recent funding, hiring surge, IPO/M&A | 5 |
+| Champion potential | Accessible engineering/platform leadership | 5 |
+| AI/ML bonus | Active AI hiring, RAG, embedding pipelines, LLM apps | +1–2 |
+
+**Signal weighting priority:**
+1. Financial signal (funding, IPO, M&A) — budget confirmed
+2. Hiring signal (DB/infra/AI engineer postings) — active investment
+3. Tech stack signal (MySQL/Aurora at scale, sharding tools) — product-market fit
+4. Competitive signal (evaluating CockroachDB, PlanetScale) — active buyer
+5. AI/ML signal (vector DB, LLM infra) — TiDB vector + HTAP opportunity
+6. News signal (scaling challenges, data infra announcements)
+
+For each recommended account: ICP score breakdown, top signal with source, recommended entry point (specific role + specific angle), and why now vs in 6 months.
+
+**Inputs needed:** A list of company names, a vertical/territory description, or a prompt like "find 10 fintech companies in Southeast Asia building AI products."
+
+**Outputs:** Scored and ranked account list with entry points and next actions per account.
+
+---
+
+### 6. SE: POC Plan
+
+**Prompt:** `SYSTEM_SE_ANALYSIS` (+ `TIDB_EXPERT_CONTEXT`)
+**Best for:** SE-led POC planning — structured proof-of-concept proposal with measurable success criteria.
+
+**What it does:**
+
+Produces a technical POC plan grounded in the prospect's specific stack and use case. Requires explicit confirmation of all assumptions before producing recommendations.
+
+Outputs include:
+- Technical maturity classification (Starter / Intermediate / Advanced)
+- At least 3 measurable POC success criteria with specific thresholds (e.g., "P99 read latency <10ms at 5K TPS") — vague criteria are rejected
+- Migration complexity rating (Low / Medium / High) with top 3 reasons, timeline estimate, and required resources
+- MySQL compatibility caveats proactively flagged: stored procedures (limited), triggers (not supported), AUTO_INCREMENT semantics, full-text search limits, FK enforcement differences — with mitigation for each
+- TiDB Cloud tier recommendation (Starter / Essential / Dedicated) with rationale
+- AI/vector capability positioning when AI/ML workloads are detected
+
+**`TIDB_EXPERT_CONTEXT` appended:** Full TiDB technical knowledge base covering vector search, HTAP architecture, TiFlash, TiCDC, TiProxy, distributed SQL internals, and the "database for AI agents" category — including agent memory systems, multi-agent coordination, and autonomous workflow use cases.
+
+**Inputs needed:** Customer's current stack (MySQL version, approximate data volume, peak TPS), use case description, and any specific evaluation criteria they've mentioned.
+
+---
+
+### 7. SE: Architecture Fit
+
+**Prompt:** `SYSTEM_SE_ANALYSIS` (+ `TIDB_EXPERT_CONTEXT`)
+**Best for:** SE-led architecture fit analysis — assessing whether and how TiDB fits the prospect's workload and design.
+
+**What it does:**
+
+Same prompt as POC Plan, oriented toward architecture evaluation:
+- Workload classification (OLTP / HTAP / hybrid / vector)
+- Fit assessment with specific evidence from the customer's stack
+- Architecture recommendation with explicit assumption flagging (e.g., "Assumption: customer is on MySQL 8.0 — confirm before migration estimate")
+- Integration points: TiCDC for CDC, TiFlash for analytics, TiProxy for connection management
+- Competitor comparison when alternatives are in the deal
+- Proof points: benchmark links, named customer references in similar verticals, Jepsen results — not generic talking points
+
+**Inputs needed:** Customer's tech stack, workload description, scale requirements.
+
+---
+
+### 8. SE: Competitor Coach
+
+**Prompt:** `SYSTEM_SE_ANALYSIS` (+ `TIDB_EXPERT_CONTEXT`)
+**Best for:** Preparing specific competitive counter-positioning for a deal where a named alternative is in play.
+
+**What it does:**
+
+Same prompt, oriented toward competitive analysis:
+- Specific objection responses with TiDB proof points for the named competitor
+- Head-to-head positioning: vs Aurora (write scaling + HTAP), vs CockroachDB (MySQL compat + columnar analytics), vs PlanetScale (self-hostable + HTAP + vector), vs Vitess (no middleware, native distributed SQL), vs YugabyteDB (MySQL compat, TiFlash columnar)
+- Flags where TiDB's MySQL wire compatibility is a decisive advantage (zero app rewrite for MySQL/Vitess shops)
+- AI/vector differentiation when the competitor lacks native vector search
+
+**Inputs needed:** Competitor name, what the prospect has said about why they're considering it, and any known evaluation criteria.
+
+---
+
+### Prompt Chaining Pattern
+
+These sections work best in sequence:
+
+```
+Pre-Call Intel  →  Call  →  Post-Call Analysis  →  Follow-Up Email
+     ↓                            ↓
+Market Research              SE: POC Plan
+(territory level)          (if technical validation starts)
+```
+
+Oracle Chat is always available as a companion for ad-hoc questions within any workflow.
+
+---
+
 ## Features by Role
 
 All users can access all dashboards. Role determines default landing page.
