@@ -15,10 +15,14 @@ from app.models.entities import (
     KBConfig,
     KBDocument,
     KBChunk,
+    KnowledgeIndex,
     MessageChannel,
     MessageMode,
     OutboundMessage,
     SourceType,
+    SyncSourceType,
+    SyncStatus,
+    SyncStatusEnum,
     UserPreference,
 )
 from app.models.feedback import AIFeedback, ChunkQualitySignal, PromptSuggestion
@@ -43,9 +47,13 @@ __all__ = [
     "KBConfig",
     "KBDocument",
     "KBChunk",
+    "KnowledgeIndex",
     "MessageChannel",
     "MessageMode",
     "OutboundMessage",
     "SourceType",
+    "SyncSourceType",
+    "SyncStatus",
+    "SyncStatusEnum",
     "UserPreference",
 ]

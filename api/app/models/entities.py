@@ -36,6 +36,20 @@ class SourceType(str, enum.Enum):
     MEMORY = "memory"
 
 
+class SyncSourceType(str, enum.Enum):
+    feishu = "feishu"
+    google_drive = "google_drive"
+    chorus = "chorus"
+    tidb_docs = "tidb_docs"
+    github = "github"
+
+
+class SyncStatusEnum(str, enum.Enum):
+    idle = "idle"
+    syncing = "syncing"
+    error = "error"
+
+
 class MessageMode(str, enum.Enum):
     DRAFT = "draft"
     SENT = "sent"
@@ -99,6 +113,38 @@ class KBChunk(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
     document: Mapped[KBDocument] = relationship("KBDocument", back_populates="chunks")
+
+
+class SyncStatus(Base):
+    __tablename__ = "sync_status"
+    __table_args__ = (Index("idx_source_org", "source_type", "org_id", unique=True),)
+
+    id: Mapped[int] = mapped_column(sa.BigInteger, primary_key=True, autoincrement=True)
+    source_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    org_id: Mapped[int] = mapped_column(sa.BigInteger, nullable=False)
+    last_sync_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=False))
+    docs_indexed: Mapped[int] = mapped_column(Integer, default=0, server_default="0", nullable=False)
+    chunks_indexed: Mapped[int] = mapped_column(Integer, default=0, server_default="0", nullable=False)
+    status: Mapped[str] = mapped_column(String(16), server_default="idle", nullable=False)
+    error_message: Mapped[str | None] = mapped_column(Text)
+
+
+class KnowledgeIndex(Base):
+    __tablename__ = "knowledge_index"
+    __table_args__ = (Index("idx_source", "source_type", "org_id"),)
+
+    id: Mapped[int] = mapped_column(sa.BigInteger, primary_key=True, autoincrement=True)
+    source_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    source_ref: Mapped[str | None] = mapped_column(String(512))
+    title: Mapped[str | None] = mapped_column(String(512))
+    chunk_text: Mapped[str | None] = mapped_column(Text)
+    chunk_index: Mapped[int | None] = mapped_column(Integer)
+    embedding: Mapped[dict | None] = mapped_column(JSON_TYPE)
+    embedding_model: Mapped[str | None] = mapped_column(String(64), server_default="text-embedding-3-small")
+    metadata_: Mapped[dict | None] = mapped_column("metadata", JSON_TYPE)
+    org_id: Mapped[int] = mapped_column(sa.BigInteger, nullable=False)
+    created_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=False), server_default=func.now())
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=False), server_default=func.now())
 
 
 class ChorusCall(Base):
