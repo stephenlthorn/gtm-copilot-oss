@@ -139,7 +139,7 @@ class KnowledgeIndex(Base):
     title: Mapped[str | None] = mapped_column(String(512))
     chunk_text: Mapped[str | None] = mapped_column(Text)
     chunk_index: Mapped[int | None] = mapped_column(Integer)
-    embedding: Mapped[list[float] | None] = mapped_column(JSON_TYPE)
+    embedding: Mapped[list[float] | None] = mapped_column(VECTOR_TYPE)
     embedding_model: Mapped[str | None] = mapped_column(String(64), server_default="text-embedding-3-small")
     metadata_: Mapped[dict | None] = mapped_column("metadata", JSON_TYPE)
     org_id: Mapped[int] = mapped_column(sa.BigInteger, nullable=False)

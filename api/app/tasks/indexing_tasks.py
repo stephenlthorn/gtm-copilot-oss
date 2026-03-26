@@ -140,7 +140,7 @@ def full_reindex(org_id: int = 1) -> dict:
 
 
 @celery_app.task(name="backfill_knowledge_index", bind=True, max_retries=None, rate_limit="10/m")
-def backfill_knowledge_index(self, offset: int = 0, batch_size: int = 500) -> dict:
+def backfill_knowledge_index(self, offset: int = 0, batch_size: int = 500, org_id: int = 1) -> dict:
     """Migrate kb_chunks rows to knowledge_index in batches. Self-chains until done."""
     init_db()
     from sqlalchemy import select
@@ -169,7 +169,7 @@ def backfill_knowledge_index(self, offset: int = 0, batch_size: int = 500) -> di
                 select(KnowledgeIndex).where(
                     KnowledgeIndex.source_ref == source_id,
                     KnowledgeIndex.chunk_index == chunk.chunk_index,
-                    KnowledgeIndex.org_id == 1,
+                    KnowledgeIndex.org_id == org_id,
                 )
             ).scalar_one_or_none()
             if existing is not None:
@@ -194,7 +194,7 @@ def backfill_knowledge_index(self, offset: int = 0, batch_size: int = 500) -> di
                 embedding=embedding_val,
                 embedding_model="text-embedding-3-small",
                 metadata_=chunk.metadata_json or {},
-                org_id=1,
+                org_id=org_id,
             ))
 
         if new_rows:
@@ -204,7 +204,7 @@ def backfill_knowledge_index(self, offset: int = 0, batch_size: int = 500) -> di
         logger.info("Backfill: offset=%d new=%d skipped=%d", offset, len(new_rows), len(rows) - len(new_rows))
 
     backfill_knowledge_index.apply_async(
-        kwargs={"offset": offset + batch_size, "batch_size": batch_size},
+        kwargs={"offset": offset + batch_size, "batch_size": batch_size, "org_id": org_id},
         countdown=2,
     )
     return {"status": "running", "offset": offset, "new_rows": len(new_rows)}

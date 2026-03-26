@@ -555,7 +555,7 @@ def get_backfill_status(db: Session = Depends(db_session)):
         "kb_chunks_count": kb_count,
         "knowledge_index_count": ki_count,
         "cutover_complete": cutover,
-        "backfill_remaining": max(0, kb_count - ki_count),
+        "kb_chunks_remaining": max(0, kb_count - ki_count),
     }
 
 

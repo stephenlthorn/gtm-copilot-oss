@@ -13,6 +13,11 @@ depends_on = None
 
 
 def upgrade() -> None:
+    # The column was created as JSON in the original migration.
+    # TiDB requires VECTOR(N) column type before a VECTOR INDEX can be added.
+    op.execute(
+        "ALTER TABLE knowledge_index MODIFY COLUMN embedding VECTOR(1536);"
+    )
     # TiDB-specific HNSW index on the embedding column using cosine distance.
     # This is raw DDL — SQLAlchemy has no ORM equivalent for TiDB vector indexes.
     op.execute(
@@ -25,3 +30,4 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     op.execute("ALTER TABLE knowledge_index DROP INDEX idx_ki_embedding;")
+    op.execute("ALTER TABLE knowledge_index MODIFY COLUMN embedding JSON;")
