@@ -7,6 +7,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.settings import get_settings
+from app.db.session import SessionLocal
 from app.ingest.feishu_connector import FeishuConnector
 from app.models.entities import SyncSourceType, SyncStatus, SyncStatusEnum
 from app.services.feishu_credentials import FeishuCredentialService
@@ -73,9 +74,10 @@ class FeishuIndexer:
             all_items = doc_items + wiki_items
             logger.info("Feishu: starting content indexing for %d docs", len(all_items))
 
-            # Reconnect DB — discovery phase may have taken long enough to drop the connection
+            # Get a fresh DB session — discovery phase may have taken long enough to drop the connection
             self.db.close()
-            self.db.begin()
+            self.db = SessionLocal()
+            self.index_manager = IndexManager(self.db, self.embedding_service)
 
             for item in all_items:
                 token = item.get("token", "")
