@@ -13,7 +13,8 @@ export async function GET(request) {
   const code = url.searchParams.get('code');
   const state = url.searchParams.get('state');
   const error = url.searchParams.get('error');
-  const redirectUri = new URL('/api/feishu/oauth/callback', request.url).toString();
+  const publicBase = process.env.NEXT_PUBLIC_BASE_URL || new URL('/', request.url).origin;
+  const redirectUri = `${publicBase.replace(/\/$/, '')}/api/feishu/oauth/callback`;
 
   if (error) {
     return NextResponse.redirect(new URL(`/settings?feishu=error&reason=${encodeURIComponent(error)}`, request.url));
