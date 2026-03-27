@@ -245,11 +245,12 @@ class FeishuConnector:
 
         return nodes
 
-    def _collect_wiki_docs(self, space_id: str, root_node_token: str, seen_docs: set[str]) -> list[dict[str, Any]]:
+    def _collect_wiki_docs(self, space_id: str, root_node_token: str, seen_docs: set[str], seen_nodes: set[str] | None = None) -> list[dict[str, Any]]:
         """BFS-collect all doc nodes reachable under root_node_token."""
         docs: list[dict[str, Any]] = []
         queue: list[str] = [root_node_token]
-        seen_nodes: set[str] = set()
+        if seen_nodes is None:
+            seen_nodes = set()
 
         while queue:
             parent_token = queue.pop(0)
@@ -301,6 +302,7 @@ class FeishuConnector:
         """
         docs: list[dict[str, Any]] = []
         seen_docs: set[str] = set()
+        seen_nodes: set[str] = set()
 
         if root_tokens:
             for token in root_tokens:
@@ -324,7 +326,7 @@ class FeishuConnector:
                         })
 
                     # Recursively collect all docs under this node
-                    docs.extend(self._collect_wiki_docs(space_id, node_token, seen_docs))
+                    docs.extend(self._collect_wiki_docs(space_id, node_token, seen_docs, seen_nodes))
                 except Exception as exc:
                     logger.warning("Feishu wiki: failed to resolve root token %s: %s", token, exc)
             logger.info("Feishu wiki: found %d docs via %d root tokens", len(docs), len(root_tokens))
