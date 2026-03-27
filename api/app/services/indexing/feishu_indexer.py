@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 from app.core.settings import get_settings
 from app.ingest.feishu_connector import FeishuConnector
 from app.models.entities import SyncSourceType, SyncStatus, SyncStatusEnum
+from app.services.feishu_credentials import FeishuCredentialService
 from app.services.indexing.embedder import EmbeddingService
 from app.services.indexing.index_manager import IndexManager, SyncResult
 
@@ -22,11 +23,13 @@ class FeishuIndexer:
         embedding_service: EmbeddingService | None = None,
         app_id: str | None = None,
         app_secret: str | None = None,
+        user_email: str | None = None,
     ) -> None:
         self.db = db
         self.settings = get_settings()
         self._app_id = app_id or self.settings.feishu_app_id
         self._app_secret = app_secret or self.settings.feishu_app_secret
+        self._user_email = user_email
         self.embedding_service = embedding_service or EmbeddingService()
         self.index_manager = IndexManager(db, self.embedding_service)
 
@@ -44,11 +47,12 @@ class FeishuIndexer:
         chunks_indexed = 0
 
         try:
+            access_token = self._resolve_access_token()
             connector = FeishuConnector(
                 app_id=self._app_id,
                 app_secret=self._app_secret,
                 base_url=self.settings.feishu_base_url,
-                access_token=self.settings.feishu_access_token or None,
+                access_token=access_token,
             )
 
             root_tokens = self._get_root_tokens()
@@ -124,6 +128,24 @@ class FeishuIndexer:
             chunks_indexed=chunks_indexed,
             errors=errors if errors else None,
         )
+
+    def _resolve_access_token(self) -> str | None:
+        """Try credential service (auto-refresh), fall back to static env var."""
+        if self._user_email:
+            try:
+                cred_service = FeishuCredentialService(self.db)
+                token = cred_service.get_access_token(
+                    self._user_email,
+                    app_id=self._app_id,
+                    app_secret=self._app_secret,
+                )
+                if token:
+                    logger.info("Using auto-refreshed user access token for %s", self._user_email)
+                    return token
+            except Exception as exc:
+                logger.warning("Could not get user token for %s: %s", self._user_email, exc)
+        static_token = (self.settings.feishu_access_token or "").strip()
+        return static_token or None
 
     def _get_root_tokens(self) -> list[str]:
         from app.models.entities import KBConfig
