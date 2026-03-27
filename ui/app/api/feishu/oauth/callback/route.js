@@ -5,22 +5,23 @@ const API_BASE = process.env.API_BASE_URL || 'http://localhost:8000';
 
 export async function GET(request) {
   const session = await getSession();
+  const publicBase = (process.env.NEXT_PUBLIC_APP_URL || process.env.NEXTAUTH_URL || new URL('/', request.url).origin).replace(/\/$/, '');
+
   if (!session?.email) {
-    return NextResponse.redirect(new URL('/login', request.url));
+    return NextResponse.redirect(`${publicBase}/login`);
   }
 
   const url = new URL(request.url);
   const code = url.searchParams.get('code');
   const state = url.searchParams.get('state');
   const error = url.searchParams.get('error');
-  const publicBase = process.env.NEXT_PUBLIC_APP_URL || process.env.NEXTAUTH_URL || new URL('/', request.url).origin;
-  const redirectUri = `${publicBase.replace(/\/$/, '')}/api/feishu/oauth/callback`;
+  const redirectUri = `${publicBase}/api/feishu/oauth/callback`;
 
   if (error) {
-    return NextResponse.redirect(new URL(`/settings?feishu=error&reason=${encodeURIComponent(error)}`, request.url));
+    return NextResponse.redirect(`${publicBase}/settings?feishu=error&reason=${encodeURIComponent(error)}`);
   }
   if (!code || !state) {
-    return NextResponse.redirect(new URL('/settings?feishu=error&reason=missing_code_or_state', request.url));
+    return NextResponse.redirect(`${publicBase}/settings?feishu=error&reason=missing_code_or_state`);
   }
 
   const res = await fetch(`${API_BASE}/admin/feishu/oauth/exchange`, {
@@ -39,7 +40,9 @@ export async function GET(request) {
   });
 
   if (!res.ok) {
-    return NextResponse.redirect(new URL('/settings?feishu=error&reason=token_exchange_failed', request.url));
+    const detail = await res.text().catch(() => '');
+    console.error('Feishu OAuth exchange failed:', res.status, detail);
+    return NextResponse.redirect(`${publicBase}/settings?feishu=error&reason=token_exchange_failed`);
   }
-  return NextResponse.redirect(new URL('/settings?feishu=connected', request.url));
+  return NextResponse.redirect(`${publicBase}/settings?feishu=connected`);
 }
