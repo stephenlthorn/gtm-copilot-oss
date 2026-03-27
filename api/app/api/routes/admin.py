@@ -91,8 +91,17 @@ def _feishu_scopes() -> list[str]:
 
 def _exchange_feishu_oauth_code(*, app_id: str, app_secret: str, code: str, redirect_uri: str) -> dict:
     settings = get_settings()
+    # Get app_access_token first — Feishu requires it for OAuth exchange
+    token_url = f"{settings.feishu_base_url.rstrip('/')}/auth/v3/app_access_token/internal"
+    token_res = httpx.post(token_url, json={"app_id": app_id, "app_secret": app_secret}, timeout=10)
+    token_res.raise_for_status()
+    token_data = token_res.json()
+    if token_data.get("code") != 0:
+        raise RuntimeError(f"Feishu app token error: {token_data}")
+    app_access_token = token_data["app_access_token"]
+
     headers = {
-        "Authorization": f"Bearer {app_id}:{app_secret}",
+        "Authorization": f"Bearer {app_access_token}",
         "Content-Type": "application/json; charset=utf-8",
     }
     body = {
