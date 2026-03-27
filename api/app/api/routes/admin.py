@@ -85,7 +85,7 @@ def _feishu_scopes() -> list[str]:
     raw = (settings.feishu_oauth_scopes or "").strip()
     scopes = [scope.strip() for scope in raw.split(" ") if scope.strip()]
     if not scopes:
-        scopes = ["offline_access", "drive:drive:readonly", "docs:document:readonly"]
+        scopes = ["offline_access", "drive:drive:readonly", "docs:document.content:read"]
     return scopes
 
 

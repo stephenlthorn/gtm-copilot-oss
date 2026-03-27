@@ -368,9 +368,9 @@ class FeishuConnector:
         code = data.get("code")
         if code != 0:
             msg = str(data.get("msg") or "")
-            if code == 20043 or "docs:document:readonly" in msg:
+            if code == 20043 or "docs:document.content:read" in msg:
                 raise RuntimeError(
-                    "Feishu permission denied (code 20043). Missing docs:document:readonly. "
+                    "Feishu permission denied (code 20043). Missing docs:document.content:read. "
                     "Grant docs read permission in Feishu app, publish the app version, "
                     "approve it in tenant admin, then reconnect OAuth and sync again."
                 )
