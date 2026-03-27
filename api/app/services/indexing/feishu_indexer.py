@@ -71,6 +71,11 @@ class FeishuIndexer:
                 errors.append(msg)
 
             all_items = doc_items + wiki_items
+            logger.info("Feishu: starting content indexing for %d docs", len(all_items))
+
+            # Reconnect DB — discovery phase may have taken long enough to drop the connection
+            self.db.close()
+            self.db.begin()
 
             for item in all_items:
                 token = item.get("token", "")
