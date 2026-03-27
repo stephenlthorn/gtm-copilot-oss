@@ -74,13 +74,22 @@ class FeishuIndexer:
             all_items = doc_items + wiki_items
             logger.info("Feishu: starting content indexing for %d docs", len(all_items))
 
-            # Get a fresh DB session — discovery phase may have taken 30+ min, killing the connection
+            # Get fresh DB session and access token — discovery may have taken 30+ min
             try:
                 self.db.close()
             except Exception:
                 pass
             self.db = SessionLocal()
             self.index_manager = IndexManager(self.db, self.embedding_service)
+
+            # Refresh access token — the old one may have expired during discovery
+            fresh_token = self._resolve_access_token()
+            connector = FeishuConnector(
+                app_id=self._app_id,
+                app_secret=self._app_secret,
+                base_url=self.settings.feishu_base_url,
+                access_token=fresh_token,
+            )
 
             for item in all_items:
                 token = item.get("token", "")
