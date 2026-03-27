@@ -13,7 +13,7 @@ export async function GET(request) {
   const code = url.searchParams.get('code');
   const state = url.searchParams.get('state');
   const error = url.searchParams.get('error');
-  const publicBase = process.env.NEXT_PUBLIC_BASE_URL || new URL('/', request.url).origin;
+  const publicBase = process.env.NEXT_PUBLIC_APP_URL || process.env.NEXTAUTH_URL || new URL('/', request.url).origin;
   const redirectUri = `${publicBase.replace(/\/$/, '')}/api/feishu/oauth/callback`;
 
   if (error) {

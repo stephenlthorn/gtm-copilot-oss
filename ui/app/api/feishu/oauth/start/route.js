@@ -8,7 +8,7 @@ export async function GET(request) {
     return Response.json({ error: 'unauthenticated' }, { status: 401 });
   }
 
-  const publicBase = process.env.NEXT_PUBLIC_BASE_URL || new URL('/', request.url).origin;
+  const publicBase = process.env.NEXT_PUBLIC_APP_URL || process.env.NEXTAUTH_URL || new URL('/', request.url).origin;
   const callbackUrl = `${publicBase.replace(/\/$/, '')}/api/feishu/oauth/callback`;
   const qs = new URLSearchParams({ redirect_uri: callbackUrl });
   const res = await fetch(`${API_BASE}/admin/feishu/oauth/start?${qs}`, {
