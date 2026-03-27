@@ -363,7 +363,12 @@ class FeishuConnector:
         """Fetch plain text content of a Feishu document."""
         url = self.base_url + _DOC_CONTENT_URL.format(doc_token=doc_token)
         resp = httpx.get(url, headers=self._headers(), timeout=30)
-        resp.raise_for_status()
+        if not resp.is_success:
+            logger.warning(
+                "Feishu get_doc_content HTTP %s token=%s: %s",
+                resp.status_code, doc_token, resp.text[:500],
+            )
+            resp.raise_for_status()
         data = resp.json()
         code = data.get("code")
         if code != 0:
