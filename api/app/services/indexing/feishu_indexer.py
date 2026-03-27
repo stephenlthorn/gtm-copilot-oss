@@ -95,6 +95,7 @@ class FeishuIndexer:
                     docs_indexed += 1
                     chunks_indexed += count
                 except Exception as exc:
+                    self.db.rollback()
                     msg = f"Failed to index Feishu doc {title}: {exc}"
                     logger.error(msg)
                     errors.append(msg)
