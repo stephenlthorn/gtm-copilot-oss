@@ -21,7 +21,7 @@ function isAuthenticated(request) {
   if (!raw) return false;
   try {
     const session = JSON.parse(raw);
-    return Boolean(session?.access_token) && Date.now() < session.expires_at;
+    return Boolean(session?.access_token);
   } catch {
     return false;
   }
