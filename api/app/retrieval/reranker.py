@@ -91,4 +91,4 @@ class LLMReranker:
             return [float(s) for s in scores[: len(hits)]]
         except Exception as exc:
             logger.warning("LLMReranker._score_batch failed: %s", exc)
-            return [5.0] * len(hits)
+            return [hit.score for hit in hits]

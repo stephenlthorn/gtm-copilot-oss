@@ -14,7 +14,6 @@ from app.prompts.templates import TIDB_EXPERT_CONTEXT
 from app.prompts.source_profiles import get_source_profile, format_source_instructions
 from app.retrieval.service import HybridRetriever
 from app.services.llm import LLMService
-from app.services.query_rewrite import QueryRewriter
 from app.utils.email_utils import is_internal_email
 
 
@@ -24,7 +23,6 @@ class ChatOrchestrator:
         self.settings = get_settings()
         self.retriever = HybridRetriever(db) if db is not None else None
         self.llm = LLMService(api_key=openai_token)
-        self.rewriter = QueryRewriter()
 
     def _guardrail_external_messaging(self, text: str) -> str | None:
         lowered = text.lower()
@@ -174,35 +172,45 @@ class ChatOrchestrator:
         return self.settings.retrieval_top_k
 
     @staticmethod
-    def _resolve_allowed_sources(kb_config: KBConfig | None, mode: str) -> list[str] | None:
+    def _resolve_allowed_sources(kb_config: KBConfig | None, mode: str) -> tuple[list[str] | None, dict[str, float]]:
+        source_priority: dict[str, float] = {
+            SourceType.OFFICIAL_DOCS_ONLINE.value: 1.2,
+            SourceType.CHORUS.value: 1.0,
+            SourceType.GOOGLE_DRIVE.value: 0.9,
+            SourceType.MEMORY.value: 0.8,
+        }
         if mode == "oracle":
             if kb_config is None:
                 return [
                     SourceType.GOOGLE_DRIVE.value,
-                    SourceType.FEISHU.value,
                     SourceType.CHORUS.value,
                     SourceType.MEMORY.value,
-                ]
+                    SourceType.OFFICIAL_DOCS_ONLINE.value,
+                ], source_priority
             allowed: list[str] = []
             if kb_config.google_drive_enabled:
                 allowed.append(SourceType.GOOGLE_DRIVE.value)
-            if kb_config.feishu_enabled:
-                allowed.append(SourceType.FEISHU.value)
             if kb_config.chorus_enabled:
                 allowed.append(SourceType.CHORUS.value)
+            allowed.append(SourceType.OFFICIAL_DOCS_ONLINE.value)
             allowed.append(SourceType.MEMORY.value)
             deduped: list[str] = []
             for source in allowed:
                 if source not in deduped:
                     deduped.append(source)
-            return deduped or [SourceType.GOOGLE_DRIVE.value, SourceType.CHORUS.value, SourceType.MEMORY.value]
+            return deduped or [
+                SourceType.GOOGLE_DRIVE.value,
+                SourceType.CHORUS.value,
+                SourceType.MEMORY.value,
+                SourceType.OFFICIAL_DOCS_ONLINE.value,
+            ], source_priority
         # call_assistant and any other modes: use call transcripts only
         if kb_config is None:
-            return None
+            return None, source_priority
         allowed = []
         if kb_config.chorus_enabled:
             allowed.append(SourceType.CHORUS.value)
-        return allowed or None
+        return allowed or None, source_priority
 
     def _infer_account_filter(self, message: str) -> list[str] | None:
         if self.db is None:
@@ -331,7 +339,7 @@ class ChatOrchestrator:
 
         kb_config: KBConfig | None = self.db.get(KBConfig, 1)
         resolved_top_k = self._resolve_top_k(kb_config, top_k)
-        allowed_sources = self._resolve_allowed_sources(kb_config, mode)
+        allowed_sources, source_priority = self._resolve_allowed_sources(kb_config, mode)
         llm_model, llm_tools = self._resolve_llm_config(kb_config, self.settings, mode)
         persona_name, persona_prompt = self._resolve_persona_config(kb_config)
 
@@ -390,9 +398,9 @@ class ChatOrchestrator:
         if mode == "oracle":
             oracle_allowed = allowed_sources or [
                 SourceType.GOOGLE_DRIVE.value,
-                SourceType.FEISHU.value,
                 SourceType.CHORUS.value,
                 SourceType.MEMORY.value,
+                SourceType.OFFICIAL_DOCS_ONLINE.value,
             ]
             if requested_sources:
                 filtered = [source for source in requested_sources if source in set(oracle_allowed)]
@@ -417,8 +425,20 @@ class ChatOrchestrator:
         if skip_rag:
             hits = []
         else:
-            rewritten = self.rewriter.rewrite(message, mode)
-            hits = self.retriever.search(rewritten, top_k=resolved_top_k, filters=mode_filters)
+            hits = self.retriever.search(
+                message,
+                top_k=resolved_top_k,
+                filters=mode_filters,
+                mode=mode,
+            )
+            if mode == "oracle" and hits:
+                hits = self._rerank_oracle_hits(message, hits)
+                high_quality = self._oracle_high_quality_hits(message, hits)
+                if high_quality:
+                    hits = high_quality[:resolved_top_k]
+                elif len(self._query_terms(message)) >= 2:
+                    # Avoid citing weakly-related chunks.
+                    hits = []
 
         # Feedback RAG injection
         feedback_corrections: list[str] = []

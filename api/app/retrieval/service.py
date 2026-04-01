@@ -91,6 +91,49 @@ class HybridRetriever:
         return terms
 
     @staticmethod
+    def _dedupe_terms(terms: list[str]) -> list[str]:
+        seen: set[str] = set()
+        out: list[str] = []
+        for term in terms:
+            normalized = term.strip().lower()
+            if not normalized or normalized in seen:
+                continue
+            seen.add(normalized)
+            out.append(normalized)
+        return out
+
+    @staticmethod
+    def _term_coverage(text: str, terms: list[str]) -> float:
+        if not terms:
+            return 0.0
+        lowered = text.lower()
+        matched = sum(1 for term in terms if HybridRetriever._contains_term(lowered, term))
+        return matched / max(1, len(terms))
+
+    def _expand_query_bundle(self, query: str, mode: str) -> list[str]:
+        expanded = self.rewriter.expand(query, mode)
+        candidates = [query]
+        variants = expanded.get("variants") if isinstance(expanded, dict) else None
+        if isinstance(variants, list):
+            candidates.extend(v for v in variants if isinstance(v, str))
+        hyde = expanded.get("hyde") if isinstance(expanded, dict) else None
+        if isinstance(hyde, str):
+            candidates.append(hyde)
+
+        deduped: list[str] = []
+        seen: set[str] = set()
+        for candidate in candidates:
+            text = candidate.strip()
+            if len(text) < 2:
+                continue
+            key = text.lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            deduped.append(text)
+        return deduped[:5]
+
+    @staticmethod
     def _keyword_score(text: str, terms: list[str]) -> float:
         if not terms:
             return 0.0
@@ -101,6 +144,8 @@ class HybridRetriever:
         weighted_hits = 0.0
         for term, term_count in count.items():
             weight = 1.0 + min(len(term), 12) / 20.0
+            if len(term) > 5:
+                weight *= 1.3  # boost specific/domain terms
             weighted_hits += weight * term_count
         denom = max(1.0, len(terms) * 1.3)
         return min(1.0, weighted_hits / denom)
@@ -117,11 +162,6 @@ class HybridRetriever:
             tags = doc.tags if isinstance(doc.tags, dict) else {}
             indexed_for = str(tags.get("user_email", "")).strip().lower()
             # Shared Drive/service-account indexed content can legitimately omit user_email.
-            if indexed_for and indexed_for != viewer_email:
-                return False
-        if viewer_email and doc.source_type.value == "feishu":
-            tags = doc.tags if isinstance(doc.tags, dict) else {}
-            indexed_for = str(tags.get("user_email", "")).strip().lower()
             if indexed_for and indexed_for != viewer_email:
                 return False
         if viewer_email and doc.source_type.value == "memory":
@@ -200,6 +240,18 @@ class HybridRetriever:
             "ddl",
             "migration",
             "poc",
+            "consistency",
+            "acid",
+            "isolation",
+            "distributed",
+            "sharding",
+            "cluster",
+            "raft",
+            "placement",
+            "operator",
+            "dashboard",
+            "grafana",
+            "prometheus",
         }
         terms = [term for term in query_terms if term in focused_terms]
         if not terms:
@@ -307,15 +359,46 @@ class HybridRetriever:
         except Exception:
             return [], None
 
-    def search(self, query: str, *, top_k: int = 8, filters: dict | None = None) -> list[RetrievedChunk]:
+    def search(
+        self,
+        query: str,
+        *,
+        top_k: int = 8,
+        filters: dict | None = None,
+        mode: str = "oracle",
+    ) -> list[RetrievedChunk]:
         filters = filters or {}
-        terms = self._query_terms(query)
+        query_bundle = self._expand_query_bundle(query, mode)
+        terms = self._dedupe_terms(
+            [term for query_text in query_bundle for term in self._query_terms(query_text)]
+        )
         semantic_available = bool(getattr(self.embedder, "client", None))
         q_vec = self.embedder.embed(query)
+        query_vectors = [q_vec] if (semantic_available and q_vec) else []
+        if semantic_available:
+            for query_text in query_bundle:
+                if query_text.strip().lower() == query.strip().lower():
+                    continue
+                try:
+                    variant_vec = self.embedder.embed(query_text)
+                    if variant_vec:
+                        query_vectors.append(variant_vec)
+                except Exception:
+                    continue
+        if query_vectors:
+            dedup_vectors: list[list[float]] = []
+            seen_vecs: set[str] = set()
+            for vec in query_vectors:
+                key = json.dumps(vec[:48])
+                if key in seen_vecs:
+                    continue
+                seen_vecs.add(key)
+                dedup_vectors.append(vec)
+            query_vectors = dedup_vectors[:4]
         dialect = (self.db.bind.dialect.name if self.db.bind is not None else "").lower()
 
         source_filter = {s.lower() for s in (filters.get("source_type") or [])}
-        candidate_limit = max(200, top_k * 40)
+        candidate_limit = max(320, top_k * 50)
 
         base_stmt = select(KBChunk, KBDocument).join(KBDocument, KBChunk.document_id == KBDocument.id)
         if source_filter:
@@ -327,13 +410,14 @@ class HybridRetriever:
             from app.db.tidb_vector import vec_cosine_distance
 
             if semantic_available and query_vectors:
-                for q_vec in query_vectors:
+                vector_limit = max(60, int(candidate_limit / max(1, len(query_vectors))))
+                for query_vec in query_vectors:
                     try:
-                        q_vec_str = json.dumps(q_vec)
+                        q_vec_str = json.dumps(query_vec)
                         vector_rows = self.db.execute(
                             base_stmt.where(KBChunk.embedding.is_not(None))
                             .order_by(vec_cosine_distance(KBChunk.embedding, literal(q_vec_str)))
-                            .limit(candidate_limit)
+                            .limit(vector_limit)
                         ).all()
                         rows.extend(vector_rows)
                     except Exception:
@@ -342,7 +426,7 @@ class HybridRetriever:
                         break
 
             if terms:
-                keyword_clauses = [KBChunk.text.ilike(f"%{term}%") for term in terms[:8]]
+                keyword_clauses = [KBChunk.text.ilike(f"%{term}%") for term in terms[:12]]
                 keyword_rows = self.db.execute(
                     base_stmt.where(or_(*keyword_clauses)).limit(candidate_limit)
                 ).all()
@@ -351,7 +435,7 @@ class HybridRetriever:
             # SQLite fallback for local unit tests
             rows.extend(self.db.execute(base_stmt.limit(candidate_limit)).all())
             if terms:
-                keyword_clauses = [KBChunk.text.ilike(f"%{term}%") for term in terms[:8]]
+                keyword_clauses = [KBChunk.text.ilike(f"%{term}%") for term in terms[:12]]
                 keyword_rows = self.db.execute(
                     base_stmt.where(or_(*keyword_clauses)).limit(candidate_limit)
                 ).all()
@@ -381,16 +465,37 @@ class HybridRetriever:
                 score = 1.0 - (chunk_idx * 0.0001)
                 scored.append((score, chunk, doc))
                 continue
-            vec_score = (self._cosine(chunk.embedding, q_vec) + 1) / 2 if q_vec else 0.5
+            if query_vectors:
+                vec_score = max((self._cosine(chunk.embedding, vec) + 1) / 2 for vec in query_vectors)
+            else:
+                vec_score = (self._cosine(chunk.embedding, q_vec) + 1) / 2 if q_vec else 0.5
             kw_score = self._keyword_score(chunk.text, terms)
             title_score = self._keyword_score(doc.title or "", terms)
+            coverage = self._term_coverage(f"{doc.title or ''}\n{chunk.text}", terms)
             domain_boost = self._domain_term_boost(terms, doc.title or "", chunk.text)
             if semantic_available:
-                score = (0.50 * vec_score) + (0.30 * kw_score) + (0.10 * title_score) + self._source_bias(doc) + domain_boost
+                score = (
+                    (0.46 * vec_score)
+                    + (0.24 * kw_score)
+                    + (0.12 * title_score)
+                    + (0.10 * coverage)
+                    + self._source_bias(doc)
+                    + domain_boost
+                )
+                # Penalize weak matches instead of hard-filtering them.
+                if kw_score < 0.10 and coverage < 0.08:
+                    score *= 0.3
             else:
-                score = (0.05 * vec_score) + (0.68 * kw_score) + (0.17 * title_score) + self._source_bias(doc) + domain_boost
-                if kw_score < 0.18 and title_score < 0.25:
-                    continue
+                score = (
+                    (0.70 * kw_score)
+                    + (0.18 * title_score)
+                    + (0.12 * coverage)
+                    + self._source_bias(doc)
+                    + domain_boost
+                )
+                # Penalize weak matches instead of hard-filtering them.
+                if kw_score < 0.10 and coverage < 0.08:
+                    score *= 0.3
             score = max(0.0, min(1.0, score))
             if score <= 0:
                 continue

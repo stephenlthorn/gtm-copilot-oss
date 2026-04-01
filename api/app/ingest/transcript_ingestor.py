@@ -46,6 +46,42 @@ def _build_embed_text(chunk_text: str, call_metadata: dict) -> str:
     return f"{prefix}\n\n{chunk_text}"
 
 
+def _to_date_str(raw_date: object) -> str:
+    if raw_date is None:
+        return date.today().isoformat()
+    try:
+        from datetime import datetime, timezone
+
+        if isinstance(raw_date, (int, float)):
+            timestamp = raw_date / 1000 if raw_date > 1e10 else raw_date
+            return datetime.fromtimestamp(timestamp, tz=timezone.utc).strftime("%Y-%m-%d")
+
+        raw = str(raw_date).strip()
+        if not raw:
+            return date.today().isoformat()
+        if len(raw) == 10 and raw.count("-") == 2:
+            return raw
+        return datetime.fromisoformat(raw.replace("Z", "+00:00")).strftime("%Y-%m-%d")
+    except Exception:
+        return date.today().isoformat()
+
+
+def _to_seconds(raw: object) -> int | None:
+    if raw is None:
+        return None
+    try:
+        if isinstance(raw, bool):
+            return None
+        if isinstance(raw, (int, float)):
+            return int(raw)
+        text = str(raw).strip()
+        if not text:
+            return None
+        return int(float(text))
+    except Exception:
+        return None
+
+
 class TranscriptIngestor:
     def __init__(self, db: Session) -> None:
         self.db = db
@@ -73,7 +109,7 @@ class TranscriptIngestor:
         date_str = _to_date_str(raw_date)
 
         md = {
-            "date": payload.get("date") or payload.get("metadata", {}).get("date"),
+            "date": date_str,
             "account": payload.get("account") or payload.get("metadata", {}).get("account") or "Unknown",
             "opportunity": payload.get("opportunity") or payload.get("metadata", {}).get("opportunity"),
             "stage": payload.get("stage") or payload.get("metadata", {}).get("stage"),
@@ -81,6 +117,63 @@ class TranscriptIngestor:
             "se_email": payload.get("se_email") or payload.get("metadata", {}).get("se_email"),
             "call_outcome": payload.get("call_outcome") or payload.get("metadata", {}).get("call_outcome"),
         }
+
+        speaker_map = payload.get("speaker_map") or conv.get("speaker_map") or {}
+        if not isinstance(speaker_map, dict):
+            speaker_map = {}
+
+        if not speaker_map:
+            participants = payload.get("participants") or conv.get("participants") or []
+            for idx, participant in enumerate(participants, start=1):
+                if not isinstance(participant, dict):
+                    continue
+                speaker_map[f"S{idx}"] = {
+                    "name": participant.get("name") or participant.get("email") or f"Speaker {idx}",
+                    "role": participant.get("role") or "other",
+                    "email": participant.get("email"),
+                }
+
+        raw_turns = (
+            payload.get("turns")
+            or payload.get("speaker_turns")
+            or payload.get("transcript_turns")
+            or conv.get("turns")
+            or []
+        )
+        turns: list[dict] = []
+        if isinstance(raw_turns, list):
+            for turn in raw_turns:
+                if not isinstance(turn, dict):
+                    continue
+                text = (turn.get("text") or turn.get("utterance") or "").strip()
+                if not text:
+                    continue
+                speaker_id = (
+                    turn.get("speaker_id")
+                    or turn.get("speaker")
+                    or turn.get("participant_id")
+                    or "S1"
+                )
+                turns.append(
+                    {
+                        "speaker_id": str(speaker_id),
+                        "start_time_sec": _to_seconds(
+                            turn.get("start_time_sec")
+                            if turn.get("start_time_sec") is not None
+                            else turn.get("start_time")
+                            if turn.get("start_time") is not None
+                            else turn.get("start")
+                        ),
+                        "end_time_sec": _to_seconds(
+                            turn.get("end_time_sec")
+                            if turn.get("end_time_sec") is not None
+                            else turn.get("end_time")
+                            if turn.get("end_time") is not None
+                            else turn.get("end")
+                        ),
+                        "text": text,
+                    }
+                )
 
         return {
             "chorus_call_id": payload.get("chorus_call_id") or payload.get("id"),
@@ -202,19 +295,19 @@ class TranscriptIngestor:
         embed_texts = [_build_embed_text(c.text, call_metadata) for c in chunks]
         embeddings = self.embedder.batch_embed(embed_texts)
         snippets: list[str] = []
-        for idx, (chunk, emb) in enumerate(zip(chunks, embeddings)):
+        for idx, (chunk, emb, store_text) in enumerate(zip(chunks, embeddings, embed_texts)):
             self.db.add(
                 KBChunk(
                     document_id=doc.id,
                     chunk_index=idx,
-                    text=chunk.text,
+                    text=store_text,
                     token_count=chunk.token_count,
                     embedding=emb,
                     metadata_json={**chunk.metadata, **call_metadata},
-                    content_hash=sha256_text(chunk.text),
+                    content_hash=sha256_text(store_text),
                 )
             )
-            snippets.append(chunk.text[:250])
+            snippets.append(store_text[:250])
         return snippets
 
     def _replace_artifact(self, call_id: str, normalized: dict, snippets: list[str]) -> None:
@@ -258,7 +351,7 @@ class TranscriptIngestor:
         """Ingest a single normalized call into TiDB with rollback on failure."""
         call = self._upsert_call(normalized)
         doc = self._upsert_document(normalized, call)
-        snippets = self._replace_chunks(doc, normalized)
+        snippets = self._replace_chunks(doc, normalized, call)
         self._replace_artifact(normalized["chorus_call_id"], normalized, snippets)
 
     def sync(self, since: date | None = None) -> dict:
