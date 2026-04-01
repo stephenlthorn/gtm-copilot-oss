@@ -1,6 +1,6 @@
 # GTM Copilot — AI-Powered GTM Platform
 
-GTM Copilot is an AI-powered go-to-market platform built for sales, marketing, and SE teams. It automates pre-call research, post-call follow-ups, competitive intelligence, and RAG-grounded chat — all grounded in company knowledge indexed from Google Drive, Feishu, TiDB docs, and TiDB GitHub. Users get role-specific dashboards (Sales Rep, Marketing, SE) backed by a shared account context, with AI that adapts over time through user feedback.
+GTM Copilot is an AI-powered go-to-market platform built for sales, marketing, and SE teams. It automates pre-call research, post-call follow-ups, competitive intelligence, and RAG-grounded chat — all grounded in company knowledge indexed from Google Drive, call transcripts, TiDB docs, and TiDB GitHub. Users get role-specific dashboards (Sales Rep, Marketing, SE) backed by a shared account context, with AI that adapts over time through user feedback.
 
 Built and maintained by Stephen Thorn.
 
@@ -45,7 +45,6 @@ Built and maintained by Stephen Thorn.
 flowchart LR
     subgraph internal["Internal Data Sources"]
         GD["📁 Google Drive\nDocs · Slides · PDFs"]
-        FS["🪶 Feishu / Lark\nWiki · Docs"]
         CT["📞 Call Transcripts\nChorus / Generic API"]
         SF["☁️ Salesforce\nAccounts · Deals"]
     end
@@ -96,7 +95,7 @@ flowchart LR
         end
     end
 
-    GD & FS & CT & SF --> kb
+    GD & CT & SF --> kb
     LI & CB & NW & JP & TS --> AB & FS2
     ED & HN --> AB & FS2
     ZI --> AB & FS2
@@ -205,12 +204,11 @@ graph TB
         MCP_CRM["Salesforce"]
         MCP_INTEL["ZoomInfo / LinkedIn / Crunchbase"]
         MCP_COMM["Slack / Gmail / Calendar"]
-        MCP_CONTENT["Drive / Feishu / GitHub"]
+        MCP_CONTENT["Drive / GitHub"]
     end
 
     subgraph ingest["Ingestion Pipelines"]
         DRIVE_ING["DriveIngestor + DriveConnector"]
-        FEISHU_ING["FeishuIngestor + FeishuConnector"]
         TRANSCRIPT_ING["TranscriptIngestor + CallConnector"]
         SF_SYNC["SalesforceSyncService"]
         CHUNKER["Chunking Utils<br/>(markdown / pdf / slides / turns)"]
@@ -223,7 +221,6 @@ graph TB
 
     subgraph external["External Services"]
         GDRIVE["Google Drive API"]
-        FEISHU_API["Feishu (Lark) API"]
         CALL_API["Call Transcript API"]
         OPENAI["OpenAI API<br/>(Chat + Embeddings)"]
         SMTP_SVC["SMTP Server"]
@@ -260,11 +257,10 @@ graph TB
     LLM --> mcp
 
     DRIVE_ING --> GDRIVE & CHUNKER & EMBED
-    FEISHU_ING --> FEISHU_API & CHUNKER & EMBED
     TRANSCRIPT_ING --> CALL_API & CHUNKER & EMBED & ARTIFACT
     SF_SYNC --> SALESFORCE
 
-    DRIVE_ING & FEISHU_ING & TRANSCRIPT_ING & SF_SYNC --> TIDB
+    DRIVE_ING & TRANSCRIPT_ING & SF_SYNC --> TIDB
     AUDIT --> TIDB
 
     BEAT --> WORKER
@@ -293,7 +289,7 @@ sequenceDiagram
 
     Note over O: rag_enabled=true and message is not conversational<br/>→ perform KB retrieval
 
-    O->>HR: search(rewritten_query, top_k=8, filters={source_type: [drive, feishu, chorus, memory]})
+    O->>HR: search(rewritten_query, top_k=8, filters={source_type: [drive, chorus, memory, official_docs_online]})
     HR->>DB: Vector + Keyword SQL queries
     DB-->>HR: candidate chunks
     HR-->>O: top_k RetrievedChunks
@@ -346,7 +342,7 @@ sequenceDiagram
     AI-->>ES: vector[1536]
     ES-->>HR: query_vec
 
-    Note over HR: Vector: VEC_COSINE_DISTANCE(embedding, query_vec)<br/>FROM knowledge_index<br/>WHERE org_id = :org_id ORDER BY distance ASC<br/>LIMIT 20<br/><br/>Keyword: MATCH(chunk_text) AGAINST<br/>(:query IN NATURAL LANGUAGE MODE)<br/><br/>Score = 0.50*vec + 0.30*kw<br/>+ 0.10*title + source_bias + domain_boost
+    Note over HR: Vector: VEC_COSINE_DISTANCE(embedding, query_vec)<br/>FROM knowledge_index<br/>WHERE org_id = :org_id ORDER BY distance ASC<br/>LIMIT 20<br/><br/>Keyword: MATCH(chunk_text) AGAINST<br/>(:query IN NATURAL LANGUAGE MODE)<br/><br/>Score = 0.46*vec + 0.24*kw<br/>+ 0.12*title + 0.10*coverage<br/>+ source_bias + domain_boost<br/>Weak matches penalized 0.3x, then LLM reranker
 
     HR->>DB: Vector + Keyword SQL queries
     DB-->>HR: candidate chunks
@@ -483,9 +479,9 @@ flowchart TB
 
     MERGE --> SCORE["Score each chunk"]
 
-    SCORE --> FORMULA["With semantic embeddings:<br/>score = 0.50 * vec_score<br/>+ 0.30 * kw_score<br/>+ 0.10 * title_score<br/>+ source_bias<br/>+ domain_boost"]
+    SCORE --> FORMULA["With semantic embeddings:<br/>score = 0.46 * vec_score<br/>+ 0.24 * kw_score<br/>+ 0.12 * title_score<br/>+ 0.10 * coverage<br/>+ source_bias + domain_boost<br/>Weak matches penalized 0.3x"]
 
-    SCORE --> FORMULA2["Without embeddings (hash mode):<br/>score = 0.05 * vec_score<br/>+ 0.68 * kw_score<br/>+ 0.17 * title_score<br/>+ source_bias<br/>+ domain_boost<br/>Skip if kw less than 0.18 AND title less than 0.25"]
+    SCORE --> FORMULA2["Without embeddings (hash mode):<br/>score = 0.70 * kw_score<br/>+ 0.18 * title_score<br/>+ 0.12 * coverage<br/>+ source_bias + domain_boost<br/>Weak matches penalized 0.3x"]
 
     FORMULA --> BIAS["Source Bias:<br/>+0.08 GitHub docs<br/>+0.03 Markdown/text<br/>-0.05 Code files<br/>-0.10 Changelogs<br/>-0.20 Test files"]
 
@@ -508,7 +504,7 @@ flowchart TB
 erDiagram
     kb_documents {
         uuid id PK
-        enum source_type "google_drive | feishu | chorus | tidb_docs_online"
+        enum source_type "google_drive | chorus | tidb_docs_online | memory"
         varchar source_id "file ID or call ID"
         varchar title
         text url
@@ -593,8 +589,6 @@ erDiagram
         int id PK "singleton"
         bool google_drive_enabled
         text google_drive_folder_ids
-        bool feishu_enabled
-        varchar feishu_folder_token
         bool chorus_enabled
         int retrieval_top_k "default 8"
         varchar llm_model "default gpt-5.4"
@@ -726,7 +720,7 @@ erDiagram
     sync_status {
         uuid id PK
         int org_id FK
-        varchar source "drive | feishu | chorus | salesforce"
+        varchar source "drive | chorus | salesforce | tidb_docs | github"
         enum status "ok | error | running"
         timestamptz last_sync
         text error_message
@@ -877,14 +871,6 @@ The server also reads Codex CLI auth from `~/.codex/auth.json` (mounted into the
 |---|---|
 | `GOOGLE_DRIVE_FOLDER_IDS` | Comma-separated folder IDs to index (optional) |
 
-### Feishu / Lark
-
-| Variable | Description |
-|---|---|
-| `FEISHU_APP_ID` | Feishu app ID |
-| `FEISHU_APP_SECRET` | Feishu app secret |
-| `FEISHU_BASE_URL` | Feishu API base URL |
-
 ### Call Transcripts
 
 | Variable | Description |
@@ -923,7 +909,7 @@ The chat interface has eight sections. Each maps to a dedicated system prompt in
 - Adapts response style to the question type. Technical or factual questions ("How does TiFlash work?") get a direct, concise answer. Deal or account questions ("How should I position against CockroachDB for Acme?") get a structured Context / Insight / Recommendation format.
 - Proactively searches **docs.pingcap.com** for any TiDB feature, SQL compatibility, configuration, or behavior question — official docs take precedence over training data.
 - Applies TiDB's "database for AI agents" narrative when agent or AI topics come up.
-- Performs KB retrieval (Google Drive, Feishu, call transcripts) when RAG is enabled. Short conversational inputs skip retrieval automatically.
+- Performs KB retrieval (Google Drive, call transcripts, official docs) when RAG is enabled. Short conversational inputs skip retrieval automatically.
 - Web search toggle controls access to `web_search_preview`. Citations shown for all retrieved sources.
 
 **Inputs needed:** Just type. No fields to fill.
@@ -1187,7 +1173,7 @@ All users can access all dashboards. Role determines default landing page.
 - User management: invite users, assign roles
 - Source registry: add/remove/configure global research sources
 - API key management: ZoomInfo, BuiltWith, and other optional connectors
-- Sync health: Drive, Feishu, Chorus, Salesforce status
+- Sync health: Drive, Chorus, Salesforce status
 - AI coaching panel: view all refinements across all users, promote to team, edit, disable, track effectiveness
 - MCP server configuration: enable/disable per server, configure API keys
 - API cost tracking: daily/weekly/monthly spend per external source
@@ -1205,7 +1191,6 @@ MCP servers give the LLM direct tool access to live data during chat. Each enabl
 | Salesforce MCP | Live CRM pipeline, deals, contacts | Sales |
 | Slack MCP | Search conversations, post messages | All |
 | Google Drive MCP | Search and retrieve documents | All |
-| Feishu MCP | Search and retrieve Feishu docs | All |
 | Gmail MCP (read-only) | Search emails for context | Sales, SE |
 | Google Calendar MCP (read-only) | Check schedules and meetings | Sales |
 | ZoomInfo MCP | Live prospect and company lookup | Sales, Marketing |
@@ -1347,7 +1332,7 @@ npm run dev
     /api/routes        # FastAPI endpoints: chat, kb, rep, se, marketing, admin, auth, slack
     /core              # Settings, constants, auth
     /db                # SQLAlchemy base, session factory (TiDB Cloud), init_db
-    /ingest            # Drive + Feishu + Chorus connectors and ingestors
+    /ingest            # Drive + Chorus connectors and ingestors
     /models            # ORM models: v1 (kb_documents, kb_chunks, chorus_calls, etc.)
                        #              v2 (users, accounts, deals, knowledge_index, etc.)
     /prompts           # System prompt templates (oracle, call coach)
