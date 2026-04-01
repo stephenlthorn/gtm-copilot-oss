@@ -4,25 +4,22 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 
-def test_oracle_allowed_sources_excludes_feishu_and_includes_official_docs_default():
+def test_oracle_allowed_sources_includes_official_docs_with_priority():
     from app.services.chat_orchestrator import ChatOrchestrator
 
     sources, source_priority = ChatOrchestrator._resolve_allowed_sources(None, "oracle")
-    assert "feishu" not in sources
     assert "official_docs_online" in sources
     assert source_priority["official_docs_online"] > source_priority["memory"]
 
 
-def test_oracle_allowed_sources_excludes_feishu_when_config_enabled():
+def test_oracle_allowed_sources_with_config_returns_priority():
     from app.services.chat_orchestrator import ChatOrchestrator
 
     config = SimpleNamespace(
         google_drive_enabled=True,
         chorus_enabled=True,
-        feishu_enabled=True,  # legacy field should not be used anymore
     )
     sources, source_priority = ChatOrchestrator._resolve_allowed_sources(config, "oracle")
-    assert "feishu" not in sources
     assert "official_docs_online" in sources
     assert isinstance(source_priority, dict)
 

@@ -457,14 +457,9 @@ class HybridRetriever:
         for chunk, doc in deduped.values():
             if not self._apply_filters(doc, filters, chunk):
                 continue
-            # Force call-focused primary chunks to score near 1.0 in order
-            # Note: _apply_filters (with chunk) was already applied above.
+            # Primary call chunks get a boost but are scored normally
             chunk_doc_id = str(doc.id)
-            if call_focused_primary_doc_id and chunk_doc_id == call_focused_primary_doc_id:
-                chunk_idx = getattr(chunk, 'chunk_index', 0) or 0
-                score = 1.0 - (chunk_idx * 0.0001)
-                scored.append((score, chunk, doc))
-                continue
+            is_primary_call = bool(call_focused_primary_doc_id and chunk_doc_id == call_focused_primary_doc_id)
             if query_vectors:
                 vec_score = max((self._cosine(chunk.embedding, vec) + 1) / 2 for vec in query_vectors)
             else:
@@ -497,6 +492,8 @@ class HybridRetriever:
                 if kw_score < 0.10 and coverage < 0.08:
                     score *= 0.3
             score = max(0.0, min(1.0, score))
+            if is_primary_call:
+                score = min(1.0, score + 0.15)
             if score <= 0:
                 continue
             scored.append((score, chunk, doc))
