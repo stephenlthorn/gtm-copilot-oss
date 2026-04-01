@@ -12,7 +12,6 @@ from app.services.mcp.tidb_mcp import create_tidb_mcp_server
 from app.services.mcp.salesforce_mcp import create_salesforce_mcp_server
 from app.services.mcp.slack_mcp import create_slack_mcp_server
 from app.services.mcp.drive_mcp import create_drive_mcp_server
-from app.services.mcp.feishu_mcp import create_feishu_mcp_server
 from app.services.mcp.gmail_mcp import create_gmail_mcp_server
 from app.services.mcp.calendar_mcp import create_calendar_mcp_server
 from app.services.mcp.zoominfo_mcp import create_zoominfo_mcp_server
@@ -48,9 +47,6 @@ class MCPRouter:
                 enabled=False,
             )
         self._registry.register(slack_server)
-
-        if self._settings.feishu_app_id and self._settings.feishu_app_secret:
-            self._registry.register(create_feishu_mcp_server(self._settings))
 
     def register_user_servers(
         self,

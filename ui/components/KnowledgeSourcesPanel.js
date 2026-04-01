@@ -5,16 +5,15 @@ import { useEffect, useMemo, useState } from 'react';
 const SOURCE_FILTERS = [
   { key: 'all', label: 'All' },
   { key: 'google_drive', label: 'Google Drive' },
-  { key: 'feishu', label: 'Feishu' },
+  { key: 'official_docs_online', label: 'Official Docs' },
   { key: 'chorus', label: 'Call Transcripts' },
 ];
 
 function sourceLabel(value) {
   if (value === 'all') return 'All';
   if (value === 'google_drive') return 'Google Drive';
-  if (value === 'feishu') return 'Feishu';
-  if (value === 'chorus') return 'Call Transcripts';
   if (value === 'official_docs_online') return 'Official Docs';
+  if (value === 'chorus') return 'Call Transcripts';
   return value || 'Unknown';
 }
 

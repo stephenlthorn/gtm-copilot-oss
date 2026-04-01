@@ -56,23 +56,6 @@ def sync_google_drive(user_id: int | None = None, org_id: int = 1) -> dict:
     }
 
 
-@celery_app.task(name="sync_feishu_v2")
-def sync_feishu(org_id: int = 1) -> dict:
-    init_db()
-    from app.services.indexing.feishu_indexer import FeishuIndexer
-
-    with SessionLocal() as db:
-        embedding_service = EmbeddingService()
-        indexer = FeishuIndexer(db, embedding_service)
-        result = _run_async(indexer.sync(org_id=org_id))
-
-    return {
-        "docs_indexed": result.docs_indexed,
-        "chunks_indexed": result.chunks_indexed,
-        "errors": result.errors,
-    }
-
-
 @celery_app.task(name="sync_tidb_docs_v2")
 def sync_tidb_docs(org_id: int = 1) -> dict:
     init_db()
@@ -117,12 +100,6 @@ def full_reindex(org_id: int = 1) -> dict:
     except Exception as exc:
         logger.error("full_reindex: google_drive failed: %s", exc)
         results["google_drive"] = {"error": str(exc)}
-
-    try:
-        results["feishu"] = sync_feishu(org_id=org_id)
-    except Exception as exc:
-        logger.error("full_reindex: feishu failed: %s", exc)
-        results["feishu"] = {"error": str(exc)}
 
     try:
         results["tidb_docs"] = sync_tidb_docs(org_id=org_id)

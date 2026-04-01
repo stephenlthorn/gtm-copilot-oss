@@ -6,7 +6,6 @@ const SOURCE_OPTIONS = [
   { value: '', label: 'All sources' },
   { value: 'google_drive', label: 'Google Drive' },
   { value: 'chorus', label: 'Call Transcripts' },
-  { value: 'feishu', label: 'Feishu' },
   { value: 'official_docs_online', label: 'Official Docs' },
 ];
 
@@ -14,7 +13,6 @@ function sourceTag(type) {
   const map = {
     google_drive: { label: 'Drive', cls: 'tag-green' },
     chorus: { label: 'Call', cls: 'tag-blue' },
-    feishu: { label: 'Feishu', cls: '' },
     official_docs_online: { label: 'Docs', cls: '' },
     memory: { label: 'Memory', cls: '' },
   };

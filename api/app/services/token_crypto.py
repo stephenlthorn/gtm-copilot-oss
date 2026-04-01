@@ -19,7 +19,7 @@ class TokenCrypto:
             seed = (
                 f"{settings.app_name}|"
                 f"{settings.google_drive_client_secret or ''}|"
-                f"{settings.feishu_app_secret or ''}|dev-only"
+                "dev-only"
             )
             key = base64.urlsafe_b64encode(hashlib.sha256(seed.encode("utf-8")).digest())
         self._fernet = Fernet(key)

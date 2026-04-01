@@ -95,12 +95,6 @@ def list_documents(
     if viewer_email:
         filtered: list[KBDocument] = []
         for doc in docs:
-            # Feishu docs are per-user; filter to viewer only
-            if doc.source_type == SourceType.FEISHU:
-                tags = doc.tags if isinstance(doc.tags, dict) else {}
-                indexed_for = str(tags.get("user_email", "")).strip().lower()
-                if indexed_for and indexed_for != viewer_email:
-                    continue
             # Google Drive and Chorus are shared workspace content — no per-user filter
             filtered.append(doc)
         docs = filtered
@@ -203,11 +197,6 @@ def fulltext_search_kb(
             indexed_for = str(tags.get("user_email", "")).strip().lower()
             if indexed_for and indexed_for != viewer_email:
                 continue
-        if viewer_email and doc.source_type == SourceType.FEISHU:
-            tags = doc.tags if isinstance(doc.tags, dict) else {}
-            indexed_for = str(tags.get("user_email", "")).strip().lower()
-            if indexed_for and indexed_for != viewer_email:
-                continue
         score = _fulltext_score(chunk.text, doc.title or "", doc.source_id or "", query)
         if score <= 0:
             continue
@@ -255,11 +244,6 @@ def inspect_file(file_id: str, request: Request = None, db: Session = Depends(db
     if not doc:
         raise HTTPException(status_code=404, detail="file not found")
     if viewer_email and doc.source_type == SourceType.GOOGLE_DRIVE:
-        tags = doc.tags if isinstance(doc.tags, dict) else {}
-        indexed_for = str(tags.get("user_email", "")).strip().lower()
-        if indexed_for and indexed_for != viewer_email:
-            raise HTTPException(status_code=404, detail="file not found")
-    if viewer_email and doc.source_type == SourceType.FEISHU:
         tags = doc.tags if isinstance(doc.tags, dict) else {}
         indexed_for = str(tags.get("user_email", "")).strip().lower()
         if indexed_for and indexed_for != viewer_email:

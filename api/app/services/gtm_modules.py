@@ -96,7 +96,6 @@ class GTMModuleService:
 
         doc_sources = [
             SourceType.GOOGLE_DRIVE.value,
-            SourceType.FEISHU.value,
             SourceType.OFFICIAL_DOCS_ONLINE.value,
             SourceType.MEMORY.value,
         ]
@@ -938,7 +937,11 @@ class GTMModuleService:
             query,
             top_k=10,
             filters={
-                "source_type": [SourceType.GOOGLE_DRIVE.value, SourceType.FEISHU.value, SourceType.CHORUS.value],
+                "source_type": [
+                    SourceType.GOOGLE_DRIVE.value,
+                    SourceType.OFFICIAL_DOCS_ONLINE.value,
+                    SourceType.CHORUS.value,
+                ],
                 "viewer_email": (user or "").strip().lower(),
             },
         )
@@ -1325,7 +1328,11 @@ class GTMModuleService:
             query,
             top_k=10,
             filters={
-                "source_type": [SourceType.GOOGLE_DRIVE.value, SourceType.FEISHU.value, SourceType.CHORUS.value],
+                "source_type": [
+                    SourceType.GOOGLE_DRIVE.value,
+                    SourceType.OFFICIAL_DOCS_ONLINE.value,
+                    SourceType.CHORUS.value,
+                ],
                 "viewer_email": (user or "").strip().lower(),
             },
         )

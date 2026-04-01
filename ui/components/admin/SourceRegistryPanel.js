@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 
-const PROVIDERS = ['google_drive', 'feishu', 'confluence', 'notion', 'github', 'slack', 'custom'];
+const PROVIDERS = ['google_drive', 'confluence', 'notion', 'github', 'slack', 'custom'];
 const SCOPES = ['global', 'account'];
 
 const EMPTY_FORM = { provider: PROVIDERS[0], config: '{}', scope: 'global' };

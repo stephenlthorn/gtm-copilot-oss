@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react';
 
 const MCP_SERVERS = [
-  'TiDB', 'Salesforce', 'Slack', 'Google Drive', 'Feishu',
+  'TiDB', 'Salesforce', 'Slack', 'Google Drive',
   'Gmail', 'Calendar', 'ZoomInfo', 'LinkedIn', 'Firecrawl', 'GitHub', 'Crunchbase',
 ];
 

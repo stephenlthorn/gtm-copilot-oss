@@ -51,7 +51,7 @@ async def test_search_deduplicates_results_across_tables():
 
     same_result = RetrievalResult(
         chunk_text="shared content",
-        source_type="feishu",
+        source_type="google_drive",
         source_ref="doc_1",
         title="Doc 1",
         score=0.9,

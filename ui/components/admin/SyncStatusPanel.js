@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 
-const SOURCES = ['google_drive', 'feishu', 'tidb_docs', 'tidb_github'];
+const SOURCES = ['google_drive', 'chorus', 'tidb_docs', 'tidb_github'];
 
 function statusTagClass(status) {
   if (status === 'ok' || status === 'completed') return 'tag-green';

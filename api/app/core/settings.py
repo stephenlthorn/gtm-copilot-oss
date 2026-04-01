@@ -50,14 +50,6 @@ class Settings(BaseSettings):
     fake_drive_include_github: bool = False
     google_drive_folder_ids: str = ""
 
-    feishu_app_id: str = ""
-    feishu_app_secret: str = ""
-    feishu_access_token: str = ""
-    feishu_base_url: str = "https://open.feishu.cn/open-apis"
-    feishu_oauth_state_ttl_seconds: int = 600
-    feishu_oauth_scopes: str = "offline_access drive:drive:readonly docs:document.content:read wiki:wiki:readonly"
-    feishu_wiki_root_tokens: str = ""  # comma-separated wiki root node tokens (bypasses space auto-discovery)
-
     call_provider: str = "generic"
     call_api_key: str | None = None
     call_base_url: str | None = None

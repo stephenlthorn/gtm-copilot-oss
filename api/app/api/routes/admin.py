@@ -5,7 +5,6 @@ import os
 import uuid
 from datetime import date, datetime, timedelta, timezone
 import logging
-import re
 
 logger = logging.getLogger(__name__)
 
@@ -20,7 +19,6 @@ from sqlalchemy.orm import Session
 from app.api.deps import db_session
 from app.core.settings import get_settings
 from app.ingest.drive_ingestor import DriveIngestor
-from app.ingest.feishu_ingestor import FeishuIngestor
 from app.ingest.transcript_ingestor import TranscriptIngestor
 from app.models import AuditLog, AuditStatus, KBConfig
 from app.models.feedback import AIFeedback, PromptSuggestion
@@ -36,8 +34,6 @@ from app.schemas.kb_config import KBConfigRead, KBConfigUpdate
 from app.services.audit import write_audit_log
 from app.services.google_drive_credentials import GoogleDriveCredentialService
 from app.services.google_drive_oauth import google_drive_oauth_state_store
-from app.services.feishu_credentials import FeishuCredentialService
-from app.services.feishu_oauth import feishu_oauth_state_store
 from app.services.drive_sync_jobs import drive_sync_jobs
 
 router = APIRouter()
@@ -47,88 +43,6 @@ def _request_user_email(request: Request, fallback: str | None = None) -> str | 
     raw = (request.headers.get("X-User-Email") if request else "") or fallback or ""
     email = raw.strip().lower()
     return email or None
-
-
-def _parse_token_list(raw: str | None) -> list[str]:
-    if not raw:
-        return []
-    parts = re.split(r"[,\n\r\t ]+", raw)
-    out: list[str] = []
-    seen: set[str] = set()
-    for part in parts:
-        token = part.strip()
-        if not token or token in seen:
-            continue
-        seen.add(token)
-        out.append(token)
-    return out
-
-
-def _resolve_feishu_roots(config: KBConfig | None) -> list[str]:
-    roots = _parse_token_list(config.feishu_root_tokens if config else None)
-    legacy = (config.feishu_folder_token if config else "") or ""
-    legacy = legacy.strip()
-    if legacy and legacy not in roots:
-        roots.append(legacy)
-    return roots
-
-
-def _resolve_feishu_creds(config: KBConfig | None) -> tuple[str, str]:
-    settings = get_settings()
-    app_id = ((config.feishu_app_id if config else None) or settings.feishu_app_id or "").strip()
-    app_secret = ((config.feishu_app_secret if config else None) or settings.feishu_app_secret or "").strip()
-    return app_id, app_secret
-
-
-def _feishu_scopes() -> list[str]:
-    settings = get_settings()
-    raw = (settings.feishu_oauth_scopes or "").strip()
-    scopes = [scope.strip() for scope in raw.split(" ") if scope.strip()]
-    if not scopes:
-        scopes = ["offline_access", "drive:drive:readonly", "docs:document.content:read"]
-    return scopes
-
-
-def _exchange_feishu_oauth_code(*, app_id: str, app_secret: str, code: str, redirect_uri: str) -> dict:
-    settings = get_settings()
-    # Get app_access_token first — Feishu requires it for OAuth exchange
-    token_url = f"{settings.feishu_base_url.rstrip('/')}/auth/v3/app_access_token/internal"
-    token_res = httpx.post(token_url, json={"app_id": app_id, "app_secret": app_secret}, timeout=10)
-    token_res.raise_for_status()
-    token_data = token_res.json()
-    if token_data.get("code") != 0:
-        raise RuntimeError(f"Feishu app token error: {token_data}")
-    app_access_token = token_data["app_access_token"]
-
-    headers = {
-        "Authorization": f"Bearer {app_access_token}",
-        "Content-Type": "application/json; charset=utf-8",
-    }
-    body = {
-        "grant_type": "authorization_code",
-        "code": code,
-        "redirect_uri": redirect_uri,
-    }
-    endpoints = ["/authen/v1/oidc/access_token", "/authen/v1/access_token"]
-    errors: list[str] = []
-    for endpoint in endpoints:
-        url = f"{settings.feishu_base_url.rstrip('/')}{endpoint}"
-        try:
-            res = httpx.post(url, headers=headers, json=body, timeout=20.0)
-            if res.status_code >= 400:
-                errors.append(f"{endpoint}:HTTP{res.status_code}")
-                continue
-            payload = res.json()
-            if payload.get("code") != 0:
-                errors.append(f"{endpoint}:{payload.get('msg') or payload.get('code')}")
-                continue
-            data = payload.get("data") or {}
-            if data.get("access_token"):
-                return data
-            errors.append(f"{endpoint}:missing_access_token")
-        except Exception as exc:
-            errors.append(f"{endpoint}:{exc}")
-    raise RuntimeError(f"Feishu token exchange failed ({'; '.join(errors)})")
 
 
 @router.get("/health")
@@ -326,120 +240,6 @@ def drive_disconnect(request: Request, db: Session = Depends(db_session)) -> dic
     return {"connected": False, "deleted": deleted}
 
 
-@router.get("/feishu/oauth/start")
-def feishu_oauth_start(
-    request: Request,
-    redirect_uri: str = Query(...),
-    db: Session = Depends(db_session),
-) -> dict:
-    user_email = _request_user_email(request)
-    if not user_email:
-        raise HTTPException(status_code=400, detail="Missing signed-in user email.")
-
-    kb_config: KBConfig | None = db.get(KBConfig, 1)
-    app_id, app_secret = _resolve_feishu_creds(kb_config)
-    if not app_id or not app_secret:
-        raise HTTPException(
-            status_code=500,
-            detail="Feishu OAuth app is not configured. Set feishu_app_id and feishu_app_secret.",
-        )
-
-    payload = feishu_oauth_state_store.create_auth_url(
-        user_email=user_email,
-        redirect_uri=redirect_uri,
-        app_id=app_id,
-        scopes=_feishu_scopes(),
-    )
-    return {"auth_url": payload["auth_url"]}
-
-
-@router.post("/feishu/oauth/exchange")
-def feishu_oauth_exchange(
-    request: Request,
-    body: dict | None = Body(default=None),
-    db: Session = Depends(db_session),
-) -> dict:
-    payload = body or {}
-    user_email = _request_user_email(request, fallback=payload.get("user_email"))
-    if not user_email:
-        raise HTTPException(status_code=400, detail="Missing signed-in user email.")
-    code = str(payload.get("code") or "").strip()
-    state = str(payload.get("state") or "").strip()
-    redirect_uri = str(payload.get("redirect_uri") or "").strip()
-    if not code or not state or not redirect_uri:
-        raise HTTPException(status_code=400, detail="code, state, and redirect_uri are required.")
-
-    kb_config: KBConfig | None = db.get(KBConfig, 1)
-    app_id, app_secret = _resolve_feishu_creds(kb_config)
-    if not app_id or not app_secret:
-        raise HTTPException(status_code=500, detail="Feishu OAuth app is not configured.")
-
-    try:
-        feishu_oauth_state_store.consume(
-            state=state,
-            user_email=user_email,
-            redirect_uri=redirect_uri,
-            app_id=app_id,
-        )
-    except RuntimeError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-
-    try:
-        token_data = _exchange_feishu_oauth_code(
-            app_id=app_id,
-            app_secret=app_secret,
-            code=code,
-            redirect_uri=redirect_uri,
-        )
-    except RuntimeError as exc:
-        raise HTTPException(status_code=502, detail=str(exc)) from exc
-
-    cred_service = FeishuCredentialService(db)
-    previous = cred_service.get_stored_payload(user_email) or {}
-    previous_refresh = previous.get("refresh_token")
-    stored_payload = FeishuCredentialService.token_payload_from_oauth_exchange(token_data)
-    if not stored_payload.get("refresh_token") and previous_refresh:
-        stored_payload["refresh_token"] = previous_refresh
-    cred_service.upsert_token_payload(user_email, stored_payload, commit=True)
-
-    write_audit_log(
-        db,
-        actor=user_email,
-        action="feishu_oauth_exchange",
-        input_payload={"user_email": user_email},
-        retrieval_payload={},
-        output_payload={"connected": True},
-        status=AuditStatus.OK,
-    )
-    return {"connected": True}
-
-
-@router.get("/feishu/status")
-def feishu_status(request: Request, db: Session = Depends(db_session)) -> dict:
-    user_email = _request_user_email(request)
-    if not user_email:
-        raise HTTPException(status_code=400, detail="Missing signed-in user email.")
-    return FeishuCredentialService(db).get_status(user_email)
-
-
-@router.delete("/feishu/credentials")
-def feishu_disconnect(request: Request, db: Session = Depends(db_session)) -> dict:
-    user_email = _request_user_email(request)
-    if not user_email:
-        raise HTTPException(status_code=400, detail="Missing signed-in user email.")
-    deleted = FeishuCredentialService(db).delete_for_user(user_email, commit=True)
-    write_audit_log(
-        db,
-        actor=user_email,
-        action="feishu_oauth_disconnect",
-        input_payload={"user_email": user_email},
-        retrieval_payload={},
-        output_payload={"deleted": deleted},
-        status=AuditStatus.OK,
-    )
-    return {"connected": False, "deleted": deleted}
-
-
 import threading as _threading
 _calls_sync_lock = _threading.Lock()
 
@@ -579,18 +379,6 @@ def update_kb_config(update: KBConfigUpdate, db: Session = Depends(db_session)):
     if "persona_prompt" in payload:
         prompt = (payload.get("persona_prompt") or "").strip()
         payload["persona_prompt"] = prompt or None
-    if "feishu_root_tokens" in payload:
-        roots = _parse_token_list(payload.get("feishu_root_tokens"))
-        payload["feishu_root_tokens"] = "\n".join(roots) if roots else None
-    if "feishu_folder_token" in payload:
-        token = (payload.get("feishu_folder_token") or "").strip()
-        payload["feishu_folder_token"] = token or None
-    if "feishu_app_id" in payload:
-        app_id = (payload.get("feishu_app_id") or "").strip()
-        payload["feishu_app_id"] = app_id or None
-    if "feishu_app_secret" in payload:
-        secret = (payload.get("feishu_app_secret") or "").strip()
-        payload["feishu_app_secret"] = secret or None
     if "se_poc_kit_url" in payload:
         url = (payload.get("se_poc_kit_url") or "").strip()
         payload["se_poc_kit_url"] = url or None
@@ -604,50 +392,6 @@ def update_kb_config(update: KBConfigUpdate, db: Session = Depends(db_session)):
     db.commit()
     db.refresh(config)
     return config
-
-
-@router.post("/sync/feishu")
-def sync_feishu(request: Request, db: Session = Depends(db_session)) -> dict:
-    import asyncio
-    from app.services.indexing.feishu_indexer import FeishuIndexer
-    from app.services.indexing.embedder import EmbeddingService
-
-    user_email = _request_user_email(request)
-
-    kb_config: KBConfig | None = db.get(KBConfig, 1)
-    app_id, app_secret = _resolve_feishu_creds(kb_config)
-
-    embedding_service = EmbeddingService()
-    indexer = FeishuIndexer(db, embedding_service, app_id=app_id, app_secret=app_secret, user_email=user_email)
-
-    try:
-        loop = asyncio.get_event_loop()
-    except RuntimeError:
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-    result = loop.run_until_complete(indexer.sync(org_id=1))
-
-    indexed = result.docs_indexed
-    errors = len(result.errors or [])
-    status_value = "ok"
-    message: str | None = None
-    if errors > 0 and indexed == 0:
-        status_value = "error"
-        message = "Feishu sync failed. Check worker logs for details."
-    elif errors > 0:
-        status_value = "partial"
-        message = "Feishu sync completed with some errors."
-
-    write_audit_log(
-        db,
-        actor=user_email or "system",
-        action="sync_feishu",
-        input_payload={"user_email": user_email},
-        retrieval_payload={},
-        output_payload={"docs_indexed": indexed, "errors": errors},
-        status=AuditStatus.OK,
-    )
-    return {"status": status_value, "message": message, "indexed": indexed, "skipped": 0}
 
 
 SUGGESTION_THRESHOLD_DEFAULT = 3

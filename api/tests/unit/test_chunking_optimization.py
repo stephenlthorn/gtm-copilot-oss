@@ -326,7 +326,8 @@ def test_replace_chunks_call_outcome_present_when_set():
         assert chunk.metadata_json["call_outcome"] == "won"
 
 
-def test_replace_chunks_text_is_raw_transcript_not_prefixed():
+def test_replace_chunks_text_is_prefixed_for_reranker():
+    """KBChunk.text stores the prefixed text so the reranker has full context."""
     from app.ingest.transcript_ingestor import TranscriptIngestor
     import re
     ingestor = _make_ingestor_with_mock_db()
@@ -338,7 +339,7 @@ def test_replace_chunks_text_is_raw_transcript_not_prefixed():
     ingestor.db.add.side_effect = added_chunks.append
     ingestor._replace_chunks(doc, normalized, call)
     for chunk in added_chunks:
-        assert not re.match(r"^\S.*\|.*rep:", chunk.text)
+        assert re.match(r"^\S.*\|.*rep:", chunk.text)
 
 
 def test_replace_chunks_embed_text_is_prefixed():
@@ -354,8 +355,8 @@ def test_replace_chunks_embed_text_is_prefixed():
     assert re.match(r"^\S.*\|.*rep:", embed_arg)
 
 
-def test_replace_chunks_fallback_path_text_not_prefixed():
-    """Summary-only path: KBChunk.text must not contain prefix."""
+def test_replace_chunks_fallback_path_text_is_prefixed():
+    """Summary-only path: KBChunk.text also stores prefixed text for reranker context."""
     from app.ingest.transcript_ingestor import TranscriptIngestor
     import re
     ingestor = _make_ingestor_with_mock_db()
@@ -373,7 +374,7 @@ def test_replace_chunks_fallback_path_text_not_prefixed():
     ingestor.db.add.side_effect = added_chunks.append
     ingestor._replace_chunks(doc, normalized, call)
     assert len(added_chunks) == 1
-    assert not re.match(r"^\S.*\|.*rep:", added_chunks[0].text)
+    assert re.match(r"^\S.*\|.*rep:", added_chunks[0].text)
     embed_arg = ingestor.embedder.batch_embed.call_args.args[0][0]
     assert re.match(r"^\S.*\|.*rep:", embed_arg)
 
@@ -574,7 +575,7 @@ def test_integration_ingest_and_retrieve_by_call_outcome(sqlite_db):
         )
         assert len(hits_rep) >= 1
 
-        # KBChunk.text must not contain the account/stage prefix
+        # KBChunk.text now stores the prefixed text for reranker context
         import re
         for hit in hits_won:
-            assert not re.match(r"^\S.*\|.*rep:", hit.text)
+            assert re.match(r"^\S.*\|.*rep:", hit.text)

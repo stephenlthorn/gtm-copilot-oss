@@ -30,14 +30,12 @@ def _uuid() -> uuid.UUID:
 
 class SourceType(str, enum.Enum):
     GOOGLE_DRIVE = "google_drive"
-    FEISHU = "feishu"
     CHORUS = "chorus"
     OFFICIAL_DOCS_ONLINE = "official_docs_online"
     MEMORY = "memory"
 
 
 class SyncSourceType(str, enum.Enum):
-    feishu = "feishu"
     google_drive = "google_drive"
     chorus = "chorus"
     tidb_docs = "tidb_docs"
@@ -232,12 +230,6 @@ class KBConfig(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, default=1)
     google_drive_enabled: Mapped[bool] = mapped_column(default=True, nullable=False)
     google_drive_folder_ids: Mapped[str | None] = mapped_column(Text)
-    feishu_enabled: Mapped[bool] = mapped_column(default=False, nullable=False)
-    feishu_root_tokens: Mapped[str | None] = mapped_column(Text)
-    feishu_oauth_enabled: Mapped[bool] = mapped_column(default=False, nullable=False, server_default="false")
-    feishu_folder_token: Mapped[str | None] = mapped_column(String(255))
-    feishu_app_id: Mapped[str | None] = mapped_column(String(255))
-    feishu_app_secret: Mapped[str | None] = mapped_column(String(255))
     retrieval_cutover: Mapped[bool] = mapped_column(default=False, nullable=False, server_default=sa.false())
     chorus_enabled: Mapped[bool] = mapped_column(default=False, nullable=False)
     retrieval_top_k: Mapped[int] = mapped_column(Integer, default=8, nullable=False)
@@ -274,20 +266,6 @@ class KBConfig(Base):
 
 class GoogleDriveUserCredential(Base):
     __tablename__ = "google_drive_user_credentials"
-
-    id: Mapped[uuid.UUID] = mapped_column(UUID_TYPE, primary_key=True, default=_uuid)
-    user_email: Mapped[str] = mapped_column(String(255), nullable=False, unique=True, index=True)
-    token_encrypted: Mapped[str] = mapped_column(Text, nullable=False)
-    scopes: Mapped[str | None] = mapped_column(Text)
-    last_synced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
-    updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
-    )
-
-
-class FeishuUserCredential(Base):
-    __tablename__ = "feishu_user_credentials"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID_TYPE, primary_key=True, default=_uuid)
     user_email: Mapped[str] = mapped_column(String(255), nullable=False, unique=True, index=True)

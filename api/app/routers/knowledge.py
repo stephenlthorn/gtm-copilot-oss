@@ -8,13 +8,13 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.api.deps import db_session
-from app.models.entities import SyncSourceType, SyncStatus
+from app.models.entities import SyncStatus
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
-_VALID_SOURCES = {e.value for e in SyncSourceType}
+_VALID_SOURCES = {"google_drive", "chorus", "tidb_docs", "tidb_github"}
 
 
 @router.get("/search")
@@ -96,7 +96,6 @@ def trigger_sync(
 
     from app.tasks.indexing_tasks import (
         full_reindex,
-        sync_feishu,
         sync_github,
         sync_google_drive,
         sync_tidb_docs,
@@ -104,7 +103,6 @@ def trigger_sync(
 
     task_map = {
         "google_drive": lambda: sync_google_drive.delay(user_id=user_id, org_id=org_id),
-        "feishu": lambda: sync_feishu.delay(org_id=org_id),
         "tidb_docs": lambda: sync_tidb_docs.delay(org_id=org_id),
         "tidb_github": lambda: sync_github.delay(org_id=org_id),
         "all": lambda: full_reindex.delay(org_id=org_id),
