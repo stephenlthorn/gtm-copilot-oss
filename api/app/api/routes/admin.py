@@ -53,6 +53,7 @@ def health() -> dict:
 @router.get("/security/settings")
 def security_settings() -> dict:
     settings = get_settings()
+    chorus_configured = bool(settings.call_api_key or settings.chorus_api_key)
     return {
         "enterprise_mode": settings.enterprise_mode,
         "security_require_private_llm_endpoint": settings.security_require_private_llm_endpoint,
@@ -69,6 +70,9 @@ def security_settings() -> dict:
         "internal_domain_allowlist": settings.domain_allowlist,
         "email_mode": settings.email_mode,
         "smtp_tls_configured": bool(settings.smtp_username and settings.smtp_password),
+        "chorus_api_configured": chorus_configured,
+        "call_api_configured": chorus_configured,
+        "call_base_url": (settings.call_base_url or settings.chorus_base_url) or None,
     }
 
 

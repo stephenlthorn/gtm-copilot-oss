@@ -75,8 +75,7 @@ export default function CallsPanel() {
       <div className="panel-body" style={{ display: 'grid', gap: '0.75rem' }}>
         <p style={{ fontSize: '0.8rem', color: 'var(--text-2)' }}>
           Syncs call transcripts from Chorus into the knowledge base.
-          Set <code style={{ fontSize: '0.74rem' }}>CALL_API_KEY</code> and{' '}
-          <code style={{ fontSize: '0.74rem' }}>CALL_BASE_URL</code> in the backend <code style={{ fontSize: '0.74rem' }}>.env</code>.
+          Set <code style={{ fontSize: '0.74rem' }}>CHORUS_API_KEY</code> in the backend <code style={{ fontSize: '0.74rem' }}>.env</code>.
         </p>
 
         {secSettings && (
