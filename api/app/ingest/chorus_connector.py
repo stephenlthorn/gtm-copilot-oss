@@ -83,7 +83,7 @@ class ChorusConnector:
 
     def _fetch_calls_api_pages(self, since: date | None = None):
         """Yield one page (list[ChorusCallRaw]) at a time."""
-        headers = {"Authorization": f"Bearer {self.api_key}"}
+        headers = {"Authorization": self.api_key}
         params: dict = {}
         if since:
             params["min_date"] = since.strftime("%Y-%m-%dT%H:%M:%S.000Z")
