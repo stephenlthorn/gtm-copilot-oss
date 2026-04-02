@@ -528,7 +528,7 @@ class HybridRetriever:
                 scored = new_scored
 
         scored.sort(key=lambda item: item[0], reverse=True)
-        _min_score = float(os.getenv("RAG_MIN_SCORE", "0.12"))
+        _min_score = float(os.getenv("RAG_MIN_SCORE", "0.05"))
         # Call-focused primary chunks always score ≥ 0.9999 and are never filtered.
         scored = [(s, c, d) for s, c, d in scored if s >= _min_score]
         # If call-focused primary doc is set, return all scored chunks (no top_k cap)
