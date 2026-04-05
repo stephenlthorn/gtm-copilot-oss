@@ -1,9 +1,10 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Depends, Request
 from sqlalchemy import asc, select
 from sqlalchemy.orm import Session
 
+from app.api.deps import require_auth
 from app.db.session import SessionLocal
 from app.models import AuditStatus
 from app.schemas.chat import ChatRequest
@@ -67,7 +68,7 @@ def chat_history(request: Request, limit: int = 100, model: str = "gpt-5.4") -> 
 
 
 @router.post("")
-def chat(req: ChatRequest, request: Request) -> dict:
+def chat(req: ChatRequest, request: Request, caller: str = Depends(require_auth)) -> dict:
     openai_token = request.headers.get("X-OpenAI-Token") or req.openai_token
     with SessionLocal() as db:
         orchestrator = ChatOrchestrator(db, openai_token=openai_token)

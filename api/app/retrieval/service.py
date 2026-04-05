@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 import json
+import logging
 import math
 import os
 import re
-from collections import Counter
 from dataclasses import asdict
 from datetime import datetime
 
@@ -16,6 +16,8 @@ from app.retrieval.reranker import LLMReranker
 from app.retrieval.types import RetrievedChunk
 from app.services.embedding import EmbeddingService
 from app.services.query_rewrite import QueryRewriter
+
+logger = logging.getLogger(__name__)
 
 
 class HybridRetriever:
@@ -29,15 +31,19 @@ class HybridRetriever:
     def _cosine(a: list[float] | None, b: list[float] | None) -> float:
         if a is None or b is None:
             return 0.0
-        aa_raw = list(a)
-        bb_raw = list(b)
-        if not aa_raw or not bb_raw:
+        aa = list(a)
+        bb = list(b)
+        if not aa or not bb:
             return 0.0
-        length = min(len(aa_raw), len(bb_raw))
-        if length == 0:
-            return 0.0
-        aa = aa_raw[:length]
-        bb = bb_raw[:length]
+        if len(aa) != len(bb):
+            logger.warning(
+                "Embedding dimension mismatch: %d vs %d — vectors may be from different models",
+                len(aa),
+                len(bb),
+            )
+            length = min(len(aa), len(bb))
+            aa = aa[:length]
+            bb = bb[:length]
         dot = sum(x * y for x, y in zip(aa, bb))
         na = math.sqrt(sum(x * x for x in aa)) or 1.0
         nb = math.sqrt(sum(y * y for y in bb)) or 1.0
@@ -138,15 +144,19 @@ class HybridRetriever:
         if not terms:
             return 0.0
         lowered = text.lower()
-        count = Counter(term for term in terms if term and HybridRetriever._contains_term(lowered, term))
-        if not count:
-            return 0.0
         weighted_hits = 0.0
-        for term, term_count in count.items():
-            weight = 1.0 + min(len(term), 12) / 20.0
-            if len(term) > 5:
-                weight *= 1.3  # boost specific/domain terms
-            weighted_hits += weight * term_count
+        for term in terms:
+            if not term:
+                continue
+            pattern = rf"(?<![a-z0-9_]){re.escape(term)}(?![a-z0-9_])"
+            occurrences = len(re.findall(pattern, lowered))
+            if occurrences > 0:
+                weight = 1.0 + min(len(term), 12) / 20.0
+                if len(term) > 5:
+                    weight *= 1.3
+                weighted_hits += weight * min(occurrences, 5)
+        if weighted_hits == 0.0:
+            return 0.0
         denom = max(1.0, len(terms) * 1.3)
         return min(1.0, weighted_hits / denom)
 
@@ -158,17 +168,16 @@ class HybridRetriever:
             return False
 
         viewer_email = str(filters.get("viewer_email") or "").strip().lower()
-        if viewer_email and doc.source_type.value == "google_drive":
+        if viewer_email and doc.source_type.value in ("google_drive", "feishu", "memory"):
             tags = doc.tags if isinstance(doc.tags, dict) else {}
             indexed_for = str(tags.get("user_email", "")).strip().lower()
-            # Shared Drive/service-account indexed content can legitimately omit user_email.
-            if indexed_for and indexed_for != viewer_email:
-                return False
-        if viewer_email and doc.source_type.value == "memory":
-            tags = doc.tags if isinstance(doc.tags, dict) else {}
-            indexed_for = str(tags.get("user_email", "")).strip().lower()
-            if indexed_for and indexed_for != viewer_email:
-                return False
+            if doc.source_type.value == "memory":
+                if not indexed_for or indexed_for != viewer_email:
+                    return False
+            else:
+                # Shared Drive/service-account content can legitimately omit user_email.
+                if indexed_for and indexed_for != viewer_email:
+                    return False
 
         account_filter = {a.lower() for a in (filters.get("account") or [])}
         if account_filter:
@@ -426,7 +435,8 @@ class HybridRetriever:
                         break
 
             if terms:
-                keyword_clauses = [KBChunk.text.ilike(f"%{term}%") for term in terms[:12]]
+                escaped = [t.replace("%", r"\%").replace("_", r"\_") for t in terms[:12]]
+                keyword_clauses = [KBChunk.text.ilike(f"%{term}%") for term in escaped]
                 keyword_rows = self.db.execute(
                     base_stmt.where(or_(*keyword_clauses)).limit(candidate_limit)
                 ).all()
@@ -435,7 +445,8 @@ class HybridRetriever:
             # SQLite fallback for local unit tests
             rows.extend(self.db.execute(base_stmt.limit(candidate_limit)).all())
             if terms:
-                keyword_clauses = [KBChunk.text.ilike(f"%{term}%") for term in terms[:12]]
+                escaped = [t.replace("%", r"\%").replace("_", r"\_") for t in terms[:12]]
+                keyword_clauses = [KBChunk.text.ilike(f"%{term}%") for term in escaped]
                 keyword_rows = self.db.execute(
                     base_stmt.where(or_(*keyword_clauses)).limit(candidate_limit)
                 ).all()
@@ -477,7 +488,6 @@ class HybridRetriever:
                     + self._source_bias(doc)
                     + domain_boost
                 )
-                # Penalize weak matches instead of hard-filtering them.
                 if kw_score < 0.10 and coverage < 0.08:
                     score *= 0.3
             else:
@@ -488,7 +498,6 @@ class HybridRetriever:
                     + self._source_bias(doc)
                     + domain_boost
                 )
-                # Penalize weak matches instead of hard-filtering them.
                 if kw_score < 0.10 and coverage < 0.08:
                     score *= 0.3
             score = max(0.0, min(1.0, score))
@@ -537,6 +546,9 @@ class HybridRetriever:
             top = scored
         else:
             top = scored[:top_k]
+
+        if not scored:
+            logger.info("Retrieval returned 0 scored results for query: %.80s (deduped=%d)", query, len(deduped))
 
         # Build RetrievedChunk objects from top 100 candidates for reranking
         rerank_pool_size = min(100, len(scored))

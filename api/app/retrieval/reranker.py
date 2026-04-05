@@ -47,25 +47,30 @@ class LLMReranker:
         """Re-score hits with GPT-4o-mini and return top_k by relevance.
 
         Falls back to original ordering if LLM is unavailable.
+        Normalizes scores within each batch to [0, 1] before merging
+        so that cross-batch comparisons are valid.
         """
         client = self._get_client()
         if not client or not hits:
             return hits[:top_k]
 
         batch_size = 40
-        scored: list[tuple[float, RetrievedChunk]] = []
+        scored: list[tuple[float, float, RetrievedChunk]] = []
 
         for i in range(0, len(hits), batch_size):
             batch = hits[i: i + batch_size]
-            scores = self._score_batch(client, query, batch)
-            for hit, score in zip(batch, scores):
-                scored.append((score, hit))
+            raw_scores = self._score_batch(client, query, batch)
+            batch_max = max(raw_scores) if raw_scores else 1.0
+            batch_min = min(raw_scores) if raw_scores else 0.0
+            spread = batch_max - batch_min
+            for hit, raw in zip(batch, raw_scores):
+                normalized = (raw - batch_min) / spread if spread > 0 else 0.5
+                scored.append((normalized, hit.score, hit))
 
-        scored.sort(key=lambda x: x[0], reverse=True)
-        return [hit for _, hit in scored[:top_k]]
+        scored.sort(key=lambda x: (x[0], x[1]), reverse=True)
+        return [hit for _, _, hit in scored[:top_k]]
 
     def _score_batch(self, client, query: str, hits: list[RetrievedChunk]) -> list[float]:
-        # Include source type context so the reranker knows what it's reading
         passages = "\n\n".join(
             f"[{i + 1}] ({hit.source_type}) {hit.text[:800]}"
             for i, hit in enumerate(hits)
@@ -81,14 +86,19 @@ class LLMReranker:
                 ],
                 response_format={"type": "json_object"},
                 temperature=0.0,
-                max_tokens=300,
+                max_tokens=500,
             )
             data = json.loads(resp.choices[0].message.content or "{}")
             scores = data.get("scores") or []
-            # Pad to batch size in case the model returns fewer
+            if len(scores) != len(hits):
+                logger.warning(
+                    "LLMReranker returned %d scores for %d passages — padding with 0",
+                    len(scores),
+                    len(hits),
+                )
             while len(scores) < len(hits):
-                scores.append(5.0)
-            return [float(s) for s in scores[: len(hits)]]
+                scores.append(0.0)
+            return [max(0.0, min(10.0, float(s))) for s in scores[: len(hits)]]
         except Exception as exc:
             logger.warning("LLMReranker._score_batch failed: %s", exc)
             return [hit.score for hit in hits]

@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.api.deps import db_session
+from app.api.deps import db_session, require_auth
 from app.models.entities import SyncStatus
 
 logger = logging.getLogger(__name__)
@@ -23,6 +23,7 @@ async def knowledge_search(
     org_id: int = Query(default=1, description="Organization ID"),
     top_k: int = Query(default=10, ge=1, le=50, description="Number of results"),
     source_types: str | None = Query(default=None, description="Comma-separated source types"),
+    user_email: str = Depends(require_auth),
     db: Session = Depends(db_session),
 ) -> dict:
     from app.services.indexing.embedder import EmbeddingService
@@ -61,6 +62,7 @@ async def knowledge_search(
 @router.get("/sync-status")
 def sync_status(
     org_id: int = Query(default=1, description="Organization ID"),
+    user_email: str = Depends(require_auth),
     db: Session = Depends(db_session),
 ) -> dict:
     rows = db.execute(
@@ -87,6 +89,7 @@ def trigger_sync(
     source: str,
     org_id: int = Query(default=1, description="Organization ID"),
     user_id: int | None = Query(default=None, description="User ID for Drive sync"),
+    user_email: str = Depends(require_auth),
 ) -> dict:
     if source not in _VALID_SOURCES and source != "all":
         raise HTTPException(

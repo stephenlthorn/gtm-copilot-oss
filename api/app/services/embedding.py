@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import logging
 import math
 from typing import Iterable
 from urllib.parse import urlparse
@@ -9,6 +10,10 @@ from openai import OpenAI
 
 from app.core.settings import get_settings
 from app.utils.redaction import redact_sensitive_text
+
+logger = logging.getLogger(__name__)
+
+_MAX_BATCH_SIZE = 2048
 
 
 class EmbeddingService:
@@ -51,16 +56,39 @@ class EmbeddingService:
         norm = math.sqrt(sum(v * v for v in values)) or 1.0
         return [v / norm for v in values]
 
+    def _normalize_vector(self, vector: list[float]) -> list[float]:
+        if len(vector) < self.dim:
+            logger.warning("Embedding returned %d dims, expected %d — padding with zeros", len(vector), self.dim)
+            vector = vector + [0.0] * (self.dim - len(vector))
+        return vector[: self.dim]
+
     def embed(self, text: str) -> list[float]:
         payload = redact_sensitive_text(text) if self.settings.security_redact_before_llm else text
         if not self.client:
             return self._hash_embedding(payload)
 
         response = self.client.embeddings.create(model=self.settings.openai_embedding_model, input=payload)
-        vector = response.data[0].embedding
-        if len(vector) < self.dim:
-            vector = vector + [0.0] * (self.dim - len(vector))
-        return vector[: self.dim]
+        return self._normalize_vector(response.data[0].embedding)
 
     def batch_embed(self, texts: Iterable[str]) -> list[list[float]]:
-        return [self.embed(text) for text in texts]
+        text_list = list(texts)
+        if not text_list:
+            return []
+        if not self.client:
+            return [self._hash_embedding(
+                redact_sensitive_text(t) if self.settings.security_redact_before_llm else t
+            ) for t in text_list]
+
+        payloads = [
+            redact_sensitive_text(t) if self.settings.security_redact_before_llm else t
+            for t in text_list
+        ]
+        results: list[list[float]] = [[] for _ in payloads]
+        for start in range(0, len(payloads), _MAX_BATCH_SIZE):
+            batch = payloads[start : start + _MAX_BATCH_SIZE]
+            response = self.client.embeddings.create(
+                model=self.settings.openai_embedding_model, input=batch
+            )
+            for item in response.data:
+                results[start + item.index] = self._normalize_vector(item.embedding)
+        return results

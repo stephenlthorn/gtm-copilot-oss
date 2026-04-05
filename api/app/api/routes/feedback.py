@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.api.deps import db_session
+from app.api.deps import db_session, require_auth
 from app.models.feedback import AIFeedback
 from app.schemas.feedback import FeedbackCreate, FeedbackRead
 from app.services.embedding import EmbeddingService
@@ -20,13 +20,13 @@ VALID_CATEGORIES = {
 @router.post("", response_model=FeedbackRead, status_code=201)
 def create_feedback(
     body: FeedbackCreate,
-    x_user_email: str = Header(...),
+    user_email: str = Depends(require_auth),
     db: Session = Depends(db_session),
 ):
     if body.rating not in ("positive", "negative"):
         raise HTTPException(status_code=422, detail="rating must be 'positive' or 'negative'")
 
-    email = x_user_email.strip().lower()
+    email = user_email
     category = body.failure_category if body.failure_category in VALID_CATEGORIES else None
     text_to_embed = body.correction.strip() if body.correction and body.correction.strip() else body.original_response
     embedding = None
@@ -101,6 +101,7 @@ def create_feedback(
 def list_feedback(
     mode: str | None = Query(default=None),
     limit: int = Query(default=20, ge=1, le=100),
+    user_email: str = Depends(require_auth),
     db: Session = Depends(db_session),
 ):
     stmt = select(AIFeedback).order_by(AIFeedback.created_at.desc()).limit(limit)

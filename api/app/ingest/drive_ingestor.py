@@ -140,10 +140,10 @@ class DriveIngestor:
             chunks = self._to_chunks(file)
             embeddings = self.embedder.batch_embed([chunk.text for chunk in chunks]) if chunks else []
 
-            for idx, (chunk, emb) in enumerate(zip(chunks, embeddings)):
+            for chunk_idx, (chunk, emb) in enumerate(zip(chunks, embeddings)):
                 row = KBChunk(
                     document_id=doc.id,
-                    chunk_index=idx,
+                    chunk_index=chunk_idx,
                     text=chunk.text,
                     token_count=chunk.token_count,
                     embedding=emb,
@@ -152,6 +152,7 @@ class DriveIngestor:
                 )
                 self.db.add(row)
 
+            self.db.commit()
             indexed += 1
             if progress:
                 progress(
@@ -166,7 +167,7 @@ class DriveIngestor:
                     }
                 )
 
-        self.db.commit()
+
         if normalized_user:
             self.credential_service.update_last_synced(normalized_user)
         result = {"files_seen": len(files), "indexed": indexed, "skipped": skipped}

@@ -28,10 +28,18 @@ class TiDBVector(TypeDecorator):
         if value is None:
             return None
         if isinstance(value, str):
+            try:
+                parsed = json.loads(value)
+                if not isinstance(parsed, list) or not all(isinstance(x, (int, float)) for x in parsed):
+                    raise ValueError(f"Invalid vector string: expected JSON array of numbers")
+            except (json.JSONDecodeError, ValueError):
+                raise ValueError(f"Invalid vector string: not valid JSON")
             return value
         if isinstance(value, list):
+            if value and not all(isinstance(x, (int, float)) for x in value):
+                raise ValueError("Vector must contain only numbers")
             return json.dumps(value)
-        return str(value)
+        raise TypeError(f"Cannot store {type(value).__name__} as vector")
 
     def process_result_value(self, value: Any, dialect: Any) -> list[float] | None:
         if value is None:

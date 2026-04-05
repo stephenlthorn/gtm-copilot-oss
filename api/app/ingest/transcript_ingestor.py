@@ -229,11 +229,16 @@ class TranscriptIngestor:
 
         return self.db.execute(select(ChorusCall).where(ChorusCall.chorus_call_id == call_id)).scalar_one()
 
-    def _upsert_document(self, normalized: dict, call: ChorusCall) -> KBDocument:
+    def _upsert_document(self, normalized: dict, call: ChorusCall) -> tuple[KBDocument, bool]:
         call_id = normalized["chorus_call_id"]
+        content_hash = sha256_text(
+            "".join(t.get("text", "") for t in normalized.get("turns", []))
+        )
         doc = self.db.execute(
             select(KBDocument).where(KBDocument.source_type == SourceType.CHORUS, KBDocument.source_id == call_id)
         ).scalar_one_or_none()
+
+        tags = {"account": call.account, "date": call.date.isoformat(), "source_type": "call_transcript", "content_hash": content_hash}
 
         if not doc:
             doc = KBDocument(
@@ -246,17 +251,20 @@ class TranscriptIngestor:
                 owner=call.rep_email,
                 path=None,
                 permissions_hash=sha256_text(f"{call.rep_email}:{call.se_email or ''}"),
-                tags={"account": call.account, "date": call.date.isoformat(), "source_type": "call_transcript"},
+                tags=tags,
             )
             self.db.add(doc)
-        else:
-            doc.title = f"Call Transcript: {call.account} {call.date.isoformat()}"
-            doc.url = call.transcript_url
-            doc.owner = call.rep_email
-            doc.tags = {"account": call.account, "date": call.date.isoformat(), "source_type": "call_transcript"}
+            self.db.flush()
+            return doc, True
 
+        previous_hash = str((doc.tags or {}).get("content_hash", ""))
+        changed = previous_hash != content_hash
+        doc.title = f"Call Transcript: {call.account} {call.date.isoformat()}"
+        doc.url = call.transcript_url
+        doc.owner = call.rep_email
+        doc.tags = tags
         self.db.flush()
-        return doc
+        return doc, changed
 
     def _replace_chunks(self, doc: KBDocument, normalized: dict, call: ChorusCall) -> list[str]:
         self.db.execute(delete(KBChunk).where(KBChunk.document_id == doc.id))
@@ -347,12 +355,18 @@ class TranscriptIngestor:
                 )
             )
 
-    def _ingest_one(self, normalized: dict) -> None:
-        """Ingest a single normalized call into TiDB with rollback on failure."""
+    def _ingest_one(self, normalized: dict) -> bool:
+        """Ingest a single normalized call into TiDB with rollback on failure.
+
+        Returns True if content was changed and re-indexed.
+        """
         call = self._upsert_call(normalized)
-        doc = self._upsert_document(normalized, call)
+        doc, changed = self._upsert_document(normalized, call)
+        if not changed:
+            return False
         snippets = self._replace_chunks(doc, normalized, call)
         self._replace_artifact(normalized["chorus_call_id"], normalized, snippets)
+        return True
 
     def sync(self, since: date | None = None) -> dict:
         from app.db.session import SessionLocal
@@ -385,12 +399,9 @@ class TranscriptIngestor:
                 page_ingestor = TranscriptIngestor(page_db)
                 for raw in page:
                     normalized = self._normalize(raw.payload)
-                    call = page_ingestor._upsert_call(normalized)
-                    doc = page_ingestor._upsert_document(normalized, call)
-                    snippets = page_ingestor._replace_chunks(doc, normalized, call)
-                    if normalized.get("turns") or normalized.get("meeting_summary") or normalized.get("action_items"):
-                        page_ingestor._replace_artifact(normalized["chorus_call_id"], normalized, snippets)
-                    processed += 1
+                    changed = page_ingestor._ingest_one(normalized)
+                    if changed:
+                        processed += 1
                 page_db.commit()
                 logger.info("Chorus sync: committed %d/%d calls", processed, total_seen)
             except Exception:

@@ -54,9 +54,10 @@ def chunk_markdown_heading_aware(text: str) -> list[TextChunk]:
     chunks: list[TextChunk] = []
     idx = 0
     for heading, content_lines in sections:
-        block = "\n".join(content_lines).strip()
-        if not block:
+        body = "\n".join(content_lines).strip()
+        if not body:
             continue
+        block = f"{heading}\n\n{body}" if heading and heading != "Document" else body
         for sub in _split_long_block(block):
             chunks.append(
                 TextChunk(
@@ -85,7 +86,8 @@ def chunk_slides(slides: Iterable[str]) -> list[TextChunk]:
         content = slide.strip()
         if not content:
             continue
-        chunks.append(TextChunk(text=content, metadata={"slide": i}, token_count=estimate_tokens(content)))
+        for sub in _split_long_block(content):
+            chunks.append(TextChunk(text=sub, metadata={"slide": i}, token_count=estimate_tokens(sub)))
     return chunks
 
 

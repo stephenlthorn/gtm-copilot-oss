@@ -73,6 +73,7 @@ class QueryRewriter:
         """
         client = self._get_client()
         if not client:
+            logger.warning("QueryRewriter: no LLM client — query expansion disabled, using original query only")
             return {"variants": [query], "hyde": query}
 
         mode_ctx = _MODE_CONTEXT.get(mode, _MODE_CONTEXT["oracle"])
