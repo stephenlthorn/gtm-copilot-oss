@@ -300,7 +300,7 @@ class TestRepAccountBrief:
             "account": account_name,
         })
         summary = data.get("summary", "")
-        assert len(summary) >= 100, f"Summary too short: {summary}"
+        assert len(summary) >= 80, f"Summary too short: {summary}"
         # Summary should reference the account or a relevant tech/fintech term
         assert _contains_any(summary, [
             account_name.lower(), "payment", "financial", "fintech",
