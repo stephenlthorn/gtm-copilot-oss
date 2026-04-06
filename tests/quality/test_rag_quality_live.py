@@ -7,11 +7,10 @@ adherence, web search, and TiDB domain knowledge across all 8 sections.
 
 Run against a deployed instance:
 
-    pytest tests/quality/test_rag_quality_live.py -v \
-        --base-url https://your-domain.com \
-        --user-email your@company.com
+    BASE_URL=http://localhost:8000 TEST_USER_EMAIL=you@company.com \
+        pytest tests/quality/test_rag_quality_live.py -v
 
-Or against local docker compose:
+Or against local docker compose (defaults to localhost:8000):
 
     pytest tests/quality/test_rag_quality_live.py -v
 
@@ -42,28 +41,14 @@ import requests
 
 # ── Configuration ─────────────────────────────────────────────────────────────
 
-def pytest_addoption(parser: pytest.Parser) -> None:
-    parser.addoption("--base-url", default=None, help="API base URL (overrides BASE_URL env var)")
-    parser.addoption("--user-email", default=None, help="User email for X-User-Email header")
+@pytest.fixture(scope="session")
+def base_url() -> str:
+    return (os.getenv("BASE_URL") or "http://localhost:8000").rstrip("/")
 
 
 @pytest.fixture(scope="session")
-def base_url(request: pytest.FixtureRequest) -> str:
-    url = (
-        request.config.getoption("--base-url")
-        or os.getenv("BASE_URL")
-        or "http://localhost:8000"
-    )
-    return url.rstrip("/")
-
-
-@pytest.fixture(scope="session")
-def user_email(request: pytest.FixtureRequest) -> str:
-    return (
-        request.config.getoption("--user-email")
-        or os.getenv("TEST_USER_EMAIL")
-        or "quality-test@pingcap.com"
-    )
+def user_email() -> str:
+    return os.getenv("TEST_USER_EMAIL") or "quality-test@pingcap.com"
 
 
 @pytest.fixture(scope="session")
