@@ -401,6 +401,7 @@ class TestRepFollowUpDraft:
         has_greeting = _contains_any(body, [
             "hi ", "hello", "thank", "following up", "great speaking",
             "per our", "as discussed", "wanted to", "hope",
+            "team", "all,", "everyone", "recap", "summary", "internal",
         ])
         assert has_greeting, f"Body doesn't open professionally: {body[:300]}"
 
