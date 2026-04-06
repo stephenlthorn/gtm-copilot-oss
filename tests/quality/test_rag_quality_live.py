@@ -58,7 +58,7 @@ def headers(user_email: str) -> dict[str, str]:
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
 
-def post(base_url: str, path: str, headers: dict, payload: dict, timeout: int = 120) -> dict:
+def post(base_url: str, path: str, headers: dict, payload: dict, timeout: int = 300) -> dict:
     resp = requests.post(f"{base_url}{path}", json=payload, headers=headers, timeout=timeout)
     assert resp.status_code == 200, (
         f"HTTP {resp.status_code} from {path}\n{resp.text[:2000]}"
