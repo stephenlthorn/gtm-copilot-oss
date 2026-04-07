@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -40,7 +40,14 @@ class ChorusSyncService:
 
         since: datetime | None = None
         if last_call and last_call.date:
-            since = datetime.combine(last_call.date, datetime.min.time())
+            # Use last call date minus 7-day buffer to handle timezone edge cases
+            # and ensure we never miss calls due to off-by-one date issues.
+            # Existing calls are skipped by the duplicate check below.
+            last_dt = datetime.combine(last_call.date, datetime.min.time())
+            since = last_dt - timedelta(days=7)
+            logger.info("Syncing Chorus calls since %s (last stored call: %s)", since.isoformat(), last_call.date)
+        else:
+            logger.info("No existing calls in DB — fetching all Chorus calls")
         calls = await self.connector.list_calls(since=since)
 
         stored = 0

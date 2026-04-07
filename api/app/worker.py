@@ -5,6 +5,7 @@ from datetime import date
 from app.celery import celery_app  # noqa: F401 — re-exported for celery CLI
 from app.db.init_db import init_db
 import app.tasks.indexing_tasks  # noqa: F401 — registers v2 Celery tasks
+import app.tasks.connector_tasks  # noqa: F401 — registers sync_chorus_connector and sync_salesforce_connector
 from app.db.session import SessionLocal
 from app.ingest.drive_ingestor import DriveIngestor
 from app.ingest.transcript_ingestor import TranscriptIngestor
