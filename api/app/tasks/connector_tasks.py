@@ -6,7 +6,7 @@ import logging
 from app.core.settings import get_settings
 from app.db.init_db import init_db
 from app.db.session import SessionLocal
-from app.worker import celery_app
+from app.celery import celery_app
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
