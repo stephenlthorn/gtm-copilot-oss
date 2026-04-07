@@ -45,16 +45,34 @@ export default function CallsPanel() {
 
   const syncCalls = async (since = null) => {
     setSyncing(true);
-    setMessage('');
+    setMessage('Syncing…');
     try {
       const url = since ? `/api/admin/sync/calls?since=${since}` : '/api/admin/sync/calls';
       const res = await fetch(url, { method: 'POST' });
       const text = await res.text();
       const data = text ? JSON.parse(text) : {};
       if (!res.ok) throw new Error(data?.detail || `HTTP ${res.status}`);
-      const indexed = Number(data?.calls_seen || data?.added || data?.processed || 0);
-      const skipped = Number(data?.skipped || 0);
-      setMessage(`✓ Sync complete · ${indexed} calls fetched${skipped ? `, ${skipped} skipped` : ''}`);
+      if (!data?.accepted) {
+        setMessage('✗ Sync already running');
+        return;
+      }
+      // Poll for result since sync runs in background
+      let result = null;
+      for (let i = 0; i < 60; i++) {
+        await new Promise(r => setTimeout(r, 3000));
+        const poll = await fetch('/api/admin/sync/calls/result');
+        if (poll.ok) {
+          const d = await poll.json();
+          if (!d.running && d.finished_at) { result = d; break; }
+        }
+      }
+      if (result) {
+        const indexed = Number(result?.calls_seen || result?.processed || 0);
+        const skipped = Number(result?.skipped || 0);
+        setMessage(`✓ Sync complete · ${indexed} calls fetched${skipped ? `, ${skipped} skipped` : ''}`);
+      } else {
+        setMessage('✓ Sync started (still running)');
+      }
       setShowFullSync(false);
     } catch (err) {
       setMessage(`✗ ${err.message || 'Sync failed'}`);

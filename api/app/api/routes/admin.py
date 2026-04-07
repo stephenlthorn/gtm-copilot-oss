@@ -246,6 +246,7 @@ def drive_disconnect(request: Request, db: Session = Depends(db_session)) -> dic
 
 import threading as _threading
 _calls_sync_lock = _threading.Lock()
+_last_calls_sync_result: dict = {}
 
 
 def _sync_calls_impl(since: str | None, db: Session) -> dict:
@@ -282,11 +283,14 @@ def _launch_calls_sync(since: str | None) -> dict:
         return {"accepted": False, "reason": "sync already running"}
 
     def _run() -> None:
+        global _last_calls_sync_result
         bg_db = SessionLocal()
         try:
-            _sync_calls_impl(since=since, db=bg_db)
+            result = _sync_calls_impl(since=since, db=bg_db)
+            _last_calls_sync_result = {**result, "status": "ok", "finished_at": datetime.utcnow().isoformat()}
         except Exception:
             logger.exception("Calls sync failed (since=%s)", since)
+            _last_calls_sync_result = {"status": "error", "finished_at": datetime.utcnow().isoformat()}
         finally:
             bg_db.close()
             _calls_sync_lock.release()
@@ -311,6 +315,15 @@ def sync_calls_background() -> dict:
 def sync_chorus(since: str | None = Query(default=None, description="YYYY-MM-DD")) -> dict:
     """Legacy alias for /sync/calls — now also non-blocking."""
     return _launch_calls_sync(since=since)
+
+
+@router.get("/sync/calls/result")
+def sync_calls_result() -> dict:
+    """Return the result of the most recent completed calls sync."""
+    running = not _calls_sync_lock.acquire(blocking=False)
+    if not running:
+        _calls_sync_lock.release()
+    return {**_last_calls_sync_result, "running": running}
 
 
 @router.get("/audit")
