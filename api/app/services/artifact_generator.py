@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import uuid
 from typing import Any
 
+from app.retrieval.types import RetrievedChunk
 from app.services.llm import LLMService
 
 
@@ -46,10 +48,23 @@ class ArtifactGenerator:
         ]
 
         support = "\n".join(supporting_snippets[:6])
+        full_text = text_blob + "\n" + support
         llm_result = self.llm.answer_call_assistant(
             "Generate concise SE coaching artifacts for this call.",
             [
-                type("Obj", (), {"text": text_blob + "\n" + support, "source_id": call_id, "chunk_id": "artifact"})(),
+                RetrievedChunk(
+                    chunk_id=uuid.uuid4(),
+                    document_id=uuid.uuid4(),
+                    score=1.0,
+                    token_count=len(full_text.split()),
+                    text=full_text,
+                    metadata={},
+                    source_type="chorus",
+                    source_id=call_id,
+                    title=f"Call {call_id}",
+                    url=None,
+                    file_id=None,
+                ),
             ],
         )
 
