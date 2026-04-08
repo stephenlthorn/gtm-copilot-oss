@@ -2,6 +2,20 @@
 
 An interactive Slack bot that provides button-based access to all GTM Copilot functions.
 
+## 🎯 Two Modes Available
+
+### OAuth Mode (Recommended - No API Key Needed!)
+- Works with **native Claude Slack app** that's already in your workspace
+- Users authenticate with their own Claude accounts
+- **No Anthropic API costs**
+- See **[OAUTH-SETUP.md](OAUTH-SETUP.md)** for setup
+
+### API Mode (Direct Integration)
+- Calls Anthropic API directly with your API key
+- Faster responses, more control
+- Costs based on API usage
+- See setup below
+
 ## Features
 
 ### Available Functions
