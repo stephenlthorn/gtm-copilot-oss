@@ -1,0 +1,23 @@
+{
+  "name": "gtm-copilot-slack-bot",
+  "version": "1.0.0",
+  "description": "Interactive Slack bot for GTM Copilot with button-based workflows",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsx watch src/index.ts",
+    "start": "node dist/index.js",
+    "tunnel": "ngrok http 3000"
+  },
+  "dependencies": {
+    "@slack/bolt": "^4.2.0",
+    "@anthropic-ai/sdk": "^0.30.1",
+    "axios": "^1.7.7",
+    "dotenv": "^16.4.5"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2"
+  }
+}
